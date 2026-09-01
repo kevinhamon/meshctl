@@ -1,0 +1,77 @@
+version: "3"
+
+vars:
+  ITERM2_TEMPLATE: ".iterm2/profile.json.tmpl"
+  ITERM2_VALUES: ".iterm2.values.yaml"
+  ITERM2_OUTPUT_DIR: '{{.HOME}}/Library/Application Support/iTerm2/DynamicProfiles'
+
+tasks:
+  install:
+    desc: Install all repo integrations
+    deps:
+      - profiles:iterm2
+
+  profiles:iterm2:
+    desc: Install iTerm2 profile
+    deps:
+      - prereqs
+    cmds:
+      - mkdir -p "{{.ITERM2_OUTPUT_DIR}}"
+      - |
+        export PATH="$(go env GOPATH)/bin:$PATH"
+
+        PROFILE_FILE="$(gomplate \
+          --datasource values="{{.ITERM2_VALUES}}" \
+          --in '{{ `{{ (ds "values").profile.name }}.json` }}')"
+
+        REPO_PATH="$(pwd)"
+        REPO_YAML="/tmp/repo-$$.yaml"
+        printf 'path: %s\n' "$REPO_PATH" > "$REPO_YAML"
+
+        gomplate \
+          --datasource values="{{.ITERM2_VALUES}}" \
+          --datasource repo="$REPO_YAML" \
+          --file "{{.ITERM2_TEMPLATE}}" \
+          --out "{{.ITERM2_OUTPUT_DIR}}/${PROFILE_FILE}"
+
+        rm -f "$REPO_YAML"
+        echo "Installed iTerm2 profile: {{.ITERM2_OUTPUT_DIR}}/${PROFILE_FILE}"
+
+  prereqs:
+    desc: Install/check required tools
+    cmds:
+      - |
+        set -e
+
+        if ! command -v go >/dev/null 2>&1; then
+          echo "Missing required tool: go"
+          echo "Install Go first: https://go.dev/dl/"
+          exit 1
+        fi
+
+        export PATH="$(go env GOPATH)/bin:$PATH"
+
+        if ! command -v gomplate >/dev/null 2>&1; then
+          echo "Installing gomplate..."
+          go install github.com/hairyhenderson/gomplate/v4/cmd/gomplate@latest
+        fi
+
+        test -f "{{.ITERM2_VALUES}}" || { echo "Missing {{.ITERM2_VALUES}}"; exit 1; }
+        test -f "{{.ITERM2_TEMPLATE}}" || { echo "Missing {{.ITERM2_TEMPLATE}}"; exit 1; }
+        test -f ".iterm2/ico.png" || { echo "Missing .iterm2/ico.png"; exit 1; }
+        test -f ".iterm2/bg.png" || { echo "Missing .iterm2/bg.png"; exit 1; }
+
+  clean:profiles:iterm2:
+    desc: Remove generated iTerm2 profile
+    deps:
+      - prereqs
+    cmds:
+      - |
+        export PATH="$(go env GOPATH)/bin:$PATH"
+
+        PROFILE_FILE="$(gomplate \
+          --datasource values="{{.ITERM2_VALUES}}" \
+          --in '{{ `{{ (ds "values").profile.name }}.json` }}')"
+
+        rm -f "{{.ITERM2_OUTPUT_DIR}}/${PROFILE_FILE}"
+        echo "Removed iTerm2 profile: ${PROFILE_FILE}"

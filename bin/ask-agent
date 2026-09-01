@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# ask-agent — RETIRED. Consolidated into the meshctl CLI (one path, no duplication).
+#
+# The synchronous-unblock capability now lives in `meshctl ask`, which does MORE in one
+# step: it writes the intake request AND dispatches the peer AND blocks for the answer
+# (this script was dispatch-only — you had to write the intake file first). Same
+# anti-cascade guards (depth / hourly cap / single-flight lock).
+#
+#   OLD:  <write intake file yourself>  &&  bin/ask-agent <target> "<prompt>"
+#   NEW:  meshctl ask <target> <type> "<prompt>"     # write + dispatch + block, in one
+#         meshctl send <target> <type> "<prompt>"    # async: write intake only (no dispatch)
+#
+# See agent-comms.md "Two verbs — send vs ask".
+set -u
+echo "bin/ask-agent is RETIRED — use the meshctl CLI:" >&2
+echo "  meshctl ask  <target> <type> \"<prompt>\"   # sync: write intake + dispatch + block" >&2
+echo "  meshctl send <target> <type> \"<prompt>\"   # async: write intake only" >&2
+if [ "$#" -ge 1 ]; then
+  echo "" >&2
+  echo "You ran: ask-agent $*" >&2
+  echo "Equivalent (pick a <type>, e.g. guidance/decision/review): meshctl ask ${1} <type> \"${2:-<prompt>}\"" >&2
+fi
+exit 64  # EX_USAGE — deliberate hard stop so any lingering caller migrates
