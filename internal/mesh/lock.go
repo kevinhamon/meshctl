@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Dispatch guard tunables, env-overridable, defaults matching bin/ask-agent.
+// Dispatch guard tunables, env-overridable.
 func hourlyMax() int      { return envInt("AGENT_DISPATCH_HOURLY_MAX", 12) }
 func staleSec() int       { return envInt("AGENT_DISPATCH_STALE_SEC", 900) }
 func timeoutSec() int     { return envInt("AGENT_DISPATCH_TIMEOUT_SEC", 420) }
@@ -52,7 +52,7 @@ func dispatchLog(agentsDir, caller, target string, depth int, now time.Time, for
 }
 
 // hourlyCount trims .dispatch.count to the last rolling hour and returns the
-// count within the window. Matches the ask-agent awk-trim behavior.
+// count within the window (awk-trim behavior).
 func hourlyCount(agentsDir string, now time.Time) (int, error) {
 	countPath := filepath.Join(agentsDir, DispatchCount)
 	cutoff := now.Unix() - 3600
@@ -79,7 +79,7 @@ func hourlyCount(agentsDir string, now time.Time) (int, error) {
 			kept = append(kept, fields[0])
 		}
 	}
-	// Rewrite the trimmed window back (matches ask-agent mv of the awk output).
+	// Rewrite the trimmed window back (mv of the awk output).
 	_ = os.WriteFile(countPath, []byte(strings.Join(kept, "\n")+"\n"), 0o644)
 	return len(kept), nil
 }
@@ -164,7 +164,7 @@ func acquireDispatchLock(agentsDir, caller, target string, pid int, now time.Tim
 
 	l.waitedSec = waited
 	l.held = true
-	// Write ownership info (mirrors ask-agent's $LOCK/info).
+	// Write ownership info ($LOCK/info).
 	_ = os.WriteFile(filepath.Join(lockPath, "info"),
 		[]byte(fmt.Sprintf("pid=%d caller=%s target=%s started=%s\n",
 			pid, caller, target, now.UTC().Format("2006-01-02T15:04:05Z"))), 0o644)

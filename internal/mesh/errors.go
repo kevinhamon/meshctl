@@ -2,7 +2,7 @@ package mesh
 
 import "fmt"
 
-// Exit codes preserved from bin/ask-agent for drop-in parity.
+// Exit codes preserved from the original dispatch script for drop-in parity.
 const (
 	ExitUnknownTarget = 2
 	ExitDepth         = 3

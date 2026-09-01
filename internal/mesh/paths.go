@@ -52,7 +52,7 @@ const (
 //     agent workspace) — that ancestor is the container.
 //  3. ~/agents as the last-resort default.
 //
-// This matches bin/ask-agent's relocatable behavior without hardcoding a path,
+// Relocatable behavior without hardcoding a path,
 // and works for a $PATH install run from any agent workspace.
 func AgentsDir() (string, error) {
 	if v := os.Getenv("AGENTS_DIR"); v != "" {

@@ -101,7 +101,7 @@ func Slug(s string) string {
 }
 
 // CallerName resolves the requesting agent name: $AGENT_NAME, else the current
-// working directory's basename (matches bin/ask-agent).
+// working directory's basename.
 func CallerName() string {
 	if v := os.Getenv("AGENT_NAME"); v != "" {
 		return v

@@ -1,12 +1,8 @@
 version: "3"
 
-# Shared "kit" tasks for the agent mesh.
-# The agents directory is derived from this Taskfile's location (parent of
-# agent-mesh) — so `task new` works wherever the mesh is cloned.
-
-vars:
-  AGENTS_DIR:
-    sh: dirname "{{.TASKFILE_DIR}}"
+# Build/kit tasks for the agent mesh. Agent scaffolding is done by `meshctl agent
+# new` (embedded templates) — these tasks just build/install the binary and keep the
+# embedded doctrine in sync with the repo-root source.
 
 tasks:
   default:
@@ -15,7 +11,7 @@ tasks:
     silent: true
 
   sync-doctrine:
-    desc: "Copy root doctrine (agent-comms.md, distiller.md) into the embed tree so the binary ships current doctrine (ADR-0031)."
+    desc: "Copy root doctrine (agent-comms.md, distiller.md) into the embed tree so the binary ships current doctrine."
     cmds:
       - cp agent-comms.md distiller.md internal/mesh/templates/doctrine/
 
@@ -30,30 +26,3 @@ tasks:
     deps: [sync-doctrine]
     cmds:
       - go build -o "$(command -v meshctl || echo ~/.local/bin/meshctl)" ./cmd/meshctl
-
-  new:
-    desc: "Scaffold a new agent workspace next to the mesh. Vars: NAME BADGE R G B (RGB 0..1). e.g. task new NAME=reviewer BADGE=REVIEWER R=0.60 G=0.20 B=0.80"
-    requires:
-      vars: [NAME, BADGE, R, G, B]
-    vars:
-      T: "{{.TASKFILE_DIR}}/templates"
-      DEST: "{{.AGENTS_DIR}}/{{.NAME}}"
-    preconditions:
-      - sh: 'test ! -e "{{.DEST}}"'
-        msg: "{{.DEST}} already exists — aborting."
-    cmds:
-      - mkdir -p "{{.DEST}}/.iterm2" "{{.DEST}}/intake"
-      - cp "{{.T}}/Taskfile.yaml" "{{.DEST}}/Taskfile.yaml"
-      - cp "{{.T}}/.iterm2/profile.json.tmpl" "{{.DEST}}/.iterm2/profile.json.tmpl"
-      - >-
-        sed -e 's/__NAME__/{{.NAME}}/g' -e 's/__BADGE__/{{.BADGE}}/g'
-        -e 's/^  red: .*/  red: {{.R}}/'
-        -e 's/^  green: .*/  green: {{.G}}/'
-        -e 's/^  blue: .*/  blue: {{.B}}/'
-        "{{.T}}/.iterm2.values.yaml" > "{{.DEST}}/.iterm2.values.yaml"
-      - sed -e 's/__NAME__/{{.NAME}}/g' -e 's/__DIR__/{{.NAME}}/g' "{{.T}}/CLAUDE.md" > "{{.DEST}}/CLAUDE.md"
-      - sed -e 's/__NAME__/{{.NAME}}/g' -e 's/__DIR__/{{.NAME}}/g' "{{.T}}/intake/README.md" > "{{.DEST}}/intake/README.md"
-      - cmd: |
-          echo "scaffolded {{.DEST}}"
-          echo "next: (1) write CLAUDE.md  (2) add .iterm2/ico.png + bg.png  (3) cd {{.DEST}} && task install  (4) add a git remote"
-        silent: true

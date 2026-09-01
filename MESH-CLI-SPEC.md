@@ -13,9 +13,9 @@ agent mesh. It:
 3. Computes the agent **directory on demand** from per-agent manifests — no
    hand-maintained, drift-prone roster file.
 
-It **replaces** the Taskfile `task new` scaffolder and **absorbs** `bin/ask-agent`
-(dispatch + anti-cascade guards). The repo ships no estate/org-sync scripts.
-Any repo-fleet automation you need lives outside `meshctl`.
+meshctl owns all agent scaffolding and cross-agent dispatch (with anti-cascade
+guards) directly — no external scaffolder or dispatch script. The repo ships no
+estate/org-sync scripts; any repo-fleet automation you need lives outside `meshctl`.
 
 ## Why not MCP / RPC / a database
 
@@ -35,8 +35,8 @@ log); the CLI just makes it one approvable action.
 - **The agents container is derived at runtime**, not hardcoded: it is the parent
   of the directory holding the `meshctl` binary's source repo *when run from the
   mesh*, but for a `$PATH` install resolve it as: `$AGENTS_DIR` env if set, else
-  the parent of the mesh repo, else `~/agents`. Match the relocatable pattern in
-  `bin/ask-agent` (derives `AGENTS_DIR` from the script location).
+  the parent of the mesh repo, else `~/agents`. Derive `AGENTS_DIR` from the
+  binary's location rather than hardcoding a path.
 - No AI attribution in any output, commits, or generated files (global rule).
 - Commits: conventional style (`<type>: <desc>`); no AI attribution.
 
@@ -94,8 +94,8 @@ Pool detection (`AgentsDir`) resolves the root by the `.agentmesh/` marker dir
 keep them in sync (`go generate ./...` / the Taskfile `sync-doctrine` target).
 
 ### `meshctl agent new <name> [--badge LABEL --rgb r,g,b --title ... --model ...]`
-Scaffold a **new** agent workspace as a sibling of the mesh. Reproduces what
-`task new` did, **plus** writes `agent.yaml`. Creates:
+Scaffold a **new** agent workspace as a sibling of the mesh, including its
+`agent.yaml` manifest. Creates:
 `<name>/{agent.yaml, intake/README.md, CLAUDE.md, .iterm2/profile.json.tmpl, .iterm2.values.yaml, Taskfile.yaml}`.
 Preconditions: dest must not exist. Emit next-steps (write CLAUDE.md body, add
 iTerm icons, create git remote).
@@ -125,15 +125,14 @@ Collapse the two prompted actions into one:
 2. Write a validated intake file into `<target>/intake/` per the request schema
    (frontmatter `id,from,to,type,created,status,priority,related,response`).
    `from` = `$AGENT_NAME` or cwd basename. This is the audit trail.
-3. Dispatch the peer **headlessly** (the `bin/ask-agent` mechanism): `claude -p`
+3. Dispatch the peer **headlessly**: `claude -p`
    in the target dir, `--permission-mode acceptEdits`, `--allowedTools Read Grep
    Glob Edit Write`, the same headless system prompt, model from manifest/env.
 4. **Sync (default):** block until it returns, then print the answer written back
    into the request file. **`--detach`:** write + dispatch async (or write-only),
    return the request id to poll later.
 
-**Port these anti-cascade guards faithfully from `bin/ask-agent` — they are
-budget/safety-critical, not optional:**
+**These anti-cascade guards are budget/safety-critical, not optional:**
 - Depth guard: refuse when `AGENT_DISPATCH_DEPTH>=1` (a dispatched agent may not
   dispatch). Set `AGENT_DISPATCH_DEPTH+1` and `AGENT_NAME=<target>` for the child.
 - Single-flight lock: atomic `mkdir` at `$AGENTS_DIR/.dispatch.lock`; stale
@@ -185,9 +184,9 @@ former `hooks/{handoff-inject,intuition-inject,distill-nudge}.py`.
 3. Convert `agent-comms.md`: keep the protocol **rules** prose; replace the
    **registry table** with a note that the roster is `meshctl agent list`.
    Trim peer lists out of each agent's `CLAUDE.md` (keep the pointer + own manifest).
-4. Implement `meshctl ask` at **parity** with `bin/ask-agent` (all guards). **DONE**:
-   `meshctl ask` reached parity (depth / hourly-cap / single-flight lock) and adds the
-   intake-write step; `bin/ask-agent` is **retired** to a deprecation shim. One path now.
+4. Implement `meshctl ask` with all anti-cascade guards. **DONE**: `meshctl ask`
+   implements depth / hourly-cap / single-flight lock and adds the intake-write
+   step — one path for dispatch.
 5. Add a `Bash(meshctl:*)` allow-rule to each agent's settings so messaging is
    preapproved. **DONE:** `meshctl agent new`/`onboard` now scaffold
    `<agent>/.claude/settings.json` with this allow-rule **and** the three hooks

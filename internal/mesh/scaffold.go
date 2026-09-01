@@ -109,8 +109,8 @@ func ensureMemoryIgnored(dest string) error {
 	return err
 }
 
-// New scaffolds a brand-new agent workspace as a sibling of the mesh. Replaces
-// `task new`, and additionally writes agent.yaml. dest must not exist.
+// New scaffolds a brand-new agent workspace as a sibling of the mesh, including
+// its agent.yaml manifest. dest must not exist.
 func New(agentsDir string, spec AgentSpec, bg BgOptions) (string, error) {
 	// Poly-repo repo-naming (ADR-0038): an agent repo is flagged `<name>-agent`
 	// unless --bare. dir == manifest name (discovery is unchanged).
@@ -148,7 +148,7 @@ func New(agentsDir string, spec AgentSpec, bg BgOptions) (string, error) {
 		return "", err
 	}
 
-	// The manifest — the piece task new never wrote.
+	// The manifest — the agent's identity/discovery source.
 	if err := writeManifest(dest, spec); err != nil {
 		return "", err
 	}
