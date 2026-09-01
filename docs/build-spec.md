@@ -89,9 +89,9 @@ user whether that counts as mutation), plus domain experts (e.g. a database expe
 
 Pool detection (`AgentsDir`) resolves the root by the `.agentmesh/` marker dir
 (preferred), else the legacy `agent-mesh/agent-comms.md` (back-compat), else
-`$AGENTS_DIR`, else `~/agents`. Doctrine source of truth is the repo-root
-`agent-comms.md`/`distiller.md`, copied into `templates/doctrine/` for embedding —
-keep them in sync (`go generate ./...` / the Taskfile `sync-doctrine` target).
+`$AGENTS_DIR`, else `~/agents`. Doctrine source of truth is `doctrine/`
+(`agent-comms.md`/`distiller.md`), copied into `internal/mesh/templates/doctrine/`
+for embedding — keep them in sync (`go generate ./...` / the Taskfile `sync-doctrine` target).
 
 ### `meshctl agent new <name> [--badge LABEL --rgb r,g,b --title ... --model ...]`
 Scaffold a **new** agent workspace as a sibling of the mesh, including its

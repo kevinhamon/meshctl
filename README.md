@@ -56,7 +56,7 @@ Ensure the install dir (`$(go env GOPATH)/bin` or `~/.local/bin`) is on `$PATH`,
 `meshctl --help`. Release binaries are cross-compiled (CGO-free) and attached by the
 release CI workflow on every `v*` tag.
 
-Update doctrine after editing `agent-comms.md` / `distiller.md`: `task sync-doctrine`
+Update doctrine after editing `doctrine/agent-comms.md` / `doctrine/distiller.md`: `task sync-doctrine`
 (or `go generate ./...`) then rebuild; refresh a pool's emitted doctrine with
 `meshctl pool upgrade`.
 
@@ -151,7 +151,7 @@ experience, reference) and learns over time:
 - **Handoff:** `meshctl handoff set` writes the resume point; auto-injected at session
   start. `meshctl doctor` validates manifests + KB + harness wiring.
 
-Authoritative protocol: `agent-comms.md` (emitted into each pool as
+Authoritative protocol: `doctrine/agent-comms.md` (emitted into each pool as
 `.agentmesh/doctrine/agent-comms.md`). Design rationale lives in `docs/`.
 
 ## Bootstrap a mesh from scratch (agent runbook)
@@ -179,9 +179,9 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
 | `cmd/meshctl/` | CLI entrypoint (cobra). |
 | `internal/mesh/` | Core: manifests, directory, intake/dispatch, concurrency (sessions/claims/kb worktrees), cognition (memory/recall/episodic/handoff/intuition), harness adapters, pool init. |
 | `internal/mesh/templates/` | Embedded (`go:embed`): agent scaffold, skills (`mesh-cognition`, `mesh-steward`), steward CLAUDE.md, doctrine copies. |
-| `agent-comms.md`, `distiller.md` | Doctrine (source of truth; copied into `templates/doctrine/` for embedding). |
+| `doctrine/` | Doctrine **source of truth** (`agent-comms.md`, `distiller.md`) — copied into the embed tree by `sync-doctrine`. Edit here, not the copies. |
+| `docs/` | Human docs: `DESIGN.md` (why it's built this way), `build-spec.md` (what to build), `knowledge-and-memory.md` (the cognition design brief). |
 | `Taskfile.yaml` | `task install` / `build` / `sync-doctrine`. |
-| `MESH-CLI-SPEC.md` | Build spec (what to build); `docs/` covers the why. |
 
 ## Conventions
 

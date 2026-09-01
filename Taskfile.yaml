@@ -11,9 +11,9 @@ tasks:
     silent: true
 
   sync-doctrine:
-    desc: "Copy root doctrine (agent-comms.md, distiller.md) into the embed tree so the binary ships current doctrine."
+    desc: "Copy doctrine/ (agent-comms.md, distiller.md) into the embed tree so the binary ships current doctrine."
     cmds:
-      - cp agent-comms.md distiller.md internal/mesh/templates/doctrine/
+      - cp doctrine/agent-comms.md doctrine/distiller.md internal/mesh/templates/doctrine/
 
   build:
     desc: "Sync doctrine + build the meshctl binary."
