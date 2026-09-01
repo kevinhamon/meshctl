@@ -72,6 +72,31 @@ cd ~/myproject-mesh/steward
 Prefer to build the roster by hand? `meshctl pool init … --no-steward`, then
 `meshctl agent new <name> …` per agent.
 
+## The steward — your mesh's front door
+
+`pool init` scaffolds one special agent, the **steward**, into every fresh pool. It is
+not a domain worker; it is the onboarding concierge that turns your intent into a
+concrete roster. Run your harness in `<pool>/steward` and it picks up the bundled
+`mesh-steward` skill and drives a three-step flow:
+
+1. **Interview** — one question at a time (not a form): what the mesh is *for*, the
+   recurring kinds of work, the external systems and which ones get *written* vs only
+   read, whether agents are advisory or state-mutating, the harness, and any tool/house
+   rules. It reflects back a one-paragraph summary and waits for your nod.
+2. **Design the roster** — it proposes a **small, bounded** roster (start with 2–4
+   agents; grow later), one agent per distinct responsibility with a real ownership
+   boundary. For each: `name`, `title`/`role`, `owns`/`domains`, `accepts` types, and
+   `mutates` — where the invariant `mutates` non-empty ⇒ **not dispatchable** decides
+   advisory (headless-dispatchable) vs state-mutating (`send`-only, human-triggered). It
+   recommends one shape and waits for explicit approval.
+3. **Scaffold** — on approval it stands each agent up with `meshctl agent new …`, wiring
+   the harness, inbox, knowledge base, and identity.
+
+The steward is also the **ongoing entry point**: re-invoke it any time to add or
+repurpose agents, or when you're unsure what the mesh should contain. Skip it entirely
+with `pool init … --no-steward` and build the roster by hand (above). Add it back to an
+existing pool with `meshctl agent bootstrap`.
+
 ## Command surface (noun → verb)
 
 ```
