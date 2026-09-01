@@ -1,8 +1,7 @@
 # Build spec — `meshctl` Go CLI
 
 > Point a fresh Claude Code instance at this file to build the mesh CLI.
-> Authoritative design rationale: architecture decision record ADR-0010.
-> This spec is the *what to build*; the ADR is the *why*.
+> This spec is the authoritative *what to build* — the CLI's intended behavior.
 
 ## Goal
 
@@ -24,11 +23,11 @@ The mesh's value model is **ephemeral**: spin an agent up in a clean context,
 analyze, answer, spin down. MCP is a persistent interactive in-session server —
 wrong shape. A DB/daemon is infrastructure with no state to justify it at this
 scale. Messaging stays **file-based** (durable, greppable, git-tracked audit
-log); the CLI just makes it one approvable action. See ADR-0010.
+log); the CLI just makes it one approvable action.
 
 ## Tech / conventions
 
-- Go (house language, ADR-0003). Module `github.com/kevinhamon/meshctl` (installable: `go install …/cmd/meshctl@latest`).
+- Go. Module `github.com/kevinhamon/meshctl` (installable: `go install …/cmd/meshctl@latest`).
 - CLI framework: `cobra` (or stdlib `flag` if you prefer zero deps — cobra preferred for subcommands/help).
 - YAML: `gopkg.in/yaml.v3`.
 - Templates embedded via `go:embed` from `templates/` (migrate the existing
@@ -43,7 +42,7 @@ log); the CLI just makes it one approvable action. See ADR-0010.
 
 ## `agent.yaml` schema (source of truth for identity + discovery)
 
-Lives at `~/agents/<name>/agent.yaml`. Full schema in ADR-0010; canonical shape:
+Lives at `~/agents/<name>/agent.yaml`. Canonical shape:
 
 ```yaml
 name: architect                       # dir name; unique mesh id
@@ -51,7 +50,7 @@ title: Software Architect
 role: >                               # one paragraph
   Architecture of record for the product repos; owns decision records, KB, risk register.
 inbox: intake/                        # relative to agent dir
-owns: [architecture, adrs, kb, risk-register]
+owns: [architecture, decisions, kb, risk-register]
 domains: [frontend, data-pipeline, backend]   # capability tags
 accepts:
   - { type: guidance,         desc: architectural guidance on an approach }
@@ -77,16 +76,16 @@ user whether that counts as mutation), plus domain experts (e.g. a database expe
 
 ## Commands
 
-### `meshctl pool init [path]` — binary-native pools (ADR-0031)
+### `meshctl pool init [path]` — binary-native pools
 - `meshctl pool init <path>` creates a **new isolated pool** at `<path>` **from the
   binary** — emits the doctrine (`.agentmesh/doctrine/{agent-comms.md,distiller.md}`)
-  from `go:embed`, creates runtime dirs (all under `.agentmesh/`, ADR-0038), writes the
-  `.agentmesh/pool.yaml` marker, and scaffolds a `steward-agent` (ADR-0035). **No git
+  from `go:embed`, creates runtime dirs (all under `.agentmesh/`), writes the
+  `.agentmesh/pool.yaml` marker, and scaffolds a `steward-agent`. **No git
   clone, no network.** `--name` sets pool identity; `--no-steward` skips the steward.
-- `meshctl pool init` (no path) targets the **current directory** (ADR-0037): repairs it
+- `meshctl pool init` (no path) targets the **current directory**: repairs it
   if already a pool, else creates one there — never falls back to `~/agents`.
 - `meshctl pool upgrade` re-emits the embedded doctrine; `pool migrate` reconciles a
-  legacy (pre-ADR-0038) layout to `.agentmesh/`.
+  legacy (pre-`.agentmesh/`) layout to `.agentmesh/`.
 
 Pool detection (`AgentsDir`) resolves the root by the `.agentmesh/` marker dir
 (preferred), else the legacy `agent-mesh/agent-comms.md` (back-compat), else
@@ -156,7 +155,7 @@ Validate all manifests: missing/invalid `agent.yaml`, `mutates`/`dispatchable`
 conflict, badge collisions, CLAUDE.md missing the intake section, orphaned
 inboxes. Exit non-zero on any error. Use in CI / pre-onboard check.
 
-## Claude Code integration (hooks) — self-contained (ADR-0030)
+## Claude Code integration (hooks) — self-contained
 
 The mesh carries its own Claude Code hooks **inside the binary** — no `python3`,
 no loose scripts, no machine-absolute paths in a global settings file. Three
@@ -164,10 +163,10 @@ handlers, each reading the hook JSON on stdin and printing `hookSpecificOutput`
 on stdout; all **fail-open** (any error ⇒ no output, exit 0 — a hook must never
 break a turn):
 
-- `meshctl hook session-start` — registers session presence (ADR-0011) and
-  injects the agent's handoff (ADR-0017).
-- `meshctl hook user-prompt` — injects compact intuition pointers (ADR-0016)
-  and a one-shot distillation boundary nudge (ADR-0027).
+- `meshctl hook session-start` — registers session presence and
+  injects the agent's handoff.
+- `meshctl hook user-prompt` — injects compact intuition pointers
+  and a one-shot distillation boundary nudge.
 - `meshctl hook session-end` — deregisters session presence.
 
 The agent is resolved from the payload `cwd` basename. Wiring lives **per-agent**
@@ -246,7 +245,7 @@ agent's art reads as one family. `seed = hash(name)` ⇒ stable re-generation.
 mflux-generate --model schnell --prompt "<built prompt>" --width 1600 --height 1000 --seed <h> --steps 4 --output <agent>/.iterm2/bg.png
 ```
 
-## Concurrency & claims (ADR-0011)
+## Concurrency & claims
 
 Multiple sessions run in the same agent workspace concurrently. Two races must be
 closed; the existing `.dispatch.lock` covers neither (it serializes only headless
@@ -255,7 +254,7 @@ dispatch — interactive sessions bypass it).
 **Two layers, two mechanisms — do not conflate:**
 - **Coordination/ephemeral** (claims, presence, heartbeats, dispatch lock) →
   shared filesystem, **atomic locks, never git-branched.**
-- **Durable KB** (ADRs, risks, docs) → **git worktree + branch + merge-back.**
+- **Durable KB** (decision records, risks, docs) → **git worktree + branch + merge-back.**
 
 ### Substrate — session identity + presence
 - Session id from `$CLAUDE_SESSION_ID` (or minted), set by a **session-start hook**
@@ -286,8 +285,8 @@ dispatch — interactive sessions bypass it).
   `--abort` discards the branch + worktree.
 - **Conflicts resolved before proceeding.** Interactive session resolves.
   **Headless dispatched run does NOT auto-resolve** — leave the branch, set the
-  request `status: needs-human`, stop (matches ADR-0010 anti-cascade rule).
-- Known hotspot: concurrent new ADRs both grab the next `NNNN` + append an index
+  request `status: needs-human`, stop (matches the anti-cascade rule).
+- Known hotspot: concurrent new decision records both grab the next `NNNN` + append an index
   row → add/add conflict at merge; resolver renumbers the second. Rare, fine.
 
 ### Acceptance additions
