@@ -16,7 +16,7 @@ type Accept struct {
 	Desc string `yaml:"desc,omitempty"`
 }
 
-// Badge is the iTerm2 identity color (0..1 components).
+// Badge is the agent's terminal identity: a label + color (0..1 components).
 type Badge struct {
 	Label string  `yaml:"label"`
 	R     float64 `yaml:"r"`

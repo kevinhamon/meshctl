@@ -22,7 +22,7 @@ func newTestAgent(t *testing.T, dir, name string, dispatchable bool, mutates []s
 		Badge: Badge{Label: name, R: 0.1, G: 0.2, B: 0.3},
 		Bare:  true, // tests use exact names; skip the -agent repo suffix
 	}
-	if _, err := New(dir, spec, BgOptions{}); err != nil {
+	if _, err := New(dir, spec, ScaffoldOptions{}); err != nil {
 		t.Fatalf("scaffold %s: %v", name, err)
 	}
 	a, err := FindAgent(dir, name)

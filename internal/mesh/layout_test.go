@@ -37,7 +37,7 @@ func TestFreshPoolFootprint_ConsolidatedUnderAgentmesh(t *testing.T) {
 func TestNaming_AgentSuffix(t *testing.T) {
 	dir := meshRoot(t)
 	// Default: -agent suffix.
-	if _, err := New(dir, AgentSpec{Name: "scribe", Title: "S", Accepts: []Accept{{Type: "fyi", Desc: "x"}}, Badge: Badge{Label: "S"}}, BgOptions{}); err != nil {
+	if _, err := New(dir, AgentSpec{Name: "scribe", Title: "S", Accepts: []Accept{{Type: "fyi", Desc: "x"}}, Badge: Badge{Label: "S"}}, ScaffoldOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if !dirExists(filepath.Join(dir, "scribe-agent")) {
@@ -47,14 +47,14 @@ func TestNaming_AgentSuffix(t *testing.T) {
 		t.Fatalf("agent should resolve by scribe-agent: %v", err)
 	}
 	// --bare: exact name, no suffix.
-	if _, err := New(dir, AgentSpec{Name: "raw", Title: "R", Accepts: []Accept{{Type: "fyi", Desc: "x"}}, Badge: Badge{Label: "R"}, Bare: true}, BgOptions{}); err != nil {
+	if _, err := New(dir, AgentSpec{Name: "raw", Title: "R", Accepts: []Accept{{Type: "fyi", Desc: "x"}}, Badge: Badge{Label: "R"}, Bare: true}, ScaffoldOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if !dirExists(filepath.Join(dir, "raw")) || dirExists(filepath.Join(dir, "raw-agent")) {
 		t.Fatal("--bare should produce dir 'raw', not 'raw-agent'")
 	}
 	// No double-suffix.
-	if _, err := New(dir, AgentSpec{Name: "ops-agent", Title: "O", Accepts: []Accept{{Type: "fyi", Desc: "x"}}, Badge: Badge{Label: "O"}}, BgOptions{}); err != nil {
+	if _, err := New(dir, AgentSpec{Name: "ops-agent", Title: "O", Accepts: []Accept{{Type: "fyi", Desc: "x"}}, Badge: Badge{Label: "O"}}, ScaffoldOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if dirExists(filepath.Join(dir, "ops-agent-agent")) {

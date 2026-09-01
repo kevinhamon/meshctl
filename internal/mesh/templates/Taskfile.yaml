@@ -59,7 +59,6 @@ tasks:
         test -f "{{.ITERM2_VALUES}}" || { echo "Missing {{.ITERM2_VALUES}}"; exit 1; }
         test -f "{{.ITERM2_TEMPLATE}}" || { echo "Missing {{.ITERM2_TEMPLATE}}"; exit 1; }
         test -f ".iterm2/ico.png" || { echo "Missing .iterm2/ico.png"; exit 1; }
-        test -f ".iterm2/bg.png" || { echo "Missing .iterm2/bg.png"; exit 1; }
 
   clean:profiles:iterm2:
     desc: Remove generated iTerm2 profile

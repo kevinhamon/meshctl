@@ -10,5 +10,6 @@ import "embed"
 // templates/doctrine/ (agent-comms.md, distiller.md), which the binary emits into
 // each pool. (go:embed cannot reach outside this package, so the doctrine lives here
 // rather than at the repo root.)
+//
 //go:embed all:templates
 var templatesFS embed.FS

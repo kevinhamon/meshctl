@@ -166,8 +166,36 @@ func poolTeardownCmd() *cobra.Command {
 }
 
 func agentCmd() *cobra.Command {
-	c := &cobra.Command{Use: "agent", Short: "Agent lifecycle: scaffold (new), onboard existing, bootstrap the steward, list roster"}
-	c.AddCommand(newCmd(), onboardCmd(), bootstrapCmd(), directoryCmd())
+	c := &cobra.Command{Use: "agent", Short: "Agent lifecycle: scaffold (new), onboard existing, bootstrap the steward, list roster, print identity"}
+	c.AddCommand(newCmd(), onboardCmd(), bootstrapCmd(), directoryCmd(), identityCmd())
+	return c
+}
+
+// identityCmd prints a portable per-agent terminal identity: an ANSI title-set plus a
+// colored badge banner from the manifest. Works in any terminal on any OS — the
+// cross-platform replacement for the optional macOS iTerm2 profile.
+func identityCmd() *cobra.Command {
+	var agent string
+	c := &cobra.Command{
+		Use:   "identity",
+		Short: "Print a portable terminal title + badge for an agent (any terminal, any OS)",
+		Long: "Emits ANSI escapes that set the terminal title to the agent name and print a\n" +
+			"colored badge from its manifest. Run it on shell entry in an agent workspace\n" +
+			"(from your shell rc or a direnv .envrc), or once per session.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, err := agentsDir()
+			if err != nil {
+				return err
+			}
+			a, err := resolveContextAgent(dir, agent)
+			if err != nil {
+				return err
+			}
+			fmt.Print(mesh.TerminalIdentity(a))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&agent, "agent", "", "agent name (default: $AGENT_NAME or cwd basename)")
 	return c
 }
 
@@ -475,14 +503,13 @@ func newCmd() *cobra.Command {
 		owns, domains, accepts  string
 		mutates                 string
 		dispatchable            bool
-		genBg                   bool
-		bgBackend, bgPrompt     string
+		iterm                   bool
 		harness                 string
 		bare                    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "new <name>",
-		Short: "Scaffold a new agent workspace (manifest + intake + iTerm + CLAUDE.md)",
+		Short: "Scaffold a new agent workspace (manifest + intake + CLAUDE.md)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
@@ -504,26 +531,21 @@ func newCmd() *cobra.Command {
 				Mutates: splitCSV(mutates), Model: model, Repo: repo, Harness: harness, Bare: bare,
 				Badge: mesh.Badge{Label: badge, R: r, G: g, B: b},
 			}
-			dest, err := mesh.New(dir, spec, mesh.BgOptions{Enabled: genBg, Backend: bgBackend, Prompt: bgPrompt})
+			dest, err := mesh.New(dir, spec, mesh.ScaffoldOptions{ITerm: iterm})
 			if err != nil {
 				return err
 			}
 			fmt.Printf("scaffolded %s\n", dest)
-			fmt.Println("next: (1) flesh out CLAUDE.md body  (2) add .iterm2/ico.png" +
-				func() string {
-					if genBg {
-						return " (bg.png generated)"
-					}
-					return " + bg.png (or re-run with --gen-bg)"
-				}() +
-				"  (3) cd " + dest + " && task install  (4) create its git remote")
+			fmt.Println("next: (1) flesh out CLAUDE.md body  (2) cd " + dest +
+				" && task install  (3) create its git remote  (4) for a per-agent terminal badge, " +
+				"run `meshctl agent identity` on shell entry (portable — any terminal, any OS)")
 			return nil
 		},
 	}
 	f := cmd.Flags()
 	f.StringVar(&title, "title", "", "human title, e.g. \"Software Architect\"")
 	f.StringVar(&role, "role", "", "one-paragraph role")
-	f.StringVar(&badge, "badge", "", "iTerm2 badge label (default: UPPERCASE name)")
+	f.StringVar(&badge, "badge", "", "badge label (default: UPPERCASE name)")
 	f.StringVar(&rgb, "rgb", "0.5,0.5,0.5", "badge color r,g,b (0..1)")
 	f.StringVar(&model, "model", "", "model pin, e.g. claude-haiku-4-5 (default: inherit)")
 	f.StringVar(&owns, "owns", "", "comma-separated ownership tags")
@@ -533,9 +555,7 @@ func newCmd() *cobra.Command {
 	f.BoolVar(&dispatchable, "dispatchable", false, "may `meshctl ask` run it headlessly (ignored if mutates set)")
 	f.StringVar(&repo, "repo", "", "git remote URL")
 	f.StringVar(&harness, "harness", "", "coding-agent harness: claude|opencode (default: claude for new; autodetect for onboard)")
-	f.BoolVar(&genBg, "gen-bg", false, "generate an iTerm2 background image")
-	f.StringVar(&bgBackend, "bg-backend", "", "mflux|pollinations|openai (default: $MESH_BG_BACKEND or pollinations)")
-	f.StringVar(&bgPrompt, "bg-prompt", "", "override the generated background prompt")
+	f.BoolVar(&iterm, "iterm2", false, "also write a macOS iTerm2 dynamic profile (.iterm2/) for window identity")
 	f.BoolVar(&bare, "bare", false, "do not append the '-agent' repo suffix to the name")
 	return cmd
 }
@@ -549,8 +569,7 @@ func onboardCmd() *cobra.Command {
 		owns, domains, accepts  string
 		mutates                 string
 		dispatchable            bool
-		genBg                   bool
-		bgBackend, bgPrompt     string
+		iterm                   bool
 		harness                 string
 	)
 	cmd := &cobra.Command{
@@ -575,7 +594,7 @@ func onboardCmd() *cobra.Command {
 			if badge != "" || cmd.Flags().Changed("rgb") {
 				spec.Badge = mesh.Badge{Label: badge, R: r, G: g, B: b}
 			}
-			res, err := mesh.Onboard(dir, args[0], spec, mesh.BgOptions{Enabled: genBg, Backend: bgBackend, Prompt: bgPrompt})
+			res, err := mesh.Onboard(dir, args[0], spec, mesh.ScaffoldOptions{ITerm: iterm})
 			if err != nil {
 				return err
 			}
@@ -607,7 +626,7 @@ func onboardCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&title, "title", "", "override inferred title")
 	f.StringVar(&role, "role", "", "override inferred role")
-	f.StringVar(&badge, "badge", "", "iTerm2 badge label")
+	f.StringVar(&badge, "badge", "", "badge label")
 	f.StringVar(&rgb, "rgb", "0.5,0.5,0.5", "badge color r,g,b (0..1)")
 	f.StringVar(&model, "model", "", "model pin")
 	f.StringVar(&owns, "owns", "", "comma-separated ownership tags")
@@ -617,9 +636,7 @@ func onboardCmd() *cobra.Command {
 	f.BoolVar(&dispatchable, "dispatchable", false, "may be dispatched headlessly (ignored if mutates set)")
 	f.StringVar(&repo, "repo", "", "git remote URL")
 	f.StringVar(&harness, "harness", "", "coding-agent harness: claude|opencode (default: claude for new; autodetect for onboard)")
-	f.BoolVar(&genBg, "gen-bg", false, "generate an iTerm2 background image")
-	f.StringVar(&bgBackend, "bg-backend", "", "mflux|pollinations|openai")
-	f.StringVar(&bgPrompt, "bg-prompt", "", "override the generated background prompt")
+	f.BoolVar(&iterm, "iterm2", false, "also write a macOS iTerm2 dynamic profile (.iterm2/) if missing")
 	return cmd
 }
 

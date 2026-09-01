@@ -128,7 +128,7 @@ func TestNew_OpencodeHarnessEndToEnd(t *testing.T) {
 		Accepts: []Accept{{Type: "fyi", Desc: "x"}},
 		Badge:   Badge{Label: "OC"}, Harness: HarnessOpencode, Bare: true,
 	}
-	if _, err := New(dir, spec, BgOptions{}); err != nil {
+	if _, err := New(dir, spec, ScaffoldOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	a, err := FindAgent(dir, "ocagent")

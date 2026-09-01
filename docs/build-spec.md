@@ -96,9 +96,10 @@ edited in place (go:embed cannot reach outside the package, so it lives there).
 ### `meshctl agent new <name> [--badge LABEL --rgb r,g,b --title ... --model ...]`
 Scaffold a **new** agent workspace as a sibling of the mesh, including its
 `agent.yaml` manifest. Creates:
-`<name>/{agent.yaml, intake/README.md, CLAUDE.md, .iterm2/profile.json.tmpl, .iterm2.values.yaml, Taskfile.yaml}`.
-Preconditions: dest must not exist. Emit next-steps (write CLAUDE.md body, add
-iTerm icons, create git remote).
+`<name>/{agent.yaml, intake/README.md, CLAUDE.md, Taskfile.yaml}` (add `--iterm2` for
+an optional macOS iTerm2 profile under `.iterm2/`).
+Preconditions: dest must not exist. Emit next-steps (write CLAUDE.md body, create git
+remote, run `meshctl agent identity` for a portable terminal badge).
 
 ### `meshctl agent onboard <name|path>`  ← NEW capability
 Upgrade a **pre-existing** agent directory into a full mesh member. Idempotent
@@ -206,43 +207,18 @@ former `hooks/{handoff-inject,intuition-inject,distill-nudge}.py`.
 - `meshctl ask pm …` is **refused** (`dispatchable:false`).
 - Runs on macOS stock bash-free (pure Go) and Linux; no bash 3.2 landmines.
 
-## Agent background generation (iTerm2 dynamic profiles)
+## Terminal identity (portable)
 
-Each agent gets an AI-generated iTerm2 background so the human can *see* which
-agent they're talking to. This is not decoration — it's the interlock that stops
-asking the wrong agent and burning usage. Treat it as a first-class flag, not an
-afterthought. The image is written to `<agent>/.iterm2/bg.png`; the existing
-`profile.json.tmpl` already references that path, so the dynamic profile picks it
-up on `cd`.
+The human needs to *see* which agent a terminal is driving — the interlock that stops
+asking the wrong agent and burning usage. `meshctl agent identity` prints ANSI escapes
+that set the terminal title to the agent name and render a colored badge from the
+manifest (`badge.label` + `badge.{r,g,b}`). It uses only OSC title-setting and SGR
+truecolor, so it works in any terminal on any OS — run it on shell entry in an agent
+workspace (shell rc or a direnv `.envrc`).
 
-Generation is **infrequent** (once per `new`/`onboard`), so latency/quota are
-irrelevant — optimize for zero-cost and repeatability, not throughput.
-
-**Pluggable backend** — one interface, selectable per mesh/agent:
-
-```go
-type ImageGen interface { Generate(prompt string, w, h, seed int) ([]byte, error) }
-```
-
-| Backend | Cost | Key | Notes |
-|---|---|---|---|
-| `mflux` (recommended if deployed) | free, offline | none | Shell out to `mflux-generate` (MLX/FLUX on Apple Silicon). Full local stack; `--seed` ⇒ deterministic. ~5-6s/512px on M3 Max. First run downloads weights. |
-| `pollinations` (default, zero-setup) | free | none | `GET https://image.pollinations.ai/prompt/<url-enc prompt>?width=W&height=H&seed=S&nologo=true`. Anon ~1 req/15s + watermark; free account token removes watermark. No SLA — fine for one-shot. |
-| `openai` (optional, house style) | ~$0.005–0.02/img | API key | `gpt-image-1.5` or `gpt-image-1-mini`. **Do NOT use `gpt-image-1` (deprecated 2026-10-23).** Uses a platform API key, NOT a ChatGPT subscription. |
-
-Flags on `new`/`onboard`: `--gen-bg` (opt in), `--bg-backend mflux|pollinations|openai`,
-`--bg-prompt "<override>"`. Backend default + any key/token come from mesh config
-(env or a mesh-level config file), never committed.
-
-**Prompt construction** — build from the manifest for a coherent set:
-`"<role/domains keywords>, <badge label>"` + a **fixed style suffix** shared by all
-agents (e.g. `", isometric, muted palette, dark background, subtle"`) so every
-agent's art reads as one family. `seed = hash(name)` ⇒ stable re-generation.
-
-`mflux` example (exec):
-```
-mflux-generate --model schnell --prompt "<built prompt>" --width 1600 --height 1000 --seed <h> --steps 4 --output <agent>/.iterm2/bg.png
-```
+`meshctl agent new --iterm2` additionally writes a macOS iTerm2 dynamic profile under
+`.iterm2/` (badge + per-agent color) for users who want the native iTerm treatment;
+it's opt-in and platform-specific, never required.
 
 ## Concurrency & claims
 

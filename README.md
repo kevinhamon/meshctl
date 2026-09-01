@@ -101,7 +101,7 @@ existing pool with `meshctl agent bootstrap`.
 
 ```
 meshctl pool    init [path] | upgrade | list
-meshctl agent   new <name> | onboard <name|path> | bootstrap | list
+meshctl agent   new <name> | onboard <name|path> | bootstrap | list | identity
 meshctl msg     ask <target> <type> "…" | send <target> <type> "…"
 meshctl inbox   list | next [--claim] | claim <id> | release <id>
 meshctl kb      begin | finish [--abort]
@@ -116,7 +116,13 @@ meshctl ask … | send …               (top-level aliases for msg ask|send)
 
 Key flags: `agent new/onboard --harness claude|opencode`, `--dispatchable`,
 `--mutates code,tracker` (non-empty ⇒ not dispatchable), `--accepts type:desc,…`,
-`--owns`, `--domains`, `--rgb`, `--badge`, `--role`, `--title`.
+`--owns`, `--domains`, `--rgb`, `--badge`, `--role`, `--title`, `--iterm2`.
+
+**Terminal identity (portable).** `meshctl agent identity` prints an ANSI title +
+colored badge (from the manifest's `--badge`/`--rgb`) so you can see which agent a
+terminal is driving — works in any terminal on any OS. Run it on shell entry in an
+agent workspace (shell rc or a direnv `.envrc`). `agent new --iterm2` additionally
+writes an optional macOS iTerm2 profile; it's off by default and never required.
 
 ## Harness integration
 

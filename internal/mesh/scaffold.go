@@ -27,11 +27,12 @@ type AgentSpec struct {
 	Bare         bool   // if false, New appends the "-agent" repo suffix (ADR-0038)
 }
 
-// BgOptions controls optional iTerm2 background generation on new/onboard.
-type BgOptions struct {
-	Enabled bool
-	Backend string // mflux | pollinations | openai
-	Prompt  string // override; empty ⇒ built from the manifest
+// ScaffoldOptions controls optional extras when creating/onboarding an agent.
+type ScaffoldOptions struct {
+	// ITerm writes a macOS iTerm2 dynamic profile (.iterm2/) for per-agent window
+	// identity. Off by default — portable identity comes from `meshctl agent identity`
+	// (see identity.go), which works in any terminal on any OS.
+	ITerm bool
 }
 
 // scaffoldKnowledgeAreas creates the ADR-0014 KB areas. Add-only: it never
@@ -111,7 +112,7 @@ func ensureMemoryIgnored(dest string) error {
 
 // New scaffolds a brand-new agent workspace as a sibling of the mesh, including
 // its agent.yaml manifest. dest must not exist.
-func New(agentsDir string, spec AgentSpec, bg BgOptions) (string, error) {
+func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error) {
 	// Poly-repo repo-naming (ADR-0038): an agent repo is flagged `<name>-agent`
 	// unless --bare. dir == manifest name (discovery is unchanged).
 	if !spec.Bare && spec.Name != "" && !strings.HasSuffix(spec.Name, "-agent") {
@@ -121,9 +122,6 @@ func New(agentsDir string, spec AgentSpec, bg BgOptions) (string, error) {
 	if _, err := os.Stat(dest); err == nil {
 		return "", fmt.Errorf("%s already exists — aborting", dest)
 	}
-	if err := os.MkdirAll(filepath.Join(dest, ".iterm2"), 0o755); err != nil {
-		return "", err
-	}
 	if err := os.MkdirAll(filepath.Join(dest, IntakeDir), 0o755); err != nil {
 		return "", err
 	}
@@ -132,15 +130,17 @@ func New(agentsDir string, spec AgentSpec, bg BgOptions) (string, error) {
 	if err := copyTemplate("templates/Taskfile.yaml", filepath.Join(dest, "Taskfile.yaml")); err != nil {
 		return "", err
 	}
-	if err := copyTemplate("templates/.iterm2/profile.json.tmpl", filepath.Join(dest, ".iterm2", "profile.json.tmpl")); err != nil {
-		return "", err
+
+	// Optional macOS iTerm2 profile for per-agent window identity. Portable identity
+	// (any terminal, any OS) comes from `meshctl agent identity` instead.
+	if opts.ITerm {
+		if err := writeITermProfile(dest, spec); err != nil {
+			return "", err
+		}
 	}
 
 	// Rendered template files.
 	repl := strings.NewReplacer("__NAME__", spec.Name, "__DIR__", spec.Name, "__BADGE__", spec.Badge.Label)
-	if err := renderITermValues(dest, spec); err != nil {
-		return "", err
-	}
 	if err := renderTemplate("templates/CLAUDE.md", filepath.Join(dest, "CLAUDE.md"), repl); err != nil {
 		return "", err
 	}
@@ -173,30 +173,25 @@ func New(agentsDir string, spec AgentSpec, bg BgOptions) (string, error) {
 	// by the session-start hook until done).
 	initAgentRepo(dest)
 
-	if bg.Enabled {
-		if err := generateBackground(dest, spec, bg); err != nil {
-			return dest, fmt.Errorf("workspace scaffolded, but background generation failed: %w", err)
-		}
-	}
 	return dest, nil
 }
 
 // OnboardResult reports what onboard added (for the summary print).
 type OnboardResult struct {
-	Dir            string
-	AddedManifest  bool
-	AddedIntake    bool
-	AddedCommsSec  bool
-	InferredTitle  string
-	InferredRole   bool
-	Notes          []string
+	Dir           string
+	AddedManifest bool
+	AddedIntake   bool
+	AddedCommsSec bool
+	InferredTitle string
+	InferredRole  bool
+	Notes         []string
 }
 
 // Onboard upgrades a pre-existing agent directory into a full mesh member.
 // Idempotent + non-destructive: only adds what is missing, never clobbers an
 // existing agent.yaml. spec supplies fields that cannot be inferred; inference
 // from CLAUDE.md fills title/role when spec leaves them blank.
-func Onboard(agentsDir, nameOrPath string, spec AgentSpec, bg BgOptions) (*OnboardResult, error) {
+func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions) (*OnboardResult, error) {
 	dir := nameOrPath
 	if !strings.ContainsRune(nameOrPath, os.PathSeparator) {
 		dir = AgentDir(agentsDir, nameOrPath)
@@ -309,11 +304,15 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, bg BgOptions) (*Onboa
 		res.Notes = append(res.Notes, added...)
 	}
 
-	if bg.Enabled && res.AddedManifest {
-		a, _ := FindAgent(agentsDir, spec.Name)
-		if a != nil {
-			if err := generateBackground(abs, specFromAgent(a), bg); err != nil {
-				res.Notes = append(res.Notes, "background generation failed: "+err.Error())
+	// Optional macOS iTerm2 profile (add-only; never clobber an existing one).
+	if opts.ITerm {
+		if _, err := os.Stat(filepath.Join(abs, ".iterm2")); os.IsNotExist(err) {
+			if a, _ := FindAgent(agentsDir, spec.Name); a != nil {
+				if err := writeITermProfile(abs, specFromAgent(a)); err != nil {
+					res.Notes = append(res.Notes, "iTerm2 profile not written: "+err.Error())
+				} else {
+					res.Notes = append(res.Notes, "wrote optional iTerm2 profile (.iterm2/)")
+				}
 			}
 		}
 	}
@@ -342,10 +341,10 @@ func ScaffoldSteward(agentsDir, harness string, now time.Time) (string, []string
 		return dest, []string{"steward already present — left unchanged"}, nil
 	}
 	spec := AgentSpec{
-		Name:  StewardName,
-		Title: "Mesh Steward",
-		Role:  "Onboarding concierge and front door for this mesh: interview the user for the mesh's purpose, design the agent roster, scaffold the agents with meshctl, and serve as the community's entry point and hub. Builds and coordinates the team; does not do their domain work.",
-		Owns:  []string{"mesh-onboarding", "roster"},
+		Name:    StewardName,
+		Title:   "Mesh Steward",
+		Role:    "Onboarding concierge and front door for this mesh: interview the user for the mesh's purpose, design the agent roster, scaffold the agents with meshctl, and serve as the community's entry point and hub. Builds and coordinates the team; does not do their domain work.",
+		Owns:    []string{"mesh-onboarding", "roster"},
 		Domains: []string{"mesh-bootstrap"},
 		Accepts: []Accept{
 			{Type: "guidance", Desc: "help shape the mesh / its roster"},
@@ -356,7 +355,7 @@ func ScaffoldSteward(agentsDir, harness string, now time.Time) (string, []string
 		Harness:      harness,
 		Bare:         true, // StewardName already carries the -agent suffix
 	}
-	dir, err := New(agentsDir, spec, BgOptions{})
+	dir, err := New(agentsDir, spec, ScaffoldOptions{})
 	if err != nil {
 		return dest, nil, err
 	}
@@ -413,6 +412,18 @@ var (
 	reGreen = regexp.MustCompile(`(?m)^  green: .*$`)
 	reBlue  = regexp.MustCompile(`(?m)^  blue: .*$`)
 )
+
+// writeITermProfile writes the optional macOS iTerm2 dynamic profile for an agent:
+// the .iterm2/ dir, the profile template, and the per-agent values (badge + color).
+func writeITermProfile(dest string, spec AgentSpec) error {
+	if err := os.MkdirAll(filepath.Join(dest, ".iterm2"), 0o755); err != nil {
+		return err
+	}
+	if err := copyTemplate("templates/.iterm2/profile.json.tmpl", filepath.Join(dest, ".iterm2", "profile.json.tmpl")); err != nil {
+		return err
+	}
+	return renderITermValues(dest, spec)
+}
 
 func renderITermValues(dest string, spec AgentSpec) error {
 	b, err := templatesFS.ReadFile("templates/.iterm2.values.yaml")
