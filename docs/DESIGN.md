@@ -34,7 +34,7 @@ approve.
 - **Dispatch is single-flight and guarded.** Headless dispatch (`meshctl ask`) is
   protected by four layered anti-cascade guards (prompt, depth, a filesystem lock, an
   hourly cap) so a runaway or expensive chain cannot happen even if a model ignores the
-  prompt. See [`../doctrine/agent-comms.md`](../doctrine/agent-comms.md).
+  prompt. See [`agent-comms.md`](../internal/mesh/templates/doctrine/agent-comms.md).
 - **Cognition rides the same substrate.** Recall, episodic capture, distillation, and
   handoff are all files under each agent's `knowledge/` — no new store. Memory is a
   disposable, regenerable index; the git-tracked KB is authoritative.

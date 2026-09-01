@@ -1,8 +1,8 @@
 version: "3"
 
 # Build/kit tasks for the agent mesh. Agent scaffolding is done by `meshctl agent
-# new` (embedded templates) — these tasks just build/install the binary and keep the
-# embedded doctrine in sync with the repo-root source.
+# new`; all embedded content (templates + doctrine) is source under
+# internal/mesh/templates/, edited in place — nothing to sync.
 
 tasks:
   default:
@@ -10,19 +10,12 @@ tasks:
     cmds: ["task --list"]
     silent: true
 
-  sync-doctrine:
-    desc: "Copy doctrine/ (agent-comms.md, distiller.md) into the embed tree so the binary ships current doctrine."
-    cmds:
-      - cp doctrine/agent-comms.md doctrine/distiller.md internal/mesh/templates/doctrine/
-
   build:
-    desc: "Sync doctrine + build the meshctl binary."
-    deps: [sync-doctrine]
+    desc: "Build the meshctl binary."
     cmds:
       - go build ./...
 
   install:
-    desc: "Sync doctrine + install meshctl to \"$(command -v meshctl || echo ~/.local/bin/meshctl)\"."
-    deps: [sync-doctrine]
+    desc: "Install meshctl to \"$(command -v meshctl || echo ~/.local/bin/meshctl)\"."
     cmds:
       - go build -o "$(command -v meshctl || echo ~/.local/bin/meshctl)" ./cmd/meshctl
