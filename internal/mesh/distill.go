@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 )
 
 // Background distillation — the enforcement half of the cognition loop.
@@ -126,7 +125,8 @@ func SpawnDistill(poolRoot string, a *Agent, sessionID string) bool {
 	}
 	// Its own process group, so the run outlives the hook process (which exits
 	// in milliseconds) instead of being torn down with the parent's group.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Platform-specific (POSIX only) — see detach_unix.go / detach_other.go.
+	detachProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		_ = os.Remove(marker) // let a later idle retry
 		return false
