@@ -126,6 +126,7 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 	// interactive session can't double-process it (ADR-0011).
 	dispatchSession := fmt.Sprintf("dispatch-%d-%s", os.Getpid(), now.UTC().Format("150405"))
 	_, _ = ClaimRequest(req.path, dispatchSession, os.Getpid(), now)
+	defer func() { _ = ReleaseClaim(req.path, dispatchSession, time.Now()) }()
 
 	// Record for the hourly cap + audit.
 	_ = recordDispatch(agentsDir, now)
@@ -141,6 +142,9 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 	childEnv := append(os.Environ(),
 		fmt.Sprintf("AGENT_DISPATCH_DEPTH=%d", depth+1),
 		"AGENT_NAME="+target.Name,
+		// The child's meshctl calls act as the dispatch session, so it can
+		// release/re-claim the request we hold instead of being refused.
+		"CLAUDE_SESSION_ID="+dispatchSession,
 	)
 
 	runner := o.Runner

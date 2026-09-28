@@ -898,7 +898,7 @@ func inboxCmd() *cobra.Command {
 				return err
 			}
 			now := time.Now()
-			id := mesh.ResolveSessionID(os.Getpid(), now)
+			id := mesh.ResolveAgentSessionID(a, os.Getpid(), now)
 			r, err := mesh.InboxNext(a, id, os.Getpid(), claim, now)
 			if err != nil {
 				return err
@@ -975,7 +975,7 @@ func claimCmd() *cobra.Command {
 				return err
 			}
 			now := time.Now()
-			id := mesh.ResolveSessionID(os.Getpid(), now)
+			id := mesh.ResolveAgentSessionID(a, os.Getpid(), now)
 			reqPath, err := requestPathByID(a, args[0])
 			if err != nil {
 				return err
@@ -1008,12 +1008,13 @@ func releaseCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id := mesh.ResolveSessionID(os.Getpid(), time.Now())
+			now := time.Now()
+			id := mesh.ResolveAgentSessionID(a, os.Getpid(), now)
 			reqPath, err := requestPathByID(a, args[0])
 			if err != nil {
 				return err
 			}
-			if err := mesh.ReleaseClaim(reqPath, id); err != nil {
+			if err := mesh.ReleaseClaim(reqPath, id, now); err != nil {
 				return err
 			}
 			fmt.Printf("released %s\n", args[0])

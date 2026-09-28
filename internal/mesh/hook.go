@@ -131,6 +131,9 @@ func HookUserPrompt(agentsDir string, p HookPayload, now time.Time) string {
 	project := ""
 	if a != nil {
 		project = a.Name
+		if p.SessionID != "" {
+			_ = TouchSession(a, p.SessionID, os.Getppid(), now) // presence heartbeat; fail-open
+		}
 	} else if p.Cwd != "" {
 		project = filepath.Base(strings.TrimRight(p.Cwd, string(os.PathSeparator)))
 	}

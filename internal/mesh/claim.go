@@ -66,8 +66,10 @@ func ClaimRequest(requestPath, session string, pid int, now time.Time) (*Claim, 
 }
 
 // ReleaseClaim removes a claim, but only if held by the given session (never
-// release someone else's claim).
-func ReleaseClaim(requestPath, session string) error {
+// release someone else's live claim). An abandoned claim — stale heartbeat and
+// owner session no longer alive — may be released by anyone, since it would be
+// reclaimed on the next claim anyway.
+func ReleaseClaim(requestPath, session string, now time.Time) error {
 	cp := claimPath(requestPath)
 	existing, err := readClaim(cp)
 	if err != nil {
@@ -76,8 +78,8 @@ func ReleaseClaim(requestPath, session string) error {
 		}
 		return err
 	}
-	if existing.OwnerSession != session {
-		return fmt.Errorf("claim on %s is held by %q, not %q", filepath.Base(requestPath), existing.OwnerSession, session)
+	if existing.OwnerSession != session && !reclaimable(requestPath, existing, now) {
+		return fmt.Errorf("claim on %s is held by live session %q, not %q", filepath.Base(requestPath), existing.OwnerSession, session)
 	}
 	return os.Remove(cp)
 }

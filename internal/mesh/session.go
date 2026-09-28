@@ -27,12 +27,39 @@ func sessionPath(agentDir, id string) string {
 	return filepath.Join(sessionsDir(agentDir), id)
 }
 
-// ResolveSessionID returns $CLAUDE_SESSION_ID or mints a stable-per-process id.
+// sessionIDEnv lists the env vars that carry the harness session id, in
+// precedence order. CLAUDE_SESSION_ID is the explicit override; Claude Code
+// exports CLAUDE_CODE_SESSION_ID to every tool subprocess, and it matches the
+// session_id the hooks register presence under.
+var sessionIDEnv = []string{"CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID"}
+
+// ResolveSessionID returns the harness session id from the environment, or
+// mints a per-process id. The minted id is unique to one meshctl invocation, so
+// a claim made under it can only be released by that same process.
 func ResolveSessionID(pid int, now time.Time) string {
-	if v := os.Getenv("CLAUDE_SESSION_ID"); v != "" {
-		return v
+	for _, k := range sessionIDEnv {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
 	}
 	return fmt.Sprintf("s-%d-%d", pid, now.UnixNano())
+}
+
+// ResolveAgentSessionID resolves the session a claim/release acts on in an
+// agent workspace. Precedence: the harness session id from the environment;
+// else the sole live registered session (hooks register presence under the
+// harness id, so a harness that does not export it to tool shells — opencode —
+// still resolves to its session); else a minted per-process id.
+func ResolveAgentSessionID(agent *Agent, pid int, now time.Time) string {
+	for _, k := range sessionIDEnv {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	if live := liveSessions(agent.Dir(), now); len(live) == 1 {
+		return live[0].ID
+	}
+	return ResolveSessionID(pid, now)
 }
 
 // SessionStart registers presence and returns any overlap warning (other live
@@ -95,6 +122,22 @@ func SessionBeat(agent *Agent, id string, now time.Time) error {
 	return writeSession(s)
 }
 
+// TouchSession refreshes a session's heartbeat, re-registering it if it was
+// never registered or was reaped as stale. Hooks call this on every prompt so a
+// long-running session stays alive (and its claims unstealable).
+func TouchSession(agent *Agent, id string, pid int, now time.Time) error {
+	p := sessionPath(agent.Dir(), id)
+	s, err := readSession(p)
+	if err != nil {
+		if err := os.MkdirAll(sessionsDir(agent.Dir()), 0o755); err != nil {
+			return err
+		}
+		s = &Session{ID: id, PID: pid, Started: now.Unix(), path: p}
+	}
+	s.LastBeat = now.Unix()
+	return writeSession(s)
+}
+
 // SessionList returns the live sessions for an agent.
 func SessionList(agent *Agent, now time.Time) []*Session {
 	return liveSessions(agent.Dir(), now)
@@ -147,6 +190,10 @@ func outstandingClaims(agent *Agent, now time.Time) []string {
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".claim") {
 			continue
+		}
+		cp := filepath.Join(agent.InboxPath(), e.Name())
+		if c, err := readClaim(cp); err == nil && reclaimable(strings.TrimSuffix(cp, ".claim"), c, now) {
+			continue // abandoned: owner dead and heartbeat stale
 		}
 		out = append(out, strings.TrimSuffix(strings.TrimSuffix(e.Name(), ".claim"), ".md"))
 	}

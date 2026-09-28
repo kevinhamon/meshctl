@@ -232,8 +232,10 @@ dispatch — interactive sessions bypass it).
 - **Durable KB** (decision records, risks, docs) → **git worktree + branch + merge-back.**
 
 ### Substrate — session identity + presence
-- Session id from `$CLAUDE_SESSION_ID` (or minted), set by a **session-start hook**
-  installed per agent (during `onboard`).
+- Session id from `$CLAUDE_SESSION_ID`, else `$CLAUDE_CODE_SESSION_ID` (exported by
+  Claude Code to tool subprocesses; matches the hook `session_id`), else minted.
+  Presence is registered by a **session-start hook** installed per agent (during
+  `onboard`).
 - Registry: `$AGENTS_DIR/<agent>/.sessions/<session-id>` = `{pid, started,
   last_beat, current_claim, kb_branch?}`; heartbeat updates `last_beat`.
 - `meshctl session start` registers presence and **loudly prints any other live
