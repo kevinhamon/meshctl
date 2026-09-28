@@ -380,29 +380,43 @@ func poolInitCmd() *cobra.Command {
 }
 
 func poolUpgradeCmd() *cobra.Command {
-	return &cobra.Command{
+	var force bool
+	c := &cobra.Command{
 		Use:   "upgrade",
-		Short: "Re-emit the embedded doctrine into the current pool from this binary",
+		Short: "Refresh the pool's doctrine from this binary (never clobbers local edits without --force)",
+		Long: "Replaces doctrine files that are unchanged since meshctl wrote them. A file edited locally is left\n" +
+			"alone: the new version is written beside it as <file>.upstream for a manual merge, and the command\n" +
+			"exits non-zero. --force overwrites edited files after backing each up to <file>.bak-<timestamp>.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {
 				return err
 			}
-			did, err := mesh.UpgradeDoctrine(dir)
+			res, err := mesh.UpgradeDoctrine(dir, force, time.Now())
 			if err != nil {
 				return err
 			}
-			if len(did) == 0 {
+			if len(res.Did) == 0 && len(res.Conflicts) == 0 {
 				fmt.Println("doctrine already current")
 				return nil
 			}
 			fmt.Printf("pool: %s\n", dir)
-			for _, d := range did {
+			for _, d := range res.Did {
 				fmt.Println("  " + d)
 			}
-			return nil
+			if len(res.Conflicts) == 0 {
+				return nil
+			}
+			for _, c := range res.Conflicts {
+				p := filepath.Join(dir, c)
+				fmt.Printf("  ✗ %s has local edits — left untouched; new version at %s.upstream\n", c, c)
+				fmt.Printf("      merge: diff -u %s %s.upstream\n", p, p)
+			}
+			return &mesh.CodedError{Code: 1, Msg: fmt.Sprintf("%d doctrine file(s) not upgraded (local edits) — merge the .upstream copies by hand, or rerun with --force to overwrite (backups kept)", len(res.Conflicts))}
 		},
 	}
+	c.Flags().BoolVar(&force, "force", false, "overwrite locally-edited doctrine (each is backed up first)")
+	return c
 }
 
 func poolListCmd() *cobra.Command {

@@ -58,7 +58,10 @@ release CI workflow on every `v*` tag.
 
 Doctrine is embedded source: edit `internal/mesh/templates/doctrine/agent-comms.md` /
 `distiller.md`, rebuild, and refresh a pool's emitted doctrine with
-`meshctl pool upgrade`.
+`meshctl pool upgrade`. Upgrade only replaces files unchanged since meshctl wrote them; a
+pool whose doctrine was edited locally keeps its copy, gets the new version as
+`<file>.upstream` to merge by hand, and the command exits non-zero (`--force` overwrites,
+backing each edited file up to `<file>.bak-<timestamp>`).
 
 ## Quickstart — stand up a mesh
 
@@ -100,7 +103,7 @@ existing pool with `meshctl agent bootstrap`.
 ## Command surface (noun → verb)
 
 ```
-meshctl pool    init [path] | upgrade | list
+meshctl pool    init [path] | upgrade [--force] | list
 meshctl agent   new <name> | onboard <name|path> | bootstrap | list | identity
 meshctl msg     ask <target> <type> "…" | send <target> <type> "…"
 meshctl inbox   list | next [--claim] | claim <id> | release <id>

@@ -606,13 +606,14 @@ func appendCognitionSection(claudePath string) error {
 // emitDoctrine writes the embedded doctrine docs (agent-comms.md, distiller.md)
 // into <poolRoot>/agent-mesh/, the path agents' CLAUDE.md reference. Binary is
 // the source (ADR-0031); this replaces the ADR-0029 git clone. overwrite=false
-// skips files already present (fresh init), true re-emits (upgrade).
+// skips files already present (fresh init), true re-emits unconditionally.
+// Upgrades go through UpgradeDoctrine, which protects local edits.
 func emitDoctrine(poolRoot string, overwrite bool) ([]string, error) {
 	dest := filepath.Join(poolRoot, DoctrineDir)
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return nil, err
 	}
-	var did []string
+	var did, written []string
 	entries, err := templatesFS.ReadDir("templates/doctrine")
 	if err != nil {
 		return nil, err
@@ -628,9 +629,11 @@ func emitDoctrine(poolRoot string, overwrite bool) ([]string, error) {
 		if err := copyTemplate("templates/doctrine/"+e.Name(), out); err != nil {
 			return did, err
 		}
+		written = append(written, e.Name())
 		did = append(did, "doctrine: "+filepath.Join(DoctrineDir, e.Name()))
 	}
-	return did, nil
+	// Stamp what we wrote so a later upgrade can tell pristine from edited.
+	return did, stampEmitted(dest, written)
 }
 
 // InitPool bootstraps a NEW, isolated mesh pool at poolRoot FROM THE BINARY
@@ -790,13 +793,6 @@ func TeardownPool(poolRoot string, purge bool) ([]string, error) {
 		did = append(did, "deregistered from the pool registry")
 	}
 	return did, nil
-}
-
-// UpgradeDoctrine re-emits the embedded doctrine into the current pool (ADR-0031
-// `init --upgrade`), refreshing agent-mesh/*.md from a newer binary. Overwrites
-// mesh-owned doctrine only; never touches agent content.
-func UpgradeDoctrine(poolRoot string) ([]string, error) {
-	return emitDoctrine(poolRoot, true)
 }
 
 // InitMesh ensures runtime artifact paths, the pool marker, and (if absent) the

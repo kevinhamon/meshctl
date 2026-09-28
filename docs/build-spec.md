@@ -84,7 +84,11 @@ user whether that counts as mutation), plus domain experts (e.g. a database expe
   clone, no network.** `--name` sets pool identity; `--no-steward` skips the steward.
 - `meshctl pool init` (no path) targets the **current directory**: repairs it
   if already a pool, else creates one there — never falls back to `~/agents`.
-- `meshctl pool upgrade` re-emits the embedded doctrine; `pool migrate` reconciles a
+- `meshctl pool upgrade` refreshes the embedded doctrine without clobbering local edits:
+  `.agentmesh/doctrine/.emitted.json` records each file's hash as meshctl wrote it; a file
+  whose hash differs (or an unstamped file that differs from the embedded copy) is left
+  alone, the new version written as `<file>.upstream`, and the command exits 1.
+  `--force` backs edited files up to `<file>.bak-<timestamp>` and overwrites; `pool migrate` reconciles a
   legacy (pre-`.agentmesh/`) layout to `.agentmesh/`.
 
 Pool detection (`AgentsDir`) resolves the root by the `.agentmesh/` marker dir

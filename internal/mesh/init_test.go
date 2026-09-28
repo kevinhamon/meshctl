@@ -72,22 +72,81 @@ func TestAgentsDir_DetectsMarker(t *testing.T) {
 	}
 }
 
-func TestUpgradeDoctrine_ReEmits(t *testing.T) {
+func TestUpgradeDoctrine_ReplacesPristine(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pool")
+	if _, err := InitPool(root, "pool", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(root, DoctrineDir)
+	comms := filepath.Join(dest, CommsFile)
+	// Simulate an older binary's emit: stale content, stamped as meshctl-written.
+	if err := os.WriteFile(comms, []byte("OLD RELEASE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := stampEmitted(dest, []string{CommsFile}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := UpgradeDoctrine(root, false, time.Now())
+	if err != nil || len(res.Conflicts) != 0 {
+		t.Fatalf("pristine upgrade: conflicts=%v err=%v", res.Conflicts, err)
+	}
+	if b, _ := os.ReadFile(comms); string(b) == "OLD RELEASE" {
+		t.Fatal("upgrade did not replace pristine doctrine")
+	}
+	if res2, _ := UpgradeDoctrine(root, false, time.Now()); len(res2.Did) != 0 {
+		t.Fatalf("second upgrade should be a no-op, did %v", res2.Did)
+	}
+}
+
+func TestUpgradeDoctrine_ProtectsLocalEdits(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "pool")
 	if _, err := InitPool(root, "pool", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	comms := filepath.Join(root, DoctrineDir, CommsFile)
-	// Tamper with the emitted doctrine.
-	if err := os.WriteFile(comms, []byte("STALE"), 0o644); err != nil {
+	if err := os.WriteFile(comms, []byte("LOCAL RULE 10"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UpgradeDoctrine(root); err != nil {
+	res, err := UpgradeDoctrine(root, false, time.Now())
+	if err != nil {
 		t.Fatal(err)
 	}
-	b, _ := os.ReadFile(comms)
-	if string(b) == "STALE" {
-		t.Fatal("upgrade did not re-emit the doctrine")
+	if len(res.Conflicts) != 1 {
+		t.Fatalf("want 1 conflict, got %v", res.Conflicts)
+	}
+	if b, _ := os.ReadFile(comms); string(b) != "LOCAL RULE 10" {
+		t.Fatal("upgrade clobbered local edits")
+	}
+	if !fileExists(comms + upstreamSuffix) {
+		t.Fatal("no .upstream copy for merging")
+	}
+
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if _, err := UpgradeDoctrine(root, true, now); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(comms + ".bak-20260102-030405"); string(b) != "LOCAL RULE 10" {
+		t.Fatal("--force did not back up local edits")
+	}
+	if b, _ := os.ReadFile(comms); string(b) == "LOCAL RULE 10" {
+		t.Fatal("--force did not overwrite")
+	}
+	if fileExists(comms + upstreamSuffix) {
+		t.Fatal("stale .upstream left after force")
+	}
+}
+
+// A pool that predates stamps (no .emitted.json) must be treated as edited.
+func TestUpgradeDoctrine_UnstampedDifferentIsConflict(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "pool")
+	if _, err := InitPool(root, "pool", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(root, DoctrineDir)
+	_ = os.Remove(filepath.Join(dest, doctrineStampFile))
+	_ = os.WriteFile(filepath.Join(dest, CommsFile), []byte("custom"), 0o644)
+	if res, _ := UpgradeDoctrine(root, false, time.Now()); len(res.Conflicts) != 1 {
+		t.Fatalf("unstamped custom doctrine not protected: %+v", res)
 	}
 }
 
