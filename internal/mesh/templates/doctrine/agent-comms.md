@@ -12,9 +12,14 @@ Canonical reference for how an agent mesh coordinates. Agent workspaces under `~
    verbs are defined below; they write the request file for you with a well-formed header, a
    stable id, and a `dispatch.log` entry. Hand-authored intake files skip all of that and
    drift from the format the inbox owner's `meshctl inbox` expects.
-3. **The inbox owner writes the outcome back into the request file** (`status` + a response
-   section). The requester reads it back on a later turn.
-4. **Requests are proposals, not commands** — the owner may `decline` / ask `needs-info`.
+3. **The inbox owner writes the outcome back with `meshctl inbox respond`** (`status` + a
+   response section; intake files are meshctl-owned and the PreToolUse gate blocks hand
+   edits). The requester reads it back via `meshctl sent`, then `meshctl sent ack <id>`.
+4. **Requests are proposals, not commands** — the owner may decline or ask `needs-info`.
+   **A misrouted request is declined, not half-answered:** `meshctl inbox decline <id>
+   --reason "…" --redirect <owner>` forwards the original ask to the agent that owns it
+   (original requester kept as `from`) and closes this copy as `declined`. Without a clear
+   owner, decline with no redirect and say why — the requester re-routes.
 5. **Don't cross ownership boundaries directly:** an agent doesn't mutate what another agent owns (e.g. the architect doesn't file tracker issues the PM owns; the PM doesn't author decision records the architect owns). Route through intake.
 6. Every request should trace to a reason (a decision record, a risk, a tracker key, or an explicit user ask).
 7. **Internal references never leave the mesh (default-deny).** Mesh-internal references must not appear in **any** artifact outside the mesh's own repos — including but not limited to issue-tracker items/comments, wiki/roadmap pages, **git commits & PRs in product repos**, shipped code comments, emails, chat/IM — **unless the user explicitly asks**. Banned when crossing out: decision-record ids, risk ids, `knowledge/…` paths, `candidates/`/`playbooks/` slugs, memory slugs, intake filenames/ids, `[[wikilinks]]`, mesh workspace paths. State the *decision* product-plain ("the new ETL is Go on the batch scheduler with a date-range trigger"), never the internal record id. **Boundary:** the mesh's own repos (KB, decision records, intake files, their git history) are internal — citing internal ids there is correct (rule 6); the rule governs content **crossing out**. Product-technical detail (repo names, languages, services, endpoints, tables) is fine — only mesh-internal *governance* artifacts are the leak.
@@ -43,7 +48,19 @@ New agents adopt the same convention (copy an `intake/README.md`, add an Intake 
 
 Filename `YYYY-MM-DD-<from>-<slug>.md`. Frontmatter: `id, from, to, type, created, status, priority, related[], (tracker_keys[] | response)`. Body: the ask + context + (for work-requests) per-story acceptance criteria. Full field docs live in each inbox's `README.md`.
 
-Statuses: `pending → in-progress → (answered|filed) | needs-info | declined|rejected`.
+Statuses (enforced by `meshctl inbox respond`; `meshctl doctor` warns on anything else):
+
+| Status | Set by | Meaning |
+|--------|--------|---------|
+| `pending` | `send`/`ask` | Awaiting the owner. |
+| `in-progress` | owner | Claimed and being worked. |
+| `needs-info` | owner | Blocked on the requester — the response says what is missing. |
+| `needs-human` | owner | Blocked on a person or another agent (a dispatched peer never chains). |
+| `answered` / `filed` | owner | Done — `filed` when the outcome is tracker items. Closed. |
+| `declined` | owner (`inbox decline`) | Not this agent's to do; the reason (and any redirect) is in the file. Closed. |
+
+Legacy spellings are read as their canonical form: `rejected`→`declined`, `done`/`resolved`→`answered`.
+`meshctl inbox archive --closed` sweeps closed requests the requester has read back (`--force` for the rest).
 
 **Intake lifecycle — an ephemeral discussion, not a ledger.** A request is
 transient coordination; it is **git-ignored** (`intake/*.md`), and its *durable residue*

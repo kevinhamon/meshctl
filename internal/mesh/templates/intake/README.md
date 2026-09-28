@@ -4,7 +4,7 @@ Inbox for requests from the user and sibling agents. Canonical protocol: `.agent
 
 ## Lifecycle
 
-`pending` → `in-progress` → `answered`/`done` | `needs-info` | `declined`. The owner updates `status` in place and writes the outcome back. Don't delete — audit trail.
+`pending` → `in-progress` → `answered` | `filed` | `needs-info` | `needs-human` | `declined`. Write outcomes with `meshctl inbox respond <id> --status … --response "…"`; decline misrouted work with `meshctl inbox decline <id> --reason "…" [--redirect <agent>]`. Never hand-edit intake files. Requesters read responses back with `meshctl sent`.
 
 ## Request file format
 
@@ -34,4 +34,4 @@ Links, constraints, prior art.
 
 - _(list the `type` values this agent handles, e.g. guidance / review / implement)_
 
-Requests are proposals — the owner may `decline` (with reason) or ask `needs-info`.
+Requests are proposals — the owner may decline (with reason, redirecting to the right agent when known) or ask `needs-info`.

@@ -104,6 +104,9 @@ meshctl pool    init [path] | upgrade | list
 meshctl agent   new <name> | onboard <name|path> | bootstrap | list | identity
 meshctl msg     ask <target> <type> "…" | send <target> <type> "…"
 meshctl inbox   list | next [--claim] | claim <id> | release <id>
+                respond <id> --status <s> --response "…" | decline <id> --reason "…" [--redirect <agent>]
+                archive <id> | --answered | --closed [--force]
+meshctl sent    [--all] | ack <id>...      # responses to requests you sent
 meshctl kb      begin | finish [--abort]
 meshctl memory  recall "<q>" | sessions | rebuild
 meshctl session start | end | list
@@ -176,7 +179,7 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
 4. **Flesh each agent's `CLAUDE.md`** with its operating doctrine (the scaffold adds the intake + Cognition stanzas; add the role-specific substance).
 5. **Verify.** `meshctl doctor` (clean but for empty-KB warnings) and `meshctl agent list`.
 6. **Onboard an existing directory** into the mesh instead of creating fresh: `meshctl agent onboard <path>` (add-only; infers title/role; autodetects harness).
-7. **Operate.** Reach a peer with `meshctl msg send|ask`; process your inbox with `meshctl inbox next --claim`; recall with `meshctl memory recall`; record decisions via `meshctl kb begin/finish`; leave a handoff with `meshctl handoff set`.
+7. **Operate.** Reach a peer with `meshctl msg send|ask`; process your inbox with `meshctl inbox next --claim`, answer with `meshctl inbox respond` (or `inbox decline --redirect` when it isn't yours), and read replies with `meshctl sent`; recall with `meshctl memory recall`; record decisions via `meshctl kb begin/finish`; leave a handoff with `meshctl handoff set`.
 
 ## Repo layout
 

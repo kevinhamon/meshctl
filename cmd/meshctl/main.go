@@ -95,7 +95,8 @@ func rootCmd() *cobra.Command {
 		poolCmd(),  // init | upgrade | list
 		agentCmd(), // new | onboard | list
 		msgCmd(),   // ask | send
-		inboxCmd(), // list | next | claim | release
+		inboxCmd(), // list | next | claim | release | respond | decline | archive
+		sentCmd(),  // requester side: responses awaiting read-back
 		kbCmd(), memoryCmd(), sessionCmd(), handoffCmd(), intuitionCmd(), hookCmd(),
 		doctorCmd(),
 		// Top-level aliases for high-frequency verbs (muscle memory + one preapproval).
@@ -913,7 +914,7 @@ func inboxCmd() *cobra.Command {
 	}
 	next.Flags().BoolVar(&claim, "claim", false, "atomically claim the returned request")
 
-	var archiveAnswered bool
+	var archiveAnswered, archiveClosed, archiveForce bool
 	archive := &cobra.Command{
 		Use:   "archive [id]",
 		Short: "Archive a closed request out of the inbox (distill its residue to the KB FIRST) — ADR-0043",
@@ -926,6 +927,21 @@ func inboxCmd() *cobra.Command {
 			a, err := resolveContextAgent(dir, agent)
 			if err != nil {
 				return err
+			}
+			if archiveClosed {
+				ids, skipped, err := mesh.ArchiveClosed(a, archiveForce)
+				if err != nil {
+					return err
+				}
+				if len(skipped) > 0 {
+					fmt.Printf("kept %d closed request(s) the requester has not read back yet (--force to archive anyway): %s\n", len(skipped), strings.Join(skipped, ", "))
+				}
+				if len(ids) == 0 {
+					fmt.Println("(no closed requests to archive)")
+					return nil
+				}
+				fmt.Printf("archived %d closed request(s): %s\n", len(ids), strings.Join(ids, ", "))
+				return nil
 			}
 			if archiveAnswered {
 				ids, err := mesh.ArchiveAnswered(a)
@@ -940,7 +956,7 @@ func inboxCmd() *cobra.Command {
 				return nil
 			}
 			if len(args) != 1 {
-				return fmt.Errorf("give a request id, or use --answered")
+				return fmt.Errorf("give a request id, or use --answered / --closed")
 			}
 			out, err := mesh.ArchiveRequest(a, args[0])
 			if err != nil {
@@ -951,11 +967,13 @@ func inboxCmd() *cobra.Command {
 		},
 	}
 	archive.Flags().BoolVar(&archiveAnswered, "answered", false, "archive every request whose status is 'answered'")
+	archive.Flags().BoolVar(&archiveClosed, "closed", false, "archive every closed request (answered/filed/declined) the requester has read back")
+	archive.Flags().BoolVar(&archiveForce, "force", false, "with --closed: also archive ones not yet read back")
 
 	// Bare `inbox` lists.
 	parent.RunE = inboxList
 	parent.PersistentFlags().StringVar(&agent, "agent", "", "agent workspace (default: $AGENT_NAME or cwd)")
-	parent.AddCommand(list, next, claimCmd(), releaseCmd(), archive)
+	parent.AddCommand(list, next, claimCmd(), releaseCmd(), respondCmd(), declineCmd(), archive)
 	return parent
 }
 

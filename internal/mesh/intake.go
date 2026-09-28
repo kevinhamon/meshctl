@@ -22,6 +22,13 @@ type Request struct {
 	Related  []string `yaml:"related"`
 	Response string   `yaml:"response"`
 
+	// Set by meshctl on write-back: `inbox respond` stamps Responded, a
+	// redirecting decline records RedirectedTo (<agent>:<id>), and the requester's
+	// `sent ack` stamps ReadBack.
+	Responded    string `yaml:"responded,omitempty"`
+	RedirectedTo string `yaml:"redirected_to,omitempty"`
+	ReadBack     string `yaml:"read_back,omitempty"`
+
 	// path is the on-disk file (set on read); Body is the markdown after the
 	// frontmatter.
 	path string `yaml:"-"`
@@ -73,7 +80,7 @@ func ArchiveAnswered(agent *Agent) ([]string, error) {
 	}
 	var done []string
 	for _, r := range reqs {
-		if strings.EqualFold(r.Status, "answered") {
+		if c, _ := CanonicalStatus(r.Status); c == StatusAnswered {
 			if _, err := ArchiveRequest(agent, r.ID); err != nil {
 				return done, err
 			}
@@ -118,6 +125,12 @@ func CallerName() string {
 //
 // `now` is injected for deterministic tests.
 func WriteRequest(target *Agent, reqType, prompt, from, priority string, related []string, now time.Time) (*Request, error) {
+	return writeRequest(target, reqType, prompt, from, priority, related, now, "")
+}
+
+// writeRequest is WriteRequest with an optional id suffix (a redirect uses one
+// so its id never equals the original's, keeping `sent ack <id>` unambiguous).
+func writeRequest(target *Agent, reqType, prompt, from, priority string, related []string, now time.Time, idSuffix string) (*Request, error) {
 	if !target.AcceptsType(reqType) {
 		var types []string
 		for _, a := range target.Accepts {
@@ -136,6 +149,9 @@ func WriteRequest(target *Agent, reqType, prompt, from, priority string, related
 
 	date := now.Format("2006-01-02")
 	id := fmt.Sprintf("%s-%s-%s", date, from, Slug(prompt))
+	if idSuffix != "" {
+		id += "-" + idSuffix
+	}
 	fname := id + ".md"
 
 	// Never clobber an existing request; disambiguate with a time suffix.

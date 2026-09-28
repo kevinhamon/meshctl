@@ -127,7 +127,7 @@ func InboxNext(agent *Agent, session string, pid int, doClaim bool, now time.Tim
 		return nil, err
 	}
 	for _, r := range reqs {
-		if r.Status != "pending" && r.Status != "needs-info" {
+		if st, _ := CanonicalStatus(r.Status); st != StatusPending && st != StatusNeedsInfo {
 			continue
 		}
 		cp := claimPath(r.path)

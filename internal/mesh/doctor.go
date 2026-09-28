@@ -263,6 +263,11 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: "inbox " + a.InboxPath() + " does not exist"})
 		}
 
+		// Intake statuses outside the canonical vocabulary (warn).
+		for _, msg := range InboxStatusFindings(a) {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
+		}
+
 		// Is the role file the harness will actually read? (Not gated on a
 		// knowledge/ tree: an agent with no KB still needs its doctrine loaded.)
 		findings = append(findings, opencodeInstructionsFindings(a)...)

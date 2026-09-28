@@ -86,6 +86,13 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 		b.WriteString(nag)
 		b.WriteString("\n\n")
 	}
+	// Requester read-back: peers' answers/declines on requests this agent sent.
+	if sent, err := ListSent(agentsDir, a.Name, true); err == nil {
+		if md := SentMarkdown(sent); md != "" {
+			b.WriteString(md)
+			b.WriteString("\n\n")
+		}
+	}
 	// Tool reference (ADR-0042): mesh-wide + agent tools, self-serve --help.
 	if md := ToolsMarkdown(EffectiveTools(LoadPoolConfig(agentsDir), a)); md != "" {
 		b.WriteString(md)

@@ -15,7 +15,7 @@ import (
 // The headless system prompt. Kept verbatim from the original dispatch script — the
 // "you may not dispatch; on a new consequential decision set needs-human and
 // stop" contract is budget/safety-critical.
-const headlessSystemPrompt = "You are being invoked HEADLESSLY by the '%s' agent to process a single intake request — there is no human in this session. Do ONLY this: locate the referenced request in this workspace's intake/ directory, process it, and write the outcome back into that same request file (update status and add a response/enrichment/decision section). Do not start unrelated work. Do not commit, push, deploy, or touch external systems. This dispatch is pre-authorized — do not wait for interactive confirmation. You MAY NOT dispatch to, or run meshctl ask against any other agent. If answering would require another agent's input, or a genuinely NEW consequential decision not covered by an accepted ADR, do NOT attempt it and do NOT fabricate: set the request status to 'needs-human', name exactly which agent/decision and the specific question, write your recommendation, then stop. The human will drive the next step."
+const headlessSystemPrompt = "You are being invoked HEADLESSLY by the '%s' agent to process a single intake request — there is no human in this session. Do ONLY this: locate the referenced request in this workspace's intake/ directory, process it, and write the outcome back with `meshctl inbox respond <id> --status <answered|needs-info|needs-human> --response-file -` (response markdown on stdin) — intake files cannot be edited directly. If the request is not within your role or domain, do NOT answer it: run `meshctl inbox decline <id> --reason \"…\" --redirect <agent>` naming the agent it belongs to (see `meshctl agent list`; omit --redirect if none fits), then stop. Do not start unrelated work. Do not commit, push, deploy, or touch external systems. This dispatch is pre-authorized — do not wait for interactive confirmation. You MAY NOT dispatch to, or run meshctl ask against any other agent. If answering would require another agent's input, or a genuinely NEW consequential decision not covered by an accepted ADR, do NOT attempt it and do NOT fabricate: respond with status 'needs-human', name exactly which agent/decision and the specific question, write your recommendation, then stop. The human will drive the next step."
 
 // AskOptions parameterizes a dispatch.
 type AskOptions struct {
@@ -186,6 +186,7 @@ func dispatchArgv(harness, msg, sys, model string) (name string, args []string) 
 		args = []string{"-p", msg,
 			"--permission-mode", "acceptEdits",
 			"--allowedTools", "Read", "Grep", "Glob", "Edit", "Write",
+			"Bash(meshctl inbox respond:*)", "Bash(meshctl inbox decline:*)", "Bash(meshctl agent list:*)",
 			"--append-system-prompt", sys,
 		}
 		if model != "" {

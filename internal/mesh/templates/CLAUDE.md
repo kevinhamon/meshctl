@@ -29,7 +29,8 @@ _If your work spans git repos, **sync before you inspect** — `git -C <repo> fe
 
 Bidirectional file-based handoff — canonical protocol: your pool's `../.agentmesh/doctrine/agent-comms.md`. Inbox: `intake/`. The roster is computed on demand — run `meshctl agent list` (do not maintain a peer list here); all `meshctl` commands scope to THIS pool automatically.
 
-- **Inbound:** at session start / on "check intake", run `meshctl inbox next --claim` (atomic claim) or scan `intake/*.md` for `status: pending`; process by `type`, write the outcome back.
+- **Inbound:** at session start / on "check intake", run `meshctl inbox next --claim` (atomic claim) or scan `intake/*.md` for `status: pending`; process by `type`, then write the outcome back with `meshctl inbox respond <id> --status answered|filed|needs-info|needs-human --response "…"` (intake files are meshctl-owned — never hand-edit them). **Not yours?** `meshctl inbox decline <id> --reason "…" --redirect <owner>` — don't half-answer out-of-domain work.
+- **Read-back:** `meshctl sent` lists requests you sent that came back (answered / declined / needs-info); read each, act, then `meshctl sent ack <id>`. The session start surfaces them automatically.
 - **Outbound:** `meshctl send <target> <type> "…"` writes a request into a peer's inbox; `meshctl ask <target> <type> "…"` also dispatches an advisory peer headlessly and blocks for the answer. Route work to the agent that **owns** it (find owners via `meshctl agent list`); never mutate a peer's KB/board directly.
 - **Blocked on a decision mid-task?** `meshctl ask <advisor> <type> "…"` for a synchronous answer; if it returns `needs-human`, stop and surface to the user.
 

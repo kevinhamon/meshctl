@@ -117,7 +117,8 @@ func deniedWritePath(path string) string {
 	// meshctl, never authored by hand.
 	if strings.Contains(s, "/"+IntakeDir+"/") || strings.HasSuffix(s, "/"+IntakeDir) {
 		return "mesh: intake/ is an ephemeral queue owned by meshctl — do not hand-write it. " +
-			"Send work with `meshctl send`, or ask with `meshctl ask`."
+			"Send work with `meshctl send`/`meshctl ask`; write an outcome back with `meshctl inbox respond`, " +
+			"or `meshctl inbox decline --reason … [--redirect <agent>]` if it is not yours."
 	}
 	return ""
 }

@@ -248,6 +248,15 @@ dispatch — interactive sessions bypass it).
 - Lease + heartbeat; stale reclaim after `AGENT_DISPATCH_STALE_SEC` (900), never
   reclaiming a claim whose session still heartbeats.
 - `meshctl inbox next [--claim]` atomically claims + returns the next `pending`.
+- `meshctl inbox respond <id> --status <s> --response …` is the owner's only write-back
+  (the gate blocks hand edits to intake). Canonical statuses: pending, in-progress,
+  needs-info, needs-human, answered, filed, declined (aliases rejected/done/resolved).
+  Refused while another live session holds the claim; releases the claim on close.
+- `meshctl inbox decline <id> --reason … [--redirect <agent>]` closes a misrouted request;
+  a redirect re-sends the ask to the owner (same `from`, `related: [<orig id>]`) and
+  records `redirected_to` on the original. Send-only — never dispatches.
+- `meshctl sent [--all]` lists the caller's requests handed back by peers and not yet
+  `sent ack`ed (`read_back` stamp); SessionStart injects the same list.
   `meshctl claim|release <id>`.
 - The request `status` field stays a human display; **the sidecar is the
   authority** — never use `status` for mutual exclusion (TOCTOU).
