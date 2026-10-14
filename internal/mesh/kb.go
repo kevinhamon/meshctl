@@ -177,8 +177,5 @@ func KBFinish(agentsDir string, agent *Agent, session string, abort, headless bo
 	}
 	_, _ = git(agent.Dir(), "branch", "-D", branch)
 	clearSessionBranch()
-	// ADR-0015: refresh the disposable memory index so a KB write never leaves it
-	// stale. Best-effort — a rebuild failure must not fail an already-merged write.
-	_, _ = MemoryRebuild(agent)
 	return nil
 }

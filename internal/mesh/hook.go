@@ -144,9 +144,13 @@ func IdentityLine(poolRoot string, a *Agent) string {
 	if pool == "" {
 		pool = filepath.Base(poolRoot)
 	}
-	return fmt.Sprintf("# Mesh identity\nYou are `%s` in mesh pool `%s` (root `%s`; your workspace `%s`). "+
+	s := fmt.Sprintf("# Mesh identity\nYou are `%s` in mesh pool `%s` (root `%s`; your workspace `%s`). "+
 		"Your peers are exactly the agents `meshctl agent list` shows; other pools on this machine are not yours. "+
 		"Run meshctl from your workspace — it resolves this pool from there.", a.Name, pool, poolRoot, a.Dir())
+	if fileExists(DoctrineLocalPath(poolRoot)) {
+		s += fmt.Sprintf(" Pool-local doctrine (house rules, roster) is in `%s` — it takes precedence over the default protocol doc beside it.", DoctrineLocalPath(poolRoot))
+	}
+	return s
 }
 
 // HookSessionEnd captures an extractive session-record (ADR-0033) then

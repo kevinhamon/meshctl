@@ -541,10 +541,29 @@ func poolUpgradeCmd() *cobra.Command {
 				}
 				fmt.Println("restart every open agent session — running harnesses keep the old wiring until restarted")
 			}
-			if len(res.Conflicts) > 0 {
-				return &mesh.CodedError{Code: 1, Msg: fmt.Sprintf("%d doctrine file(s) not upgraded (local edits) — merge the .upstream copies by hand, or rerun with --force to overwrite (backups kept)", len(res.Conflicts))}
+			// Hygiene last: an upgraded pool should also be a clean one. Automatic
+			// repairs are applied; anything needing a human is listed.
+			hyg := mesh.PoolHygiene(dir, time.Now())
+			fixed, errs := mesh.ApplyHygiene(hyg)
+			manual := mesh.ManualItems(hyg)
+			if len(fixed) > 0 || len(errs) > 0 || len(manual) > 0 {
+				fmt.Println("hygiene:")
+				for _, f := range fixed {
+					fmt.Println("  ✓ " + f)
+				}
+				for _, e := range errs {
+					fmt.Println("  ✗ " + e.Error())
+				}
+				for _, m := range manual {
+					fmt.Printf("  ⚠ [%s] %s\n", m.Agent, m.Message)
+				}
 			}
-			return nil
+			if len(res.Conflicts) == 0 && len(manual) == 0 && len(errs) == 0 {
+				fmt.Println("pool clean ✓")
+				return nil
+			}
+			n := len(res.Conflicts) + len(manual) + len(errs)
+			return &mesh.CodedError{Code: 1, Msg: fmt.Sprintf("%d item(s) need a human (listed above); the pool is upgraded but not yet clean", n)}
 		},
 	}
 	c.Flags().BoolVar(&force, "force", false, "overwrite locally-edited doctrine (each is backed up first)")
@@ -963,9 +982,15 @@ func sendCmd() *cobra.Command {
 // --- doctor ---
 
 func doctorCmd() *cobra.Command {
-	return &cobra.Command{
+	var fix bool
+	c := &cobra.Command{
 		Use:   "doctor",
-		Short: "Validate every manifest; non-zero exit on any error",
+		Short: "Check manifests, wiring, KB consistency and pool hygiene; non-zero exit on any error",
+		Long: `Check every agent's manifest, harness wiring, knowledge base and the pool's
+runtime state. Hygiene items (stale claims and sessions, orphan worktrees, retired
+files, legacy intake statuses, leftovers from earlier upgrades) are reported with
+"fixable" when meshctl can repair them; --fix applies those repairs. Items that
+need a human (text you wrote, doctrine you edited) are always reported, never changed.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {
@@ -975,8 +1000,26 @@ func doctorCmd() *cobra.Command {
 			if n := selfupdate.Notice(resolveVersion(), time.Now()); n != "" {
 				fmt.Println("ℹ " + n)
 			}
+			hyg := mesh.PoolHygiene(dir, time.Now())
+			if fix {
+				fixed, errs := mesh.ApplyHygiene(hyg)
+				for _, f := range fixed {
+					fmt.Println("✓ fixed " + f)
+				}
+				for _, e := range errs {
+					fmt.Println("✗ fix failed: " + e.Error())
+				}
+				hyg = mesh.ManualItems(hyg)
+			}
+			for _, h := range hyg {
+				msg := h.Message
+				if h.Fixable() {
+					msg += "  (fixable: meshctl doctor --fix)"
+				}
+				findings = append(findings, mesh.DoctorFinding{Agent: h.Agent, Level: "warn", Message: msg})
+			}
 			if len(findings) == 0 {
-				fmt.Println("doctor: all manifests valid ✓")
+				fmt.Println("doctor: clean ✓")
 				return nil
 			}
 			for _, f := range findings {
@@ -995,6 +1038,8 @@ func doctorCmd() *cobra.Command {
 			return nil
 		},
 	}
+	c.Flags().BoolVar(&fix, "fix", false, "apply the automatic hygiene repairs (stale state, retired files, legacy statuses)")
+	return c
 }
 
 // --- session ---
@@ -1281,11 +1326,13 @@ func memoryCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			idx, err := mesh.MemoryRebuild(a)
-			if err != nil {
+			// Recall has computed live over knowledge/ since v1.1; the on-disk
+			// index is retired. This verb now just removes a leftover one.
+			p := filepath.Join(a.Dir(), mesh.MemoryDir, mesh.MemoryIndexFile)
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 				return err
 			}
-			fmt.Printf("rebuilt %s/.memory/index.json — %d topics from knowledge/\n", a.Name, len(idx.Topics))
+			fmt.Printf("memory is computed live from %s/knowledge/ — nothing to rebuild (removed any leftover %s)\n", a.Name, mesh.MemoryIndexFile)
 			return nil
 		},
 	}

@@ -61,7 +61,8 @@ Doctrine is embedded source: edit `internal/mesh/templates/doctrine/agent-comms.
 `meshctl pool upgrade`. Upgrade only replaces files unchanged since meshctl wrote them; a
 pool whose doctrine was edited locally keeps its copy, gets the new version as
 `<file>.upstream` to merge by hand, and the command exits non-zero (`--force` overwrites,
-backing each edited file up to `<file>.bak-<timestamp>`).
+backing each edited file up to `<file>.bak-<timestamp>`). Pool-specific doctrine belongs
+in `.agentmesh/doctrine/local.md`, which upgrades never touch.
 
 ## Quickstart — stand up a mesh
 
@@ -111,14 +112,27 @@ meshctl inbox   list | next [--claim] | claim <id> | release <id>
                 archive <id> | --answered | --closed [--force]
 meshctl sent    [--all] | ack <id>...      # responses to requests you sent
 meshctl kb      begin | finish [--abort]
-meshctl memory  recall "<q>" | sessions | rebuild
+meshctl memory  recall "<q>" | sessions
 meshctl session start | end | list
 meshctl handoff show | set          (set reads the body from stdin)
 meshctl intuition recall "<q>"
 meshctl hook    session-start | user-prompt | session-beat | session-end | pre-tool-use   (wired per-agent; not run by hand)
-meshctl doctor
+meshctl doctor  [--fix]              # manifests, wiring, KB consistency, pool hygiene
 meshctl ask … | send …               (top-level aliases for msg ask|send)
 ```
+
+**Keeping a pool clean across upgrades.** A pool accumulates drift as meshctl evolves:
+stale claims and presence records, orphan KB worktrees, a dead dispatch lock, retired
+files (`.memory/index.json`), legacy intake statuses, per-session state from long-dead
+sessions, leftovers of earlier doctrine upgrades, and references to retired command
+names in hand-written files. `meshctl doctor` reports every such item and marks the
+ones it can repair as *fixable*; `meshctl doctor --fix` repairs them. `meshctl pool
+upgrade` runs the same repairs as its last step and ends with `pool clean ✓`, or lists
+exactly what still needs a human. Items that need a human are never edited by meshctl:
+a doctrine file you changed (merge the `.upstream` copy, or `--force` with a backup) and
+your own text that names the retired `agentmesh` command. Put pool-specific doctrine
+(house rules, the real roster, tool policy) in `.agentmesh/doctrine/local.md` — upgrades
+never touch it, agents read it first, and the core doctrine stays upgradable.
 
 **Updating meshctl.** `meshctl update` replaces the binary with the latest GitHub release
 (checksum-verified, in place; `--check` only reports, `--version vX.Y.Z` pins a release).
