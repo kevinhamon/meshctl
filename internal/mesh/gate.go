@@ -31,6 +31,9 @@ import (
 type GateDecision struct {
 	Deny   bool
 	Reason string
+	// Ask hands the call to the human: Claude Code prompts for approval with
+	// Reason. Harnesses with no ask form treat it as a deny.
+	Ask bool
 }
 
 const claudeMemPrefix = "mcp__plugin_claude-mem__"
@@ -87,24 +90,41 @@ func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
 	//    holds even if tool_input is missing or malformed. Reads fall through to
 	//    the KB-rule check.
 	if isClaudeMemMutator(name) {
-		return GateDecision{true, "mesh: memory is owned by the mesh — do not write the claude-mem store. " +
+		return GateDecision{Deny: true, Reason: "mesh: memory is owned by the mesh — do not write the claude-mem store. " +
 			"Persist through `meshctl memory` / `meshctl kb` (knowledge), or `meshctl send` / `meshctl ask` (messages)."}
 	}
 
-	// 1b. In-session peer: the peer answers through `meshctl inbox
-	//     respond` and nothing else. Its subagent definition grants no edit
-	//     tools, but the `tools` list cannot scope Bash, so the no-dispatch /
-	//     no-write / no-commit contract is enforced here.
+	// 1a. A delegation (Agent/Task call) from the caller's session. Delegating
+	//     work to a state-mutating peer (ADR-0063) is the human's call, every
+	//     time: ask. Nothing else about a delegation is the gate's business.
+	if p.ToolName == "Agent" || p.ToolName == "Task" {
+		if p.InSession {
+			return GateDecision{Deny: true, Reason: peerWorkDenyDispatch}
+		}
+		return gateDelegation(agentsDir, p)
+	}
+
+	// 1b. In-session peer. Consult: the peer answers through `meshctl inbox
+	//     respond` and nothing else — its definition grants no edit tools, but
+	//     the `tools` list cannot scope Bash, so the no-dispatch / no-write /
+	//     no-commit contract is enforced here. Work: writes confined to the
+	//     peer's own workspace and workdirs, still no dispatch.
 	if p.InSession {
-		if reason := deniedPeerAction(p); reason != "" {
-			return GateDecision{true, reason}
+		reason := ""
+		if p.Work {
+			reason = deniedPeerWorkAction(agentsDir, p)
+		} else {
+			reason = deniedPeerAction(p)
+		}
+		if reason != "" {
+			return GateDecision{Deny: true, Reason: reason}
 		}
 	}
 
 	// 2/3. File writes: inspect the target path(s).
 	for _, path := range gateEditPaths(p) {
 		if reason := deniedWritePath(agentsDir, path); reason != "" {
-			return GateDecision{true, reason}
+			return GateDecision{Deny: true, Reason: reason}
 		}
 	}
 
@@ -112,12 +132,33 @@ func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
 	//     only way to write a file; `echo > intake/x.md` or `sed -i` on one
 	//     must meet the same rule, or the gate is decorative.
 	if reason := deniedShellWrite(agentsDir, p); reason != "" {
-		return GateDecision{true, reason}
+		return GateDecision{Deny: true, Reason: reason}
 	}
 
 	// 4. Standing rules from the agent's own KB (kbrules.go): deny once per
 	//    session per matching rule, with the rule as the reason.
 	return gateKBRules(agentsDir, p)
+}
+
+// gateDelegation asks the human before work is delegated in-session to a
+// state-mutating peer; any other Agent call is allowed.
+func gateDelegation(agentsDir string, p HookPayload) GateDecision {
+	var in struct {
+		SubagentType string `json:"subagent_type"`
+	}
+	if len(p.ToolInput) == 0 || json.Unmarshal(p.ToolInput, &in) != nil {
+		return GateDecision{}
+	}
+	st := in.SubagentType
+	if !strings.HasPrefix(st, PeerAgentPrefix) || !strings.HasSuffix(st, PeerWorkSuffix) {
+		return GateDecision{}
+	}
+	peer, err := FindAgent(agentsDir, strings.TrimSuffix(strings.TrimPrefix(st, PeerAgentPrefix), PeerWorkSuffix))
+	if err != nil || len(peer.Mutates) == 0 {
+		return GateDecision{}
+	}
+	return GateDecision{Ask: true, Reason: "mesh: `" + peer.Name + "` is a state-mutating peer (mutates: " +
+		strings.Join(peer.Mutates, ", ") + ") — approve this delegated work before it runs in this session."}
 }
 
 // shellTools name the tools whose input is a shell command line.
@@ -324,23 +365,28 @@ func deniedWritePath(agentsDir, path string) string {
 // merely broken payload that slipped through as "allow" would make every rule
 // above optional.
 func GateUnavailable(why string) GateDecision {
-	return GateDecision{true, "mesh gate could not evaluate this tool call (" + why + ") and refuses rather than fail open. " +
+	return GateDecision{Deny: true, Reason: "mesh gate could not evaluate this tool call (" + why + ") and refuses rather than fail open. " +
 		"Re-run the call; if this persists, run `meshctl doctor` in the agent workspace."}
 }
 
 // EmitGateDecision writes Claude Code's PreToolUse permission-decision envelope.
-// Allow ⇒ nothing written (the default flow proceeds); deny ⇒ the deny envelope
-// carrying its reason. opencode's form is the raw reason (Harness.EmitGate):
+// Allow ⇒ nothing written (the default flow proceeds); deny or ask ⇒ that
+// envelope carrying its reason. opencode's form is the raw reason (Harness.EmitGate):
 // the V2 plugin throws it from tool.execute.before. opencode V1 has no
 // equivalent hook and is not gated.
 func EmitGateDecision(w io.Writer, d GateDecision) error {
-	if !d.Deny {
+	decision := "deny"
+	switch {
+	case d.Deny:
+	case d.Ask:
+		decision = "ask"
+	default:
 		return nil
 	}
 	out := map[string]any{
 		"hookSpecificOutput": map[string]any{
 			"hookEventName":            "PreToolUse",
-			"permissionDecision":       "deny",
+			"permissionDecision":       decision,
 			"permissionDecisionReason": d.Reason,
 		},
 	}

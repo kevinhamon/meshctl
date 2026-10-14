@@ -132,7 +132,7 @@ func TestSettings_UpgradesMeshMatcher(t *testing.T) {
 	}
 	b, _ := os.ReadFile(filepath.Join(dest, ".claude", "settings.json"))
 	s := string(b)
-	if !strings.Contains(s, `"Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__"`) {
+	if !strings.Contains(s, `"Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__|Agent|Task"`) {
 		t.Fatalf("mesh matcher not upgraded:\n%s", s)
 	}
 	if !strings.Contains(s, "pr-review-gate.sh") || strings.Count(s, "meshctl hook pre-tool-use") != 1 {

@@ -738,14 +738,14 @@ func poolForgetCmd() *cobra.Command {
 func newCmd() *cobra.Command {
 	var (
 		title, model, rgb, repo, workdirs string
-		badge, role             string
-		owns, domains, accepts  string
-		mutates                 string
-		dispatchable            bool
-		iterm                   bool
-		harness                 string
-		ocVersion               int
-		bare                    bool
+		badge, role                       string
+		owns, domains, accepts            string
+		mutates                           string
+		dispatchable                      bool
+		iterm                             bool
+		harness                           string
+		ocVersion                         int
+		bare                              bool
 	)
 	cmd := &cobra.Command{
 		Use:   "new <name>",
@@ -810,13 +810,13 @@ func newCmd() *cobra.Command {
 func onboardCmd() *cobra.Command {
 	var (
 		title, model, rgb, repo, workdirs string
-		badge, role             string
-		owns, domains, accepts  string
-		mutates                 string
-		dispatchable            bool
-		iterm                   bool
-		harness                 string
-		ocVersion               int
+		badge, role                       string
+		owns, domains, accepts            string
+		mutates                           string
+		dispatchable                      bool
+		iterm                             bool
+		harness                           string
+		ocVersion                         int
 	)
 	cmd := &cobra.Command{
 		Use:   "onboard <name|path>",
@@ -1736,7 +1736,7 @@ func stateCmd() *cobra.Command {
 // exit 0 (a hook must never break a turn).
 func hookCmd() *cobra.Command {
 	var harness, peer string
-	var inSession bool
+	var inSession, work bool
 	cmd := &cobra.Command{
 		Use:   "hook session-start|user-prompt|session-end|pre-tool-use",
 		Short: "Harness hook handlers (self-contained; wired per-agent by agent new/onboard)",
@@ -1744,10 +1744,12 @@ func hookCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&harness, "harness", "", "output envelope: claude|opencode (default: agent's harness)")
 	cmd.PersistentFlags().StringVar(&peer, "agent", "", "act for this agent instead of the payload cwd's (in-session peer subagents)")
 	cmd.PersistentFlags().BoolVar(&inSession, "in-session", false, "the hook fires inside an in-session peer subagent (peer gate; Stop closes the dispatch)")
+	cmd.PersistentFlags().BoolVar(&work, "work", false, "with --in-session: the peer does delegated work (work gate: writes in its own repos only)")
 	// stamp applies the override flags to a parsed payload.
 	stamp := func(p mesh.HookPayload) mesh.HookPayload {
 		p.PeerAgent = peer
 		p.InSession = inSession
+		p.Work = inSession && work
 		return p
 	}
 

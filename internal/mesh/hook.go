@@ -44,6 +44,9 @@ type HookPayload struct {
 	// payload fields.
 	PeerAgent string `json:"-"`
 	InSession bool   `json:"-"`
+	// Work marks a peer doing delegated work (ADR-0063): the work gate
+	// applies instead of the consult contract.
+	Work bool `json:"-"`
 }
 
 // payloadAgent resolves the agent a hook acts for: the explicit --agent

@@ -48,7 +48,9 @@ var meshctlAllowRules = []string{
 // doctor can detect an agent left on older wiring after a meshctl upgrade and
 // tell you to re-onboard. Bump it whenever hookWiring OR the gate's deny policy
 // (gate.go) changes materially. v3: scoped allow rules, shell-write gate.
-const MeshWiringVersion = 3
+// v4: the gate also sees Agent/Task delegations (ask before delegating work to
+// a state-mutating peer, ADR-0063).
+const MeshWiringVersion = 4
 
 const meshWiringStampFile = ".mesh-wiring.json"
 
@@ -56,12 +58,13 @@ const meshWiringStampFile = ".mesh-wiring.json"
 // fail-closed enforcement gate (gate.go); the other three are advisory. The gate
 // matcher fires on file-edit tools, Bash and every MCP tool — the gate denies
 // claude-mem writes and competing-store paths, then checks the call against the
-// agent's KB rules (kbrules.go). v2 widened the matcher for the KB-rule gate.
+// agent's KB rules (kbrules.go). v2 widened the matcher for the KB-rule gate;
+// v4 added Agent/Task for delegations.
 var hookWiring = []struct{ event, sub, matcher string }{
 	{"SessionStart", "session-start", "startup|resume|clear"},
 	{"UserPromptSubmit", "user-prompt", ""},
 	{"SessionEnd", "session-end", ""},
-	{"PreToolUse", "pre-tool-use", "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__"},
+	{"PreToolUse", "pre-tool-use", "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__|Agent|Task"},
 }
 
 // EnsureAgentSettings merges the mesh integration into <dest>/.claude/settings.json.

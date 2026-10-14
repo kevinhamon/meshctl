@@ -231,8 +231,9 @@ func (h opencodeHarness) DistillCmd(prompt string) []string {
 }
 
 // EmitGate = the raw deny reason; the plugin throws it to block the call.
+// opencode has no ask form, so an ask is a deny (the human runs it by hand).
 func (opencodeHarness) EmitGate(w io.Writer, d GateDecision) error {
-	if !d.Deny {
+	if !d.Deny && !d.Ask {
 		return nil
 	}
 	_, err := io.WriteString(w, d.Reason+"\n")
