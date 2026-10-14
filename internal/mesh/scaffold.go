@@ -589,7 +589,8 @@ Run the **` + "`mesh-cognition`" + ` skill** for the full procedure; its short f
   ` + "`experience/`" + ` / a decision (ADR) → ` + "`meshctl kb finish`" + `.
 - **Record decisions & risks.** Consequential domain choices become ADRs in
   ` + "`knowledge/decisions/`" + `; new risks get logged in ` + "`knowledge/risks.md`" + `.
-- **Handoff at end.** Rewrite ` + "`knowledge/handoff.md`" + ` via ` + "`meshctl handoff set`" + `.
+- **Handoff at end.** Fill in ` + "`meshctl handoff template`" + ` (fixed sections, ≤40 lines, facts only) and
+  write it in one pass: ` + "`meshctl handoff set <<'EOF' … EOF`" + `.
 - **Repo hygiene (your knowledge is only as safe as your remote).** Your workspace
   must be its own git repo **with a remote** — ` + "`knowledge/`" + ` is durable only
   once committed **and pushed**. If your dir is not a git repo, ` + "`git init`" + ` +

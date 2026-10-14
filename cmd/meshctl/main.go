@@ -1407,7 +1407,7 @@ func intuitionCmd() *cobra.Command {
 func handoffCmd() *cobra.Command {
 	var agent string
 	cmd := &cobra.Command{
-		Use:   "handoff show|set",
+		Use:   "handoff show|template|set",
 		Short: "Read/write the agent's authoritative session handoff (current focus + next step)",
 	}
 	show := &cobra.Command{
@@ -1432,9 +1432,32 @@ func handoffCmd() *cobra.Command {
 			return nil
 		},
 	}
+	template := &cobra.Command{
+		Use:   "template",
+		Short: "Print the handoff template to fill in (the one fixed shape a handoff takes)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Print(mesh.HandoffTemplate)
+			return nil
+		},
+	}
 	set := &cobra.Command{
 		Use:   "set",
 		Short: "Write the handoff body from stdin (stamps a timestamp; overwrites current)",
+		Long: "Replaces knowledge/handoff.md with the body on stdin (meshctl adds the timestamp header).\n" +
+			"Fill in `meshctl handoff template` — four fixed sections, at most " + fmt.Sprint(mesh.HandoffMaxLines) + " lines, facts only —\n" +
+			"and rewrite the whole thing each time (don't append; git keeps prior handoffs). Pass it with a\n" +
+			"quoted heredoc so nothing in the text is shell-expanded:\n\n" +
+			"  meshctl handoff set <<'EOF'\n" +
+			"  ## Current State\n" +
+			"  Pool upgraded to opencode V2; all agents rewired and pushed.\n\n" +
+			"  ## Next Step\n" +
+			"  Restart every agent session, then smoke-test research-agent.\n\n" +
+			"  ## Open Threads\n" +
+			"  - none\n\n" +
+			"  ## Pointers\n" +
+			"  - knowledge/experience/opencode-v1-to-v2-pool-upgrade.md\n" +
+			"  EOF\n\n" +
+			"Problems (missing section, leftover placeholder, over budget) are reported but never block the write.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {
@@ -1455,12 +1478,15 @@ func handoffCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("wrote %s\n", mesh.HandoffPath(a))
+			for _, w := range mesh.HandoffLint(string(b)) {
+				fmt.Fprintln(os.Stderr, "⚠ handoff: "+w)
+			}
 			return nil
 		},
 	}
 	show.Flags().StringVar(&agent, "agent", "", "agent (default: cwd/$AGENT_NAME)")
 	set.Flags().StringVar(&agent, "agent", "", "agent (default: cwd/$AGENT_NAME)")
-	cmd.AddCommand(show, set)
+	cmd.AddCommand(show, template, set)
 	return cmd
 }
 

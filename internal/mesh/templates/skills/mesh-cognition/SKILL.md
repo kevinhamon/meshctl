@@ -89,10 +89,33 @@ experience note; `fyi`/routine → often nothing — then `meshctl inbox archive
 ## Session handoff — resume point (ADR-0017)
 
 Keep an authoritative, git-tracked `knowledge/handoff.md`: *where we are + the next
-concrete step*. Read at start (auto-injected). Write at end / when attention shifts:
-`meshctl handoff set` (from stdin). Body — *Current focus · Status · Next step ·
-Open threads/blockers · Pointers*. It is a handoff, not a journal — **rewrite it,
-don't append**; git history preserves prior handoffs.
+concrete step*. Read at start (auto-injected). Write it at session end, or when the
+user asks for a handoff — **in one pass, with no deliberation about format**: the
+format is fixed. Fill in exactly this (also printed by `meshctl handoff template`)
+and send it in one command:
+
+```
+meshctl handoff set <<'EOF'
+## Current State
+<2-6 lines: what is true right now — done, in progress, where things live>
+
+## Next Step
+<the single next action, concrete enough to start cold>
+
+## Open Threads
+- <blocker / pending decision / follow-up — who owns it> (or: none)
+
+## Pointers
+- <paths, commits, intake ids, URLs the next session needs> (or: none)
+EOF
+```
+
+Rules — that is all there is to decide:
+- **Facts only**, no session narrative ("I then…"), no hedging. At most 40 lines.
+- **Rewrite the whole thing** each time; never append. Git keeps prior handoffs.
+- Keep the quoted `'EOF'` so nothing is shell-expanded. meshctl adds the timestamp.
+- Don't re-read or second-guess it after writing; `meshctl handoff set` reports any
+  missing section or leftover placeholder.
 
 ## Repo hygiene — knowledge is only safe once pushed (ADR-0039)
 
