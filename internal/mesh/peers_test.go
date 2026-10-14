@@ -104,7 +104,9 @@ func TestPeers_RosterChangeRefreshesAndRemoves(t *testing.T) {
 	_ = os.WriteFile(mp, []byte(strings.Replace(string(b), "architect title", "Chief Architect", 1)), 0o644)
 
 	plan := PlanPeerAgents(dir, caller.Dir())
-	if len(plan.Remove) != 1 || plan.Remove[0] != "grid-expert" || len(plan.Update) != 1 || plan.Update[0] != "architect" {
+	// grid-expert loses both definitions (no longer dispatchable, not mutating);
+	// architect's consult and work definitions both carry the title.
+	if strings.Join(plan.Remove, ",") != "grid-expert,grid-expert-work" || strings.Join(plan.Update, ",") != "architect,architect-work" {
 		t.Fatalf("plan: %+v", plan)
 	}
 	notes, err := ensurePeerAgents(dir, caller.Dir())
@@ -114,7 +116,7 @@ func TestPeers_RosterChangeRefreshesAndRemoves(t *testing.T) {
 	if len(notes) != 2 {
 		t.Fatalf("notes: %v", notes)
 	}
-	if fileExists(PeerAgentFile(caller.Dir(), "grid-expert")) {
+	if fileExists(PeerAgentFile(caller.Dir(), "grid-expert")) || fileExists(PeerWorkAgentFile(caller.Dir(), "grid-expert")) {
 		t.Fatal("stale definition not removed")
 	}
 	got, _ := os.ReadFile(PeerAgentFile(caller.Dir(), "architect"))
@@ -182,12 +184,12 @@ func TestPeers_UpgradePlanAndDoctorFlagStaleSet(t *testing.T) {
 	dir, caller := peerPool(t)
 	// The caller was scaffolded before its peers existed, so its set is stale.
 	plan := PlanPeerAgents(dir, caller.Dir())
-	if len(plan.Write) != 2 {
-		t.Fatalf("want 2 peers to write, got %+v", plan)
+	if strings.Join(plan.Write, ",") != "architect,architect-work,grid-expert,grid-expert-work,pm-work" {
+		t.Fatalf("want consult+work for dispatchable peers and work for pm, got %+v", plan)
 	}
 	ap := planAgent(caller, time.Now())
 	joined := strings.Join(ap.Actions, "\n")
-	if !strings.Contains(joined, "write in-session peer subagents: mesh-architect, mesh-grid-expert") {
+	if !strings.Contains(joined, "write in-session peer subagents: mesh-architect, mesh-architect-work, mesh-grid-expert, mesh-grid-expert-work, mesh-pm-work") {
 		t.Fatalf("upgrade plan missing peer actions: %v", ap.Actions)
 	}
 	found := false
@@ -217,5 +219,112 @@ func TestPeers_UpgradePlanAndDoctorFlagStaleSet(t *testing.T) {
 	arch, _ := FindAgent(dir, "architect")
 	if fileExists(PeerAgentFile(arch.Dir(), "architect")) || !fileExists(PeerAgentFile(arch.Dir(), "grid-expert")) {
 		t.Fatal("peer set for architect wrong")
+	}
+}
+
+func TestPeers_WorkFrontmatterContract(t *testing.T) {
+	dir, caller := peerPool(t)
+	arch, _ := FindAgent(dir, "architect")
+	body, err := RenderPeerWorkAgent(caller.Name, arch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.SplitN(body, "---\n", 3)
+	var fm struct {
+		Name        string         `yaml:"name"`
+		Description string         `yaml:"description"`
+		Tools       string         `yaml:"tools"`
+		Hooks       map[string]any `yaml:"hooks"`
+	}
+	if err := yaml.Unmarshal([]byte(parts[1]), &fm); err != nil {
+		t.Fatalf("frontmatter is not YAML: %v", err)
+	}
+	if fm.Name != "mesh-architect-work" {
+		t.Fatalf("name: %q", fm.Name)
+	}
+	for _, want := range []string{"Edit", "Write", "MultiEdit", "Bash"} {
+		if !strings.Contains(fm.Tools, want) {
+			t.Fatalf("work peer needs %s: %q", want, fm.Tools)
+		}
+	}
+	if strings.Contains(fm.Tools, "Agent") {
+		t.Fatalf("work peer must not get Agent: %q", fm.Tools)
+	}
+	if !strings.Contains(fm.Description, "--in-session --work") {
+		t.Fatalf("description must name the work precondition: %q", fm.Description)
+	}
+	h, _ := json.Marshal(fm.Hooks)
+	for _, want := range []string{"meshctl hook pre-tool-use --agent architect --in-session --work", "meshctl hook session-end --agent architect --in-session --work"} {
+		if !strings.Contains(string(h), want) {
+			t.Fatalf("hooks missing %q: %s", want, h)
+		}
+	}
+	for _, want := range []string{distillerAgentMarker, "receipt", "meshctl kb begin", "worktree", "`developer`"} {
+		if !strings.Contains(parts[2], want) {
+			t.Fatalf("body missing %q", want)
+		}
+	}
+}
+
+func TestPeers_MutatingPeerGetsWorkDefinitionOnly(t *testing.T) {
+	dir, caller := peerPool(t)
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if fileExists(PeerAgentFile(caller.Dir(), "pm")) || !fileExists(PeerWorkAgentFile(caller.Dir(), "pm")) {
+		t.Fatal("mutating pm must get mesh-pm-work and no consult definition")
+	}
+	b, _ := os.ReadFile(PeerWorkAgentFile(caller.Dir(), "pm"))
+	if !strings.Contains(string(b), "approve") {
+		t.Fatal("mutating peer's description must say delegation needs approval")
+	}
+	got := InstalledPeers(caller.Dir())
+	want := []InstalledPeer{{"architect", true, true}, {"grid-expert", true, true}, {"pm", false, true}}
+	if len(got) != len(want) {
+		t.Fatalf("installed: %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("installed: %+v", got)
+		}
+	}
+	line := PeerLine(caller)
+	for _, w := range []string{"`architect` (consult/work)", "`pm` (work)", "--work"} {
+		if !strings.Contains(line, w) {
+			t.Fatalf("peer line missing %q: %s", w, line)
+		}
+	}
+}
+
+func TestPeers_WorkdirsWiredIntoCallerAdditionalDirs(t *testing.T) {
+	dir, caller := peerPool(t)
+	repo := t.TempDir()
+	mp := ManifestPath(dir, "architect")
+	if _, err := addManifestWorkdirs(mp, []string{repo}); err != nil {
+		t.Fatal(err)
+	}
+	// Add-only: a second --workdirs does not overwrite.
+	if note, _ := addManifestWorkdirs(mp, []string{"/elsewhere"}); !strings.Contains(note, "left unchanged") {
+		t.Fatalf("note: %q", note)
+	}
+	arch, _ := FindAgent(dir, "architect")
+	if len(arch.Workdirs) != 1 || arch.WorkdirPaths()[0] != filepath.Clean(repo) {
+		t.Fatalf("workdirs: %v", arch.Workdirs)
+	}
+	if miss := MissingAdditionalDirs(caller.Dir(), PeerWorkdirs(dir, caller.Dir())...); len(miss) != 1 {
+		t.Fatalf("workdir should be missing before onboard: %v", miss)
+	}
+	if !strings.Contains(strings.Join(planAgent(caller, time.Now()).Actions, "\n"), repo) {
+		t.Fatal("upgrade plan must preview the workdir grant")
+	}
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if miss := MissingAdditionalDirs(caller.Dir(), dir, repo); len(miss) != 0 {
+		t.Fatalf("not wired: %v", miss)
+	}
+	// The agent's own workdirs are not granted to itself through this path.
+	if PeerWorkdirs(dir, arch.Dir()) != nil {
+		t.Fatal("an agent is not its own peer")
 	}
 }

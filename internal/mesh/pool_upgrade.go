@@ -146,8 +146,10 @@ func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
 		// change or a template change makes them stale.
 		poolRoot := filepath.Dir(dir)
 		p.Actions = append(p.Actions, PlanPeerAgents(poolRoot, dir).Actions()...)
-		if IsPool(poolRoot) && !PoolAccessWired(poolRoot, dir) {
-			p.Actions = append(p.Actions, "add the pool root to .claude/settings.local.json additionalDirectories (in-session peers)")
+		if IsPool(poolRoot) {
+			if miss := MissingAdditionalDirs(dir, append([]string{poolRoot}, PeerWorkdirs(poolRoot, dir)...)...); len(miss) > 0 {
+				p.Actions = append(p.Actions, "add "+strings.Join(miss, ", ")+" to .claude/settings.local.json additionalDirectories (in-session peers)")
+			}
 		}
 	}
 

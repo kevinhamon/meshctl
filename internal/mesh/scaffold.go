@@ -24,6 +24,7 @@ type AgentSpec struct {
 	Badge        Badge
 	Model        string
 	Repo         string
+	Workdirs     []string // local repo paths writable in delegated work (ADR-0063)
 	Harness      string // claude | opencode (ADR-0032); empty ⇒ claude
 	// HarnessVersion pins the opencode major (1|2) to wire for; 0 ⇒ the
 	// installed binary's. Not persisted: the installed binary is the truth at
@@ -240,6 +241,15 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 	// 1. Manifest — infer where possible, never overwrite.
 	if fileExists(mp) {
 		res.Notes = append(res.Notes, "agent.yaml present — left unchanged")
+		// --workdirs on an existing manifest is add-only: appended when the
+		// field is absent.
+		if len(spec.Workdirs) > 0 {
+			note, err := addManifestWorkdirs(mp, spec.Workdirs)
+			if err != nil {
+				return nil, err
+			}
+			res.Notes = append(res.Notes, note)
+		}
 	} else {
 		if spec.Title == "" {
 			spec.Title = inferTitle(string(claudeBody), name)
@@ -486,14 +496,42 @@ func writeManifest(dir string, spec AgentSpec) error {
 	if spec.Repo != "" {
 		fmt.Fprintf(&b, "repo: %s\n", spec.Repo)
 	}
+	if len(spec.Workdirs) > 0 {
+		fmt.Fprintf(&b, "workdirs: [%s]\n", yamlFlowList(spec.Workdirs))
+	}
 	return os.WriteFile(filepath.Join(dir, ManifestName), []byte(b.String()), 0o644)
+}
+
+// addManifestWorkdirs appends a workdirs: line to an existing manifest that
+// has none. A manifest that already declares workdirs is left alone.
+func addManifestWorkdirs(mp string, dirs []string) (string, error) {
+	a, err := LoadAgent(mp)
+	if err != nil {
+		return "", err
+	}
+	if len(a.Workdirs) > 0 {
+		return "agent.yaml already declares workdirs — left unchanged (edit it by hand)", nil
+	}
+	b, err := os.ReadFile(mp)
+	if err != nil {
+		return "", err
+	}
+	s := string(b)
+	if s != "" && !strings.HasSuffix(s, "\n") {
+		s += "\n"
+	}
+	s += fmt.Sprintf("workdirs: [%s]\n", yamlFlowList(dirs))
+	if err := os.WriteFile(mp, []byte(s), 0o644); err != nil {
+		return "", err
+	}
+	return "added workdirs to agent.yaml: " + strings.Join(dirs, ", "), nil
 }
 
 func specFromAgent(a *Agent) AgentSpec {
 	return AgentSpec{
 		Name: a.Name, Title: a.Title, Role: a.Role, Owns: a.Owns, Domains: a.Domains,
 		Accepts: a.Accepts, Dispatchable: a.IsDispatchable(), Mutates: a.Mutates,
-		Badge: a.Badge, Model: a.Model, Repo: a.Repo, Harness: a.Harness,
+		Badge: a.Badge, Model: a.Model, Repo: a.Repo, Workdirs: a.Workdirs, Harness: a.Harness,
 	}
 }
 

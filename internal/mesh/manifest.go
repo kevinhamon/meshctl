@@ -42,6 +42,9 @@ type Agent struct {
 	Badge        Badge    `yaml:"badge"`
 	Model        string   `yaml:"model,omitempty"`
 	Repo         string   `yaml:"repo,omitempty"`
+	// Workdirs are local repo paths (~ allowed) this agent may write when it
+	// does delegated work in a hub session (ADR-0063), besides its workspace.
+	Workdirs []string `yaml:"workdirs,omitempty"`
 	// Harness is the coding-agent harness this workspace runs under (claude |
 	// opencode). Determines how hooks/skills are wired (ADR-0032). Empty ⇒ claude.
 	Harness string `yaml:"harness,omitempty"`
@@ -71,6 +74,37 @@ func (a *Agent) IsDispatchable() bool {
 		return false
 	}
 	return a.Dispatchable != nil && *a.Dispatchable
+}
+
+// IsWorkDelegable reports whether a hub session may delegate write-capable
+// work to this agent in-session (ADR-0063): any dispatchable agent, and any
+// state-mutating one (those only with the human's per-delegation approval).
+// An agent that is neither stays send-only.
+func (a *Agent) IsWorkDelegable() bool {
+	return len(a.Mutates) > 0 || a.IsDispatchable()
+}
+
+// WorkdirPaths returns Workdirs with ~ expanded and made absolute; entries
+// that cannot be resolved are dropped.
+func (a *Agent) WorkdirPaths() []string {
+	var out []string
+	for _, d := range a.Workdirs {
+		d = strings.TrimSpace(d)
+		if d == "" {
+			continue
+		}
+		if d == "~" || strings.HasPrefix(d, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				continue
+			}
+			d = filepath.Join(home, strings.TrimPrefix(d, "~"))
+		}
+		if abs, err := filepath.Abs(d); err == nil {
+			out = append(out, filepath.Clean(abs))
+		}
+	}
+	return out
 }
 
 // Accepts reports whether this inbox handles the given request type.

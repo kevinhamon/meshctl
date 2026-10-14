@@ -50,15 +50,57 @@ func PeerAgentFile(callerDir, peer string) string {
 // PeerAgentName is the `subagent_type` a caller passes to the Agent tool.
 func PeerAgentName(peer string) string { return PeerAgentPrefix + peer }
 
-// RenderPeerAgent renders the subagent definition for `peer` as installed into
-// `caller`'s workspace.
+// PeerWorkSuffix marks the write-capable definition a hub session delegates
+// owned work to (ADR-0063): `mesh-<peer>-work`.
+const PeerWorkSuffix = "-work"
+
+// PeerWorkAgentFile is the path of a peer's delegated-work definition.
+func PeerWorkAgentFile(callerDir, peer string) string {
+	return filepath.Join(callerDir, ".claude", "agents", PeerAgentPrefix+peer+PeerWorkSuffix+".md")
+}
+
+// PeerWorkAgentName is the work-mode `subagent_type`.
+func PeerWorkAgentName(peer string) string { return PeerAgentPrefix + peer + PeerWorkSuffix }
+
+// peerWorkHookFlag is how a rendered definition tells the hook it is the
+// work-mode one; also how an installed file's mode is read back without
+// guessing from a name (an agent may itself be called "<x>-work").
+const peerWorkHookFlag = "--in-session --work"
+
+// RenderPeerAgent renders the read-only consult definition for `peer` as
+// installed into `caller`'s workspace.
 func RenderPeerAgent(caller string, peer *Agent) (string, error) {
-	tpl, err := templatesFS.ReadFile("templates/claude/mesh-peer.md")
+	return renderPeer(caller, peer, false)
+}
+
+// RenderPeerWorkAgent renders the write-capable delegated-work definition
+// (ADR-0063). The peer edits and commits in its own workspace and declared
+// workdirs; the in-session work gate confines the writes, not this list.
+func RenderPeerWorkAgent(caller string, peer *Agent) (string, error) {
+	return renderPeer(caller, peer, true)
+}
+
+func renderPeer(caller string, peer *Agent, work bool) (string, error) {
+	name, tplPath, flags := PeerAgentName(peer.Name), "templates/claude/mesh-peer.md", "--in-session"
+	// No Agent tool in either mode: a peer cannot spawn subagents (depth
+	// guard). Bash is scoped by the in-session gate, not by this list (the
+	// `tools` field takes tool names only).
+	// Consult: no Write/Edit — it answers through `meshctl inbox respond`.
+	tools := "Read, Grep, Glob, Bash"
+	if work {
+		name, tplPath, flags = PeerWorkAgentName(peer.Name), "templates/claude/mesh-peer-work.md", peerWorkHookFlag
+		tools = "Read, Grep, Glob, Bash, Edit, Write, MultiEdit"
+	}
+	tpl, err := templatesFS.ReadFile(tplPath)
 	if err != nil {
 		return "", err
 	}
+	workdirs := "none declared"
+	if len(peer.Workdirs) > 0 {
+		workdirs = "`" + strings.Join(peer.Workdirs, "`, `") + "`"
+	}
 	body := strings.NewReplacer("__PEER__", peer.Name, "__CALLER__", caller,
-		"__TITLE__", firstNonEmpty(peer.Title, peer.Name)).Replace(string(tpl))
+		"__TITLE__", firstNonEmpty(peer.Title, peer.Name), "__WORKDIRS__", workdirs).Replace(string(tpl))
 
 	model := strings.TrimSpace(peer.Model)
 	if model == "" || model == "default" {
@@ -66,18 +108,14 @@ func RenderPeerAgent(caller string, peer *Agent) (string, error) {
 	}
 	hook := func(sub string) map[string]any {
 		return map[string]any{"type": "command", "timeout": 10,
-			"command": fmt.Sprintf("meshctl hook %s --agent %s --in-session", sub, peer.Name)}
+			"command": fmt.Sprintf("meshctl hook %s --agent %s %s", sub, peer.Name, flags)}
 	}
 	fm := peerFrontmatter{
-		Name:        PeerAgentName(peer.Name),
-		Description: peerDescription(peer),
-		// No Agent tool: a consulted peer cannot spawn subagents (depth guard).
-		// No Write/Edit: it answers through `meshctl inbox respond`. Bash is
-		// scoped by the in-session gate, not by this list (the `tools` field
-		// takes tool names only).
-		Tools:      "Read, Grep, Glob, Bash",
-		Model:      model,
-		OmitClaude: true,
+		Name:        name,
+		Description: peerDescription(peer, work),
+		Tools:       tools,
+		Model:       model,
+		OmitClaude:  true,
 		Hooks: map[string]any{
 			"PreToolUse": []any{map[string]any{"matcher": peerGateMatcher, "hooks": []any{hook("pre-tool-use")}}},
 			"Stop":       []any{map[string]any{"hooks": []any{hook("session-end")}}},
@@ -92,7 +130,7 @@ func RenderPeerAgent(caller string, peer *Agent) (string, error) {
 
 // peerDescription is what makes the caller's model delegate correctly: title,
 // role, the request types this inbox accepts, and the one precondition.
-func peerDescription(a *Agent) string {
+func peerDescription(a *Agent, work bool) string {
 	var types []string
 	for _, x := range a.Accepts {
 		if x.Desc != "" {
@@ -109,32 +147,79 @@ func peerDescription(a *Agent) string {
 	if role != "" {
 		s += " — " + strings.TrimRight(role, ".")
 	}
+	if work {
+		s += ". Mesh peer `" + a.Name + "`, doing delegated work in-session (edits and commits in its own repos) for: " +
+			strings.Join(types, "; ") + ". Use ONLY after `meshctl ask " + a.Name +
+			" <type> \"...\" --in-session --work` printed a request id, and pass that id in the prompt."
+		if len(a.Mutates) > 0 {
+			s += " State-mutating (" + strings.Join(a.Mutates, ", ") + "): each delegation asks the human to approve."
+		}
+		return s
+	}
 	s += ". Mesh peer `" + a.Name + "`, consulted in-session for: " + strings.Join(types, "; ") +
-		". Use ONLY after `meshctl msg ask " + a.Name + " <type> \"...\" --in-session` printed a request id, and pass that id in the prompt."
+		". Use ONLY after `meshctl ask " + a.Name + " <type> \"...\" --in-session` printed a request id, and pass that id in the prompt."
 	return s
 }
 
-// InstalledPeers lists the peers with a managed in-session definition in a
-// caller workspace, sorted.
-func InstalledPeers(callerDir string) []string {
-	entries, _ := os.ReadDir(filepath.Join(callerDir, ".claude", "agents"))
-	var out []string
+// InstalledPeer is one peer with managed in-session definitions in a caller.
+type InstalledPeer struct {
+	Name          string
+	Consult, Work bool
+}
+
+// managedPeerDefs reads the meshctl-managed mesh-*.md files in a caller
+// workspace: definition stem (file name minus prefix and .md) → work mode.
+// The mode comes from the rendered hook flag, not the file name.
+func managedPeerDefs(callerDir string) map[string]bool {
+	dir := filepath.Join(callerDir, ".claude", "agents")
+	entries, _ := os.ReadDir(dir)
+	out := map[string]bool{}
 	for _, e := range entries {
 		n := e.Name()
 		if e.IsDir() || !strings.HasPrefix(n, PeerAgentPrefix) || !strings.HasSuffix(n, ".md") {
 			continue
 		}
-		if b, err := os.ReadFile(filepath.Join(callerDir, ".claude", "agents", n)); err == nil && strings.Contains(string(b), distillerAgentMarker) {
-			out = append(out, strings.TrimSuffix(strings.TrimPrefix(n, PeerAgentPrefix), ".md"))
+		b, err := os.ReadFile(filepath.Join(dir, n))
+		if err != nil || !strings.Contains(string(b), distillerAgentMarker) {
+			continue
+		}
+		out[strings.TrimSuffix(strings.TrimPrefix(n, PeerAgentPrefix), ".md")] = strings.Contains(string(b), peerWorkHookFlag)
+	}
+	return out
+}
+
+// InstalledPeers lists the peers with a managed in-session definition in a
+// caller workspace, sorted, with the modes each one is installed for.
+func InstalledPeers(callerDir string) []InstalledPeer {
+	by := map[string]*InstalledPeer{}
+	for stem, work := range managedPeerDefs(callerDir) {
+		name := stem
+		if work {
+			name = strings.TrimSuffix(stem, PeerWorkSuffix)
+		}
+		p := by[name]
+		if p == nil {
+			p = &InstalledPeer{Name: name}
+			by[name] = p
+		}
+		if work {
+			p.Work = true
+		} else {
+			p.Consult = true
 		}
 	}
-	sort.Strings(out)
+	out := make([]InstalledPeer, 0, len(by))
+	for _, p := range by {
+		out = append(out, *p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
 // PeerLine is the session-start sentence that tells a Claude Code agent which
-// peers it can consult in-session and how. Injected so existing agents learn
-// the verb without a CLAUDE.md edit. "" when the agent has no peer definitions.
+// peers it can consult or delegate to in-session and how. Injected so existing
+// agents learn the verb without a CLAUDE.md edit. "" when the agent has no
+// peer definitions.
 func PeerLine(a *Agent) string {
 	if a.HarnessName() != HarnessClaude {
 		return ""
@@ -143,10 +228,22 @@ func PeerLine(a *Agent) string {
 	if len(peers) == 0 {
 		return ""
 	}
-	return "# In-session peers\nAdvisory peers you can consult without leaving this session: `" +
-		strings.Join(peers, "`, `") + "`. Run `meshctl ask <peer> <type> \"…\" --in-session`, then make the " +
-		"Agent-tool call it prints (`subagent_type: " + PeerAgentPrefix + "<peer>`); read the answer with `meshctl sent`. " +
-		"Plain `meshctl ask` (headless, second process) still works; state-mutating peers stay `send`-only."
+	names := make([]string, len(peers))
+	for i, p := range peers {
+		var modes []string
+		if p.Consult {
+			modes = append(modes, "consult")
+		}
+		if p.Work {
+			modes = append(modes, "work")
+		}
+		names[i] = "`" + p.Name + "` (" + strings.Join(modes, "/") + ")"
+	}
+	return "# In-session peers\nPeers you can use without leaving this session: " + strings.Join(names, ", ") + ". " +
+		"Consult: `meshctl ask <peer> <type> \"…\" --in-session`. Work the peer owns (edits and commits in its own repos, " +
+		"its KB learns from it): add `--work`. Then make the Agent-tool call it prints (`subagent_type: " + PeerAgentPrefix +
+		"<peer>` or `" + PeerAgentPrefix + "<peer>" + PeerWorkSuffix + "`); read the outcome with `meshctl sent`. " +
+		"Plain `meshctl ask` (headless, second process) still works; delegating to a state-mutating peer asks the human first."
 }
 
 // PeerPlan is what ensurePeerAgents would do to one caller workspace.
@@ -170,7 +267,7 @@ func (p PeerPlan) Actions() []string {
 		out = append(out, "refresh in-session peer subagents: "+strings.Join(prefixed(p.Update), ", "))
 	}
 	if len(p.Remove) > 0 {
-		out = append(out, "remove in-session peer subagents (no longer dispatchable): "+strings.Join(prefixed(p.Remove), ", "))
+		out = append(out, "remove in-session peer subagents (no longer eligible): "+strings.Join(prefixed(p.Remove), ", "))
 	}
 	return out
 }
@@ -183,9 +280,42 @@ func prefixed(names []string) []string {
 	return out
 }
 
-// PlanPeerAgents compares the dispatchable peers of the pool with the managed
-// definitions in callerDir. The caller itself is never its own peer. Fail-soft:
-// an unreadable pool yields an empty plan.
+// wantedPeerDefs is the set of definitions a caller should hold: stem →
+// (peer, work mode). Consult for dispatchable peers, work for work-delegable
+// ones; a state-mutating peer gets the work definition only.
+func wantedPeerDefs(agents []*Agent, caller string) map[string]peerDef {
+	want := map[string]peerDef{}
+	for _, a := range agents {
+		if a.Name == caller {
+			continue
+		}
+		if a.IsDispatchable() {
+			want[a.Name] = peerDef{a, false}
+		}
+		if a.IsWorkDelegable() {
+			want[a.Name+PeerWorkSuffix] = peerDef{a, true}
+		}
+	}
+	return want
+}
+
+type peerDef struct {
+	peer *Agent
+	work bool
+}
+
+func (d peerDef) render(caller string) (string, error) {
+	return renderPeer(caller, d.peer, d.work)
+}
+
+func peerDefFile(callerDir, stem string) string {
+	return filepath.Join(callerDir, ".claude", "agents", PeerAgentPrefix+stem+".md")
+}
+
+// PlanPeerAgents compares the peers of the pool with the managed definitions
+// in callerDir. Entries are definition stems (`architect`, `architect-work`).
+// The caller itself is never its own peer. Fail-soft: an unreadable pool
+// yields an empty plan.
 func PlanPeerAgents(poolRoot, callerDir string) PeerPlan {
 	var plan PeerPlan
 	caller := filepath.Base(callerDir)
@@ -193,45 +323,32 @@ func PlanPeerAgents(poolRoot, callerDir string) PeerPlan {
 	if err != nil {
 		return plan
 	}
-	want := map[string]bool{}
-	for _, a := range agents {
-		if a.Name == caller || !a.IsDispatchable() {
-			continue
-		}
-		want[a.Name] = true
-		out := PeerAgentFile(callerDir, a.Name)
-		cur, err := os.ReadFile(out)
+	want := wantedPeerDefs(agents, caller)
+	for stem, d := range want {
+		cur, err := os.ReadFile(peerDefFile(callerDir, stem))
 		if err != nil {
-			plan.Write = append(plan.Write, a.Name)
+			plan.Write = append(plan.Write, stem)
 			continue
 		}
 		if !strings.Contains(string(cur), distillerAgentMarker) {
-			plan.Hand = append(plan.Hand, a.Name)
+			plan.Hand = append(plan.Hand, stem)
 			continue
 		}
-		body, err := RenderPeerAgent(caller, a)
+		body, err := d.render(caller)
 		if err != nil || string(cur) != body {
-			plan.Update = append(plan.Update, a.Name)
+			plan.Update = append(plan.Update, stem)
 		}
 	}
-	// Managed definitions for peers that are gone or no longer dispatchable.
-	entries, _ := os.ReadDir(filepath.Join(callerDir, ".claude", "agents"))
-	for _, e := range entries {
-		n := e.Name()
-		if e.IsDir() || !strings.HasPrefix(n, PeerAgentPrefix) || !strings.HasSuffix(n, ".md") {
-			continue
-		}
-		peer := strings.TrimSuffix(strings.TrimPrefix(n, PeerAgentPrefix), ".md")
-		if want[peer] {
-			continue
-		}
-		if b, err := os.ReadFile(filepath.Join(callerDir, ".claude", "agents", n)); err == nil && strings.Contains(string(b), distillerAgentMarker) {
-			plan.Remove = append(plan.Remove, peer)
+	// Managed definitions for peers that are gone or no longer eligible.
+	for stem := range managedPeerDefs(callerDir) {
+		if _, ok := want[stem]; !ok {
+			plan.Remove = append(plan.Remove, stem)
 		}
 	}
 	sort.Strings(plan.Write)
 	sort.Strings(plan.Update)
 	sort.Strings(plan.Remove)
+	sort.Strings(plan.Hand)
 	return plan
 }
 
@@ -243,17 +360,18 @@ func ensurePeerAgents(poolRoot, callerDir string) ([]string, error) {
 		return nil, nil
 	}
 	caller := filepath.Base(callerDir)
-	write := func(names []string) error {
-		for _, n := range names {
-			a, err := FindAgent(poolRoot, n)
+	agents, _, err := ScanAgents(poolRoot)
+	if err != nil {
+		return nil, err
+	}
+	want := wantedPeerDefs(agents, caller)
+	write := func(stems []string) error {
+		for _, stem := range stems {
+			body, err := want[stem].render(caller)
 			if err != nil {
 				return err
 			}
-			body, err := RenderPeerAgent(caller, a)
-			if err != nil {
-				return err
-			}
-			out := PeerAgentFile(callerDir, n)
+			out := peerDefFile(callerDir, stem)
 			if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 				return err
 			}
@@ -269,21 +387,21 @@ func ensurePeerAgents(poolRoot, callerDir string) ([]string, error) {
 	if err := write(plan.Update); err != nil {
 		return nil, err
 	}
-	for _, n := range plan.Remove {
-		if err := os.Remove(PeerAgentFile(callerDir, n)); err != nil && !os.IsNotExist(err) {
+	for _, stem := range plan.Remove {
+		if err := os.Remove(peerDefFile(callerDir, stem)); err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
 	}
 	var notes []string
 	if len(plan.Write) > 0 {
-		notes = append(notes, fmt.Sprintf("wrote %d in-session peer subagent(s) (.claude/agents/%s<peer>.md): %s",
-			len(plan.Write), PeerAgentPrefix, strings.Join(plan.Write, ", ")))
+		notes = append(notes, fmt.Sprintf("wrote %d in-session peer subagent(s) (.claude/agents/%s<peer>[%s].md): %s",
+			len(plan.Write), PeerAgentPrefix, PeerWorkSuffix, strings.Join(plan.Write, ", ")))
 	}
 	if len(plan.Update) > 0 {
 		notes = append(notes, fmt.Sprintf("refreshed %d in-session peer subagent(s): %s", len(plan.Update), strings.Join(plan.Update, ", ")))
 	}
 	if len(plan.Remove) > 0 {
-		notes = append(notes, "removed in-session peer subagent(s) no longer dispatchable: "+strings.Join(plan.Remove, ", "))
+		notes = append(notes, "removed in-session peer subagent(s) no longer eligible: "+strings.Join(plan.Remove, ", "))
 	}
 	return notes, nil
 }
@@ -299,29 +417,67 @@ const localSettingsFile = "settings.local.json"
 // PoolAccessWired reports whether the caller's settings.local.json already
 // lists the pool root under permissions.additionalDirectories.
 func PoolAccessWired(poolRoot, callerDir string) bool {
-	root := readJSONObject(filepath.Join(callerDir, ".claude", localSettingsFile))
-	perms, _ := root["permissions"].(map[string]any)
-	dirs, _ := perms["additionalDirectories"].([]any)
-	for _, d := range dirs {
-		if s, ok := d.(string); ok && samePath(s, poolRoot) {
-			return true
-		}
-	}
-	return false
+	return len(MissingAdditionalDirs(callerDir, poolRoot)) == 0
 }
 
-// ensurePoolAccess adds the pool root to settings.local.json
+// PeerWorkdirs is every declared workdir of the caller's work-delegable peers:
+// the repos a delegated peer may write from the caller's session (ADR-0063).
+func PeerWorkdirs(poolRoot, callerDir string) []string {
+	agents, _, err := ScanAgents(poolRoot)
+	if err != nil {
+		return nil
+	}
+	caller := filepath.Base(callerDir)
+	var out []string
+	for _, a := range agents {
+		if a.Name != caller && a.IsWorkDelegable() {
+			out = append(out, a.WorkdirPaths()...)
+		}
+	}
+	return out
+}
+
+// MissingAdditionalDirs returns the dirs not yet in the caller's
+// settings.local.json permissions.additionalDirectories.
+func MissingAdditionalDirs(callerDir string, dirs ...string) []string {
+	root := readJSONObject(filepath.Join(callerDir, ".claude", localSettingsFile))
+	perms, _ := root["permissions"].(map[string]any)
+	have, _ := perms["additionalDirectories"].([]any)
+	var missing []string
+	for _, d := range dirs {
+		found := false
+		for _, h := range have {
+			if s, ok := h.(string); ok && samePath(s, d) {
+				found = true
+				break
+			}
+		}
+		for _, m := range missing {
+			found = found || samePath(m, d)
+		}
+		if !found {
+			missing = append(missing, d)
+		}
+	}
+	return missing
+}
+
+// ensureAdditionalDirs adds dirs to settings.local.json
 // permissions.additionalDirectories (add-only, idempotent) and makes sure the
-// file is git-ignored. Returns a note, or "" when nothing changed.
-func ensurePoolAccess(poolRoot, callerDir string) (string, error) {
-	if PoolAccessWired(poolRoot, callerDir) {
+// file is git-ignored. The pool root lets an in-session peer read its own
+// workspace; a peer's workdirs let it do delegated work in them. Returns a
+// note, or "" when nothing changed.
+func ensureAdditionalDirs(callerDir string, dirs ...string) (string, error) {
+	missing := MissingAdditionalDirs(callerDir, dirs...)
+	if len(missing) == 0 {
 		return "", nil
 	}
 	path := filepath.Join(callerDir, ".claude", localSettingsFile)
 	root := readJSONObject(path)
 	if root == nil {
 		if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) > 0 {
-			return ".claude/" + localSettingsFile + " is not valid JSON — left unchanged (add the pool root to permissions.additionalDirectories by hand)", nil
+			return ".claude/" + localSettingsFile + " is not valid JSON — left unchanged (add " +
+				strings.Join(missing, ", ") + " to permissions.additionalDirectories by hand)", nil
 		}
 		root = map[string]any{}
 	}
@@ -330,12 +486,15 @@ func ensurePoolAccess(poolRoot, callerDir string) (string, error) {
 		perms = map[string]any{}
 		root["permissions"] = perms
 	}
-	dirs, _ := perms["additionalDirectories"].([]any)
-	abs, err := filepath.Abs(poolRoot)
-	if err != nil {
-		abs = poolRoot
+	have, _ := perms["additionalDirectories"].([]any)
+	for _, d := range missing {
+		abs, err := filepath.Abs(d)
+		if err != nil {
+			abs = d
+		}
+		have = append(have, abs)
 	}
-	perms["additionalDirectories"] = append(dirs, abs)
+	perms["additionalDirectories"] = have
 	b, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return "", err
@@ -347,7 +506,14 @@ func ensurePoolAccess(poolRoot, callerDir string) (string, error) {
 		return "", err
 	}
 	_ = ensureGitignoreLine(callerDir, ".claude/"+localSettingsFile)
-	return "added the pool root to .claude/" + localSettingsFile + " additionalDirectories (in-session peers read their own workspaces; takes effect on the next session)", nil
+	return "added " + strings.Join(missing, ", ") + " to .claude/" + localSettingsFile +
+		" additionalDirectories (in-session peers reach their workspaces and workdirs; takes effect on the next session)", nil
+}
+
+// ensurePoolAccess wires the pool root plus every work-delegable peer's
+// workdirs into the caller's additional directories.
+func ensurePoolAccess(poolRoot, callerDir string) (string, error) {
+	return ensureAdditionalDirs(callerDir, append([]string{poolRoot}, PeerWorkdirs(poolRoot, callerDir)...)...)
 }
 
 // readJSONObject parses a JSON object file; nil when absent or invalid.

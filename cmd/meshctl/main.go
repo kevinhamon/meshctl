@@ -737,7 +737,7 @@ func poolForgetCmd() *cobra.Command {
 
 func newCmd() *cobra.Command {
 	var (
-		title, model, rgb, repo string
+		title, model, rgb, repo, workdirs string
 		badge, role             string
 		owns, domains, accepts  string
 		mutates                 string
@@ -771,7 +771,7 @@ func newCmd() *cobra.Command {
 				Name: name, Title: title, Role: role,
 				Owns: splitCSV(owns), Domains: splitCSV(domains),
 				Accepts: parseAccepts(accepts), Dispatchable: dispatchable,
-				Mutates: splitCSV(mutates), Model: model, Repo: repo, Harness: harness, HarnessVersion: ocVersion, Bare: bare,
+				Mutates: splitCSV(mutates), Model: model, Repo: repo, Workdirs: splitCSV(workdirs), Harness: harness, HarnessVersion: ocVersion, Bare: bare,
 				Badge: mesh.Badge{Label: badge, R: r, G: g, B: b},
 			}
 			dest, err := mesh.New(dir, spec, mesh.ScaffoldOptions{ITerm: iterm})
@@ -797,6 +797,7 @@ func newCmd() *cobra.Command {
 	f.StringVar(&mutates, "mutates", "", "external systems written (tracker,code,prod); non-empty ⇒ not dispatchable")
 	f.BoolVar(&dispatchable, "dispatchable", false, "may `meshctl ask` run it headlessly (ignored if mutates set)")
 	f.StringVar(&repo, "repo", "", "git remote URL")
+	f.StringVar(&workdirs, "workdirs", "", "comma-separated local repo paths writable in delegated hub-session work (~ ok)")
 	f.StringVar(&harness, "harness", "", "coding-agent harness: claude|opencode (default: claude for new; autodetect for onboard)")
 	f.IntVar(&ocVersion, "opencode-version", 0, "opencode major to wire for: 1|2 (default: the installed opencode's; 2 if none)")
 	f.BoolVar(&iterm, "iterm2", false, "also write a macOS iTerm2 dynamic profile (.iterm2/) for window identity")
@@ -808,7 +809,7 @@ func newCmd() *cobra.Command {
 
 func onboardCmd() *cobra.Command {
 	var (
-		title, model, rgb, repo string
+		title, model, rgb, repo, workdirs string
 		badge, role             string
 		owns, domains, accepts  string
 		mutates                 string
@@ -837,7 +838,7 @@ func onboardCmd() *cobra.Command {
 				Title: title, Role: role,
 				Owns: splitCSV(owns), Domains: splitCSV(domains),
 				Accepts: parseAccepts(accepts), Dispatchable: dispatchable,
-				Mutates: splitCSV(mutates), Model: model, Repo: repo, Harness: harness,
+				Mutates: splitCSV(mutates), Model: model, Repo: repo, Workdirs: splitCSV(workdirs), Harness: harness,
 				HarnessVersion: ocVersion,
 			}
 			if badge != "" || cmd.Flags().Changed("rgb") {
@@ -884,6 +885,7 @@ func onboardCmd() *cobra.Command {
 	f.StringVar(&mutates, "mutates", "", "external systems written; non-empty ⇒ not dispatchable")
 	f.BoolVar(&dispatchable, "dispatchable", false, "may be dispatched headlessly (ignored if mutates set)")
 	f.StringVar(&repo, "repo", "", "git remote URL")
+	f.StringVar(&workdirs, "workdirs", "", "comma-separated local repo paths writable in delegated hub-session work (~ ok)")
 	f.StringVar(&harness, "harness", "", "coding-agent harness: claude|opencode (default: claude for new; autodetect for onboard)")
 	f.IntVar(&ocVersion, "opencode-version", 0, "opencode major to wire for: 1|2 (default: the installed opencode's; 2 if none)")
 	f.BoolVar(&iterm, "iterm2", false, "also write a macOS iTerm2 dynamic profile (.iterm2/) if missing")
