@@ -3,6 +3,7 @@ package mesh
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -69,6 +70,32 @@ func TestAgentsDir_DetectsMarker(t *testing.T) {
 	wantR, _ := filepath.EvalSymlinks(root)
 	if gotR != wantR {
 		t.Fatalf("AgentsDir=%s, want %s", gotR, wantR)
+	}
+}
+
+// Outside any pool, AgentsDir must error — never fall back to some default
+// pool (formerly ~/agents), which made agents act on another pool's roster.
+func TestAgentsDir_NoPoolIsAnError(t *testing.T) {
+	t.Setenv("AGENTS_DIR", "")
+	t.Chdir(t.TempDir())
+	if got, err := AgentsDir(); err == nil {
+		t.Fatalf("outside a pool AgentsDir must error, got %q", got)
+	} else if !strings.Contains(err.Error(), "not inside a mesh pool") {
+		t.Fatalf("unhelpful error: %v", err)
+	}
+}
+
+// Nothing a pool ships may assume the pool lives at ~/agents.
+func TestTemplates_ArePoolNeutral(t *testing.T) {
+	if strings.Contains(commsSection, "~/agents") {
+		t.Fatal("comms section hardcodes ~/agents")
+	}
+	b, err := templatesFS.ReadFile("templates/doctrine/" + CommsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "~/agents") {
+		t.Fatal("agent-comms doctrine hardcodes ~/agents")
 	}
 }
 

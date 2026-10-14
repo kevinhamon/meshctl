@@ -1,6 +1,6 @@
 # Agent Communication Protocol
 
-Canonical reference for how an agent mesh coordinates. Agent workspaces under `~/agents/*` (or wherever the pool lives) are independent — there is no direct call between them. Coordination is **file-based handoff on the shared filesystem**, and the **human triggers each agent**.
+Canonical reference for how an agent mesh coordinates. Agent workspaces in a pool (sibling directories of the pool root, which holds `.agentmesh/`) are independent — there is no direct call between them. Coordination is **file-based handoff on the shared filesystem**, and the **human triggers each agent**.
 
 > The roster used in the examples below (architect, pm, developer, qa) is **illustrative** — a mesh defines whatever agents its work needs. The protocol is what's normative; the specific agents are not.
 

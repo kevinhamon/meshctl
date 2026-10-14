@@ -33,15 +33,20 @@ func TestHook_SessionStart_PresenceAndHandoff(t *testing.T) {
 	}
 }
 
-func TestHook_SessionStart_NoHandoffNoOutput(t *testing.T) {
+func TestHook_SessionStart_NoHandoffOnlyIdentity(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)
 	// Give it a remote so the ADR-0039 repo-hygiene nag is silent — isolating the
-	// "no handoff ⇒ no injection" behavior under test.
+	// "no handoff ⇒ only the identity anchor" behavior under test.
 	_ = exec.Command("git", "-C", a.Dir(), "remote", "add", "origin", "https://example.test/x.git").Run()
 	ctx := HookSessionStart(dir, HookPayload{Cwd: a.Dir(), SessionID: "s"}, 1, time.Now())
-	if ctx != "" {
-		t.Fatalf("expected empty context for a fresh agent with no handoff, got %q", ctx)
+	if ctx != IdentityLine(dir, a) {
+		t.Fatalf("expected only the identity line for a fresh agent with no handoff, got %q", ctx)
+	}
+	for _, want := range []string{"`architect`", dir, "other pools on this machine are not yours"} {
+		if !strings.Contains(ctx, want) {
+			t.Fatalf("identity line missing %q: %q", want, ctx)
+		}
 	}
 }
 

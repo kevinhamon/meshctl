@@ -2,6 +2,7 @@ package mesh
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -549,7 +550,7 @@ const commsSection = `
 
 ## Agent Communication (intake)
 
-Bidirectional file-based handoff — canonical protocol: ` + "`.agentmesh/doctrine/agent-comms.md`" + `. Inbox: ` + "`~/agents/%s/intake/`" + `. The roster is computed on demand — run ` + "`meshctl agent list`" + ` (do not maintain a peer list here).
+Bidirectional file-based handoff — canonical protocol: your pool's ` + "`../.agentmesh/doctrine/agent-comms.md`" + `. Inbox: ` + "`intake/`" + ` (in this workspace). The roster is computed on demand — run ` + "`meshctl agent list`" + ` (do not maintain a peer list here).
 
 - **Inbound:** at session start / on "check intake", run ` + "`meshctl inbox next --claim`" + ` (atomic claim) or scan ` + "`intake/*.md`" + ` for ` + "`status: pending`" + `; process by ` + "`type`" + `, then write the outcome back with ` + "`meshctl inbox respond <id> --status answered|filed|needs-info|needs-human --response \"…\"`" + ` (intake files are meshctl-owned — never hand-edit them). **Not yours?** ` + "`meshctl inbox decline <id> --reason \"…\" --redirect <owner>`" + ` — don't half-answer out-of-domain work.
 - **Read-back:** ` + "`meshctl sent`" + ` lists requests you sent that came back (answered / declined / needs-info); read each, act, then ` + "`meshctl sent ack <id>`" + `. The session start surfaces them automatically.
@@ -563,7 +564,7 @@ func appendCommsSection(claudePath, name string) error {
 		return err
 	}
 	defer f.Close()
-	_, err = fmt.Fprintf(f, commsSection, name)
+	_, err = io.WriteString(f, commsSection)
 	return err
 }
 

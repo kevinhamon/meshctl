@@ -77,6 +77,8 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 	handoff = strings.TrimSpace(handoff)
 
 	var b strings.Builder
+	b.WriteString(IdentityLine(agentsDir, a))
+	b.WriteString("\n\n")
 	if warn != "" {
 		b.WriteString(warn)
 		b.WriteString("\n\n")
@@ -103,6 +105,19 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 		b.WriteString(handoff)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// IdentityLine anchors an agent to its own pool. Several pools can share a
+// machine, and an agent left to infer which one it belongs to from paths and
+// global config can pick the wrong one; state it once, at session start.
+func IdentityLine(poolRoot string, a *Agent) string {
+	pool := LoadPoolConfig(poolRoot).Name
+	if pool == "" {
+		pool = filepath.Base(poolRoot)
+	}
+	return fmt.Sprintf("# Mesh identity\nYou are `%s` in mesh pool `%s` (root `%s`; your workspace `%s`). "+
+		"Your peers are exactly the agents `meshctl agent list` shows; other pools on this machine are not yours. "+
+		"Run meshctl from your workspace — it resolves this pool from there.", a.Name, pool, poolRoot, a.Dir())
 }
 
 // HookSessionEnd captures an extractive session-record (ADR-0033) then

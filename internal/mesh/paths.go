@@ -50,10 +50,11 @@ const (
 //  2. The nearest ancestor of the current working directory that contains a
 //     `agent-mesh/agent-comms.md` (i.e. we are inside the mesh or a sibling
 //     agent workspace) — that ancestor is the container.
-//  3. ~/agents as the last-resort default.
 //
-// Relocatable behavior without hardcoding a path,
-// and works for a $PATH install run from any agent workspace.
+// There is deliberately no default pool. A machine can hold several pools, and
+// silently falling back to one (formerly ~/agents) made a command run from the
+// wrong directory act on another pool — an agent would see a foreign roster
+// and lose track of which pool it belongs to. Outside a pool this errors.
 func AgentsDir() (string, error) {
 	if v := os.Getenv("AGENTS_DIR"); v != "" {
 		abs, err := filepath.Abs(v)
@@ -81,11 +82,9 @@ func AgentsDir() (string, error) {
 		}
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve $AGENTS_DIR, mesh ancestor, or home dir: %w", err)
-	}
-	return filepath.Join(home, "agents"), nil
+	cwd, _ := os.Getwd()
+	return "", fmt.Errorf("not inside a mesh pool: no %s/ in %s or any parent — run meshctl from a pool "+
+		"or agent workspace, or set $AGENTS_DIR (`meshctl pool list` shows this machine's pools)", PoolMarkerDir, cwd)
 }
 
 // AgentDir returns the workspace directory for a named agent.
