@@ -47,6 +47,14 @@ doctor` warns `playbooks/`/`experience/` are empty. Quality over volume.
    Drop the rest. `meshctl kb finish` merges + auto-rebuilds the memory index.
 4. **Leave `candidates/` clean** — a holding area, not a graveyard.
 
+**Off the main thread.** Steps 1–2 are slow and mechanical, so they run in the
+background: on Claude Code, spawn the scaffolded `distiller` subagent
+(`.claude/agents/distiller.md`) with `run_in_background: true` and relay only the
+DECISION items it returns; on opencode the session-end hook runs the same procedure
+(`../.agentmesh/doctrine/distiller.md`). The per-prompt hook nudges you once per
+session at a work boundary (a wind-down phrase, or ~8 exchanges in) — act on it then.
+The distiller drafts candidates only; **you** do step 3.
+
 Guardrails: **review gate** (a human/the owning agent approves before a candidate
 becomes truth) · **KB is authoritative, claude-mem is never edited** (distill *from*
 it) · **all writes via `kb begin`/`kb finish`** (git-tracked, recoverable).

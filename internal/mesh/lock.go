@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,9 +11,9 @@ import (
 )
 
 // Dispatch guard tunables, env-overridable.
-func hourlyMax() int      { return envInt("AGENT_DISPATCH_HOURLY_MAX", 12) }
-func staleSec() int       { return envInt("AGENT_DISPATCH_STALE_SEC", 900) }
-func timeoutSec() int     { return envInt("AGENT_DISPATCH_TIMEOUT_SEC", 420) }
+func hourlyMax() int  { return envInt("AGENT_DISPATCH_HOURLY_MAX", 12) }
+func staleSec() int   { return envInt("AGENT_DISPATCH_STALE_SEC", 900) }
+func timeoutSec() int { return envInt("AGENT_DISPATCH_TIMEOUT_SEC", 420) }
 
 // lockWaitSec bounds how long a caller queues behind an in-flight dispatch
 // before giving up. Most dispatches finish in seconds, so this only has to
@@ -22,6 +23,7 @@ func lockWaitSec() int { return envInt("AGENT_DISPATCH_LOCK_WAIT_SEC", 120) }
 
 // var, not const, so tests can poll faster than a real caller needs to.
 var lockPollInterval = 2 * time.Second
+
 func dispatchModel() string { return os.Getenv("AGENT_DISPATCH_MODEL") }
 
 func envInt(key string, def int) int {
@@ -79,8 +81,12 @@ func hourlyCount(agentsDir string, now time.Time) (int, error) {
 			kept = append(kept, fields[0])
 		}
 	}
-	// Rewrite the trimmed window back (mv of the awk output).
-	_ = os.WriteFile(countPath, []byte(strings.Join(kept, "\n")+"\n"), 0o644)
+	// Rewrite the trimmed window back, atomically, so a concurrent reader never
+	// sees a half-written file. Only rewrite when something was trimmed: a
+	// rewrite races with a concurrent append, and most calls trim nothing.
+	if len(kept) != len(strings.Fields(string(b))) {
+		_ = writeFileAtomic(countPath, []byte(strings.Join(kept, "\n")+"\n"), 0o644)
+	}
 	return len(kept), nil
 }
 
@@ -94,6 +100,34 @@ func recordDispatch(agentsDir string, now time.Time) error {
 	defer f.Close()
 	_, err = fmt.Fprintf(f, "%d\n", now.Unix())
 	return err
+}
+
+// unrecordDispatch removes one entry stamped `now` from the count file: the
+// cap is charged BEFORE the lock wait (so concurrent callers cannot all pass
+// at max-1), and refunded when the dispatch never ran (BUSY, interrupted).
+func unrecordDispatch(agentsDir string, now time.Time) {
+	countPath := filepath.Join(agentsDir, DispatchCount)
+	b, err := os.ReadFile(countPath)
+	if err != nil {
+		return
+	}
+	want := fmt.Sprintf("%d", now.Unix())
+	var kept []string
+	removed := false
+	for _, ln := range strings.Split(string(b), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		if !removed && strings.Fields(ln)[0] == want {
+			removed = true
+			continue
+		}
+		kept = append(kept, ln)
+	}
+	if removed {
+		_ = writeFileAtomic(countPath, []byte(strings.Join(kept, "\n")+"\n"), 0o644)
+	}
 }
 
 // singleFlightLock is the mkdir-based dispatch lock. It is atomic on POSIX and
@@ -117,7 +151,7 @@ type singleFlightLock struct {
 // worst possible outcome: work proceeds unreviewed, and the operator is told
 // the peer could not be reached. Queuing removes the judgement call entirely
 // for the common case, which is a dispatch that ends within seconds.
-func acquireDispatchLock(agentsDir, caller, target string, pid int, now time.Time) (*singleFlightLock, error) {
+func acquireDispatchLock(ctx context.Context, agentsDir, caller, target string, pid int, now time.Time) (*singleFlightLock, error) {
 	lockPath := filepath.Join(agentsDir, DispatchLock)
 	l := &singleFlightLock{path: lockPath}
 	_ = os.MkdirAll(filepath.Dir(lockPath), 0o755) // ensure .agentmesh/ exists (ADR-0038)
@@ -127,6 +161,9 @@ func acquireDispatchLock(agentsDir, caller, target string, pid int, now time.Tim
 	deadline := now.Add(time.Duration(lockWaitSec()) * time.Second)
 	waited := 0
 	for {
+		if ctx != nil && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		err := mk()
 		if err == nil {
 			break
@@ -135,13 +172,23 @@ func acquireDispatchLock(agentsDir, caller, target string, pid int, now time.Tim
 			return nil, err
 		}
 
-		// Held. Reclaim if the holder died or overran; otherwise wait it out.
-		if age := lockAge(lockPath, time.Now()); age > staleSec() {
-			_ = os.RemoveAll(lockPath)
-			if err := mk(); err != nil {
-				return nil, coded(ExitLockReclaim, "could not acquire lock after reclaim: %v", err)
+		// Held. Reclaim only if the holder is gone: its process is dead (when the
+		// platform can tell), or it is past the stale window. A live holder past
+		// the window is left alone — the BUSY message names it for the operator.
+		if lockReclaimable(lockPath, time.Now()) {
+			// Rename-then-mkdir: of several waiters that all judged the lock
+			// stale, exactly one wins the rename; the rest see it vanish and loop
+			// back to mkdir, where only one of THEM can succeed. The old
+			// remove-then-mkdir let a second waiter remove the winner's fresh lock.
+			tomb := fmt.Sprintf("%s.stale-%d", lockPath, time.Now().UnixNano())
+			if err := os.Rename(lockPath, tomb); err == nil {
+				_ = os.RemoveAll(tomb)
+				if err := mk(); err == nil {
+					break
+				}
 			}
-			break
+			time.Sleep(lockPollInterval / 4)
+			continue
 		}
 
 		if !time.Now().Before(deadline) {
@@ -186,6 +233,30 @@ func lockAge(lockPath string, now time.Time) int {
 		return 0
 	}
 	return int(now.Sub(info.ModTime()).Seconds())
+}
+
+// lockReclaimable decides whether a held lock may be taken over. The holder's
+// pid is recorded in $LOCK/info; a dead pid is reclaimable at once, a live one
+// never is (a hung holder is the operator's call, see the BUSY message), and an
+// unknown one (no info yet, or a platform that cannot probe) falls back to age.
+func lockReclaimable(lockPath string, now time.Time) bool {
+	if pid := lockHolderPID(lockPath); pid > 0 {
+		if alive, known := pidAlive(pid); known {
+			return !alive
+		}
+	}
+	return lockAge(lockPath, now) > staleSec()
+}
+
+// lockHolderPID parses `pid=N` out of $LOCK/info; 0 if absent.
+func lockHolderPID(lockPath string) int {
+	for _, f := range strings.Fields(readLockInfo(lockPath)) {
+		if v, ok := strings.CutPrefix(f, "pid="); ok {
+			n, _ := strconv.Atoi(v)
+			return n
+		}
+	}
+	return 0
 }
 
 func readLockInfo(lockPath string) string {

@@ -114,7 +114,7 @@ func readClaim(cp string) (*Claim, error) {
 
 func writeClaim(c *Claim) error {
 	b, _ := json.Marshal(c)
-	return os.WriteFile(c.path, b, 0o644)
+	return writeFileAtomic(c.path, b, 0o644)
 }
 
 // InboxNext atomically claims and returns the next pending request in an agent's

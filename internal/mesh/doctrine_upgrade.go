@@ -31,7 +31,7 @@ func readDoctrineStamps(dest string) map[string]string {
 
 func writeDoctrineStamps(dest string, m map[string]string) error {
 	b, _ := json.MarshalIndent(m, "", "  ")
-	return os.WriteFile(filepath.Join(dest, doctrineStampFile), append(b, '\n'), 0o644)
+	return writeFileAtomic(filepath.Join(dest, doctrineStampFile), append(b, '\n'), 0o644)
 }
 
 // DoctrineUpgrade is the outcome of an upgrade.

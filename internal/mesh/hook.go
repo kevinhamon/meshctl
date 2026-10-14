@@ -36,10 +36,39 @@ type HookPayload struct {
 }
 
 // ParseHookPayload decodes a hook payload, tolerating an empty/invalid stdin.
+// For the advisory hooks only; the gate uses ParseHookPayloadStrict.
 func ParseHookPayload(b []byte) HookPayload {
 	var p HookPayload
 	_ = json.Unmarshal(b, &p) // fail-open: zero value on any error
 	return p
+}
+
+// ParseHookPayloadStrict decodes a hook payload and reports a malformed one,
+// so the gate can refuse instead of evaluating an empty call as "allow".
+func ParseHookPayloadStrict(b []byte) (HookPayload, error) {
+	var p HookPayload
+	if len(strings.TrimSpace(string(b))) == 0 {
+		return p, fmt.Errorf("empty payload")
+	}
+	if err := json.Unmarshal(b, &p); err != nil {
+		return p, fmt.Errorf("payload is not JSON: %w", err)
+	}
+	if p.ToolName == "" {
+		return p, fmt.Errorf("payload has no tool_name")
+	}
+	return p, nil
+}
+
+// HookPreToolUse is the gate entry point for a tool call. Besides deciding, it
+// refreshes the session heartbeat: a long autonomous turn makes no prompts, so
+// without this its presence would look dead and its claims reclaimable.
+func HookPreToolUse(agentsDir string, p HookPayload, now time.Time) GateDecision {
+	if agentsDir != "" && p.SessionID != "" {
+		if a := hookAgent(agentsDir, p.Cwd); a != nil {
+			_ = TouchSession(a, p.SessionID, os.Getppid(), now)
+		}
+	}
+	return GatePreToolUse(agentsDir, p)
 }
 
 // hookAgent resolves the agent whose workspace the hook fired in, from the
@@ -145,6 +174,17 @@ func HookSessionEnd(agentsDir string, p HookPayload, pid int, now time.Time) {
 	SpawnDistill(agentsDir, a, id)
 }
 
+// HookSessionBeat refreshes presence for a session that is still open. The
+// opencode plugins call it when a turn finishes: a finished turn is not the
+// end of the session, only proof it is alive. No output. Fail-open.
+func HookSessionBeat(agentsDir string, p HookPayload, now time.Time) {
+	a := hookAgent(agentsDir, p.Cwd)
+	if a == nil || p.SessionID == "" {
+		return
+	}
+	_ = TouchSession(a, p.SessionID, os.Getppid(), now)
+}
+
 // HookUserPrompt returns the block to inject on a user prompt: compact intuition
 // pointers (ADR-0016) followed by a one-shot distillation boundary nudge
 // (ADR-0027) when a work boundary is detected. Either half may be empty.
@@ -182,20 +222,27 @@ const (
 
 var reWindDown = regexp.MustCompile(`(?i)\b(that'?s all|that will be all|we'?re done|done for now|all done|wrap(?:ping)? up|call it (?:a day|here)|nothing else|good ?night|see you|talk later|bye|thanks[,!. ]*that'?s it)\b`)
 
-// distillNudgeAllowlist is the set of agents the nudge is piloted on
-// ($AGENT_MESH_DISTILL_NUDGE_AGENTS, comma-separated; default pm).
-func distillNudgeAllowlist() map[string]bool {
-	raw := os.Getenv("AGENT_MESH_DISTILL_NUDGE_AGENTS")
-	if raw == "" {
-		raw = "pm"
+// distillNudgeAgents is $AGENT_MESH_DISTILL_NUDGE_AGENTS: a comma-separated
+// allowlist of agents that get the boundary nudge. Unset or "*" ⇒ every agent
+// (the default — a nudge nobody gets is a cognition loop that never runs);
+// "none" ⇒ no agent.
+const distillNudgeAgentsEnv = "AGENT_MESH_DISTILL_NUDGE_AGENTS"
+
+// distillNudgeEnabled reports whether the boundary nudge fires for an agent.
+func distillNudgeEnabled(agent string) bool {
+	raw := strings.TrimSpace(os.Getenv(distillNudgeAgentsEnv))
+	switch raw {
+	case "", "*":
+		return agent != ""
+	case "none", "off", "0":
+		return false
 	}
-	out := map[string]bool{}
 	for _, a := range strings.Split(raw, ",") {
-		if a = strings.TrimSpace(a); a != "" {
-			out[a] = true
+		if strings.TrimSpace(a) == agent {
+			return true
 		}
 	}
-	return out
+	return false
 }
 
 type distillState struct {
@@ -218,7 +265,7 @@ func distillStatePath(cwd, sessionID string) string {
 // Boundary = an explicit wind-down phrase OR a staleness threshold of prompts.
 // Allowlist-gated. Fail-open: any error ⇒ "".
 func distillNudge(p HookPayload, agent string, a *Agent) string {
-	if agent == "" || !distillNudgeAllowlist()[agent] {
+	if !distillNudgeEnabled(agent) {
 		return ""
 	}
 	// Harnesses that distil themselves at session end are already covered;

@@ -333,7 +333,7 @@ func updateRequestFile(path string, fields map[string]string, heading, text, by 
 	}
 	s := strings.TrimRight(string(b), "\n") +
 		fmt.Sprintf("\n\n## %s — %s, %s\n\n%s\n", heading, by, now.Format("2006-01-02 15:04"), strings.TrimSpace(text))
-	return os.WriteFile(path, []byte(s), 0o644)
+	return writeFileAtomic(path, []byte(s), 0o644)
 }
 
 // setFrontmatterFields replaces (or appends) top-level `key: value` lines in a
@@ -377,5 +377,5 @@ func setFrontmatterFields(path string, fields map[string]string) error {
 			end++
 		}
 	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+	return writeFileAtomic(path, []byte(strings.Join(lines, "\n")), 0o644)
 }

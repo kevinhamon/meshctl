@@ -50,7 +50,7 @@ func TestArchiveAnswered(t *testing.T) {
 	b, _ := os.ReadFile(r1.path)
 	os.WriteFile(r1.path, []byte(replaceOnce(string(b), "status: pending", "status: answered")), 0o644)
 
-	ids, err := ArchiveAnswered(a)
+	ids, _, err := ArchiveAnswered(a, false)
 	if err != nil {
 		t.Fatal(err)
 	}

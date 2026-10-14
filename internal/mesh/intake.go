@@ -71,23 +71,29 @@ func ArchiveRequest(agent *Agent, id string) (string, error) {
 	return "", fmt.Errorf("no request %q in %s", id, agent.InboxPath())
 }
 
-// ArchiveAnswered archives every request whose status is "answered" (the requester
-// has, by convention, already read it back). Returns the archived request ids.
-func ArchiveAnswered(agent *Agent) ([]string, error) {
+// ArchiveAnswered archives every request whose status is "answered". Unless
+// force, it keeps ones the requester has not read back yet (`meshctl sent ack`):
+// an archived request drops out of the requester's `sent` view, so sweeping it
+// early would lose the answer. Returns archived and skipped ids.
+func ArchiveAnswered(agent *Agent, force bool) (archived, skipped []string, err error) {
 	reqs, err := ListRequests(agent.InboxPath())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var done []string
 	for _, r := range reqs {
-		if c, _ := CanonicalStatus(r.Status); c == StatusAnswered {
-			if _, err := ArchiveRequest(agent, r.ID); err != nil {
-				return done, err
-			}
-			done = append(done, r.ID)
+		if c, _ := CanonicalStatus(r.Status); c != StatusAnswered {
+			continue
 		}
+		if !force && awaitingReadBack(r) && r.From != "user" && r.From != agent.Name {
+			skipped = append(skipped, r.ID)
+			continue
+		}
+		if _, err := ArchiveRequest(agent, r.ID); err != nil {
+			return archived, skipped, err
+		}
+		archived = append(archived, r.ID)
 	}
-	return done, nil
+	return archived, skipped, nil
 }
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -108,15 +114,55 @@ func Slug(s string) string {
 }
 
 // CallerName resolves the requesting agent name: $AGENT_NAME, else the current
-// working directory's basename.
+// working directory's basename. A value that is not a safe identifier falls
+// back to "unknown" rather than reaching a filename or frontmatter line.
 func CallerName() string {
-	if v := os.Getenv("AGENT_NAME"); v != "" {
+	if v := os.Getenv("AGENT_NAME"); v != "" && ValidName("agent name", v) == nil {
 		return v
 	}
 	if cwd, err := os.Getwd(); err == nil {
-		return filepath.Base(cwd)
+		if b := filepath.Base(cwd); ValidName("agent name", b) == nil {
+			return b
+		}
 	}
 	return "unknown"
+}
+
+// validPriorities is the request priority vocabulary.
+var validPriorities = map[string]bool{"P1": true, "P2": true, "P3": true}
+
+// reRelatedRef bounds a `related:` entry: a ticket/ADR/risk key or a request id,
+// optionally agent-qualified (<agent>:<id>). One line, no YAML punctuation.
+var reRelatedRef = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/#-]{0,127}$`)
+
+// yamlQuote renders s as a double-quoted YAML scalar, so a value can never be
+// read as structure (a colon, a hash, a leading dash) or span lines.
+func yamlQuote(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	s = strings.ReplaceAll(s, "\r", "")
+	return `"` + s + `"`
+}
+
+// validateRequestFields checks the caller-supplied header values before any of
+// them reaches a filename or a frontmatter line.
+func validateRequestFields(reqType, from, priority string, related []string) error {
+	if err := ValidName("request type", reqType); err != nil {
+		return err
+	}
+	if err := ValidName("requester name", from); err != nil {
+		return err
+	}
+	if !validPriorities[priority] {
+		return fmt.Errorf("invalid priority %q: use P1, P2 or P3", priority)
+	}
+	for _, x := range related {
+		if !reRelatedRef.MatchString(x) {
+			return fmt.Errorf("invalid related ref %q: one token per ref (letters, digits, . _ : / # -), no spaces or newlines", x)
+		}
+	}
+	return nil
 }
 
 // WriteRequest validates target+type and writes a new intake file into the
@@ -141,6 +187,14 @@ func writeRequest(target *Agent, reqType, prompt, from, priority string, related
 	if priority == "" {
 		priority = "P2"
 	}
+	if err := validateRequestFields(reqType, from, priority, related); err != nil {
+		return nil, err
+	}
+	if idSuffix != "" {
+		if err := ValidName("id suffix", idSuffix); err != nil {
+			return nil, err
+		}
+	}
 
 	inbox := target.InboxPath()
 	if err := os.MkdirAll(inbox, 0o755); err != nil {
@@ -148,42 +202,38 @@ func writeRequest(target *Agent, reqType, prompt, from, priority string, related
 	}
 
 	date := now.Format("2006-01-02")
-	id := fmt.Sprintf("%s-%s-%s", date, from, Slug(prompt))
+	base := fmt.Sprintf("%s-%s-%s", date, from, Slug(prompt))
 	if idSuffix != "" {
-		id += "-" + idSuffix
-	}
-	fname := id + ".md"
-
-	// Never clobber an existing request; disambiguate with a time suffix.
-	full := filepath.Join(inbox, fname)
-	if fileExists(full) {
-		id = fmt.Sprintf("%s-%s", id, now.Format("150405"))
-		fname = id + ".md"
-		full = filepath.Join(inbox, fname)
-	}
-
-	r := &Request{
-		ID:       id,
-		From:     from,
-		To:       target.Name,
-		Type:     reqType,
-		Created:  date,
-		Status:   "pending",
-		Priority: priority,
-		Related:  related,
-		path:     full,
+		base += "-" + idSuffix
 	}
 
 	relatedLines := "related: []"
 	if len(related) > 0 {
 		relatedLines = "related:\n"
 		for _, x := range related {
-			relatedLines += fmt.Sprintf("  - %s\n", x)
+			relatedLines += "  - " + yamlQuote(x) + "\n"
 		}
 		relatedLines = strings.TrimRight(relatedLines, "\n")
 	}
 
-	content := fmt.Sprintf(`---
+	// Never clobber an existing request. The file is created O_EXCL so two
+	// writers racing on the same id cannot both "see it absent" and overwrite
+	// each other; a clash falls back to a time suffix, then a counter.
+	var r *Request
+	for attempt := 0; ; attempt++ {
+		id := base
+		switch {
+		case attempt == 1:
+			id = fmt.Sprintf("%s-%s", base, now.Format("150405"))
+		case attempt > 1:
+			id = fmt.Sprintf("%s-%s-%d", base, now.Format("150405"), attempt)
+		}
+		full := filepath.Join(inbox, id+".md")
+		r = &Request{
+			ID: id, From: from, To: target.Name, Type: reqType, Created: date,
+			Status: "pending", Priority: priority, Related: related, path: full,
+		}
+		content := fmt.Sprintf(`---
 id: %s
 from: %s
 to: %s
@@ -202,12 +252,25 @@ response:
 ## Context
 
 _(none supplied)_
-`, r.ID, r.From, r.To, r.Type, r.Created, r.Priority, relatedLines, prompt)
+`, yamlQuote(r.ID), yamlQuote(r.From), yamlQuote(r.To), yamlQuote(r.Type), r.Created, r.Priority, relatedLines, prompt)
 
-	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-		return nil, err
+		f, err := os.OpenFile(full, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if err != nil {
+			if os.IsExist(err) && attempt < 50 {
+				continue
+			}
+			return nil, err
+		}
+		_, werr := f.WriteString(content)
+		cerr := f.Close()
+		if werr != nil {
+			return nil, werr
+		}
+		if cerr != nil {
+			return nil, cerr
+		}
+		return r, nil
 	}
-	return r, nil
 }
 
 // ReadRequest parses an intake file's frontmatter + body.

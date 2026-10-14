@@ -54,6 +54,18 @@ func tokenScore(haystack string, tokens []string) int {
 // (sessions + commits) plus freshest KB topics — the "what have we been doing"
 // view. Never reads source bodies.
 func Recall(agent *Agent, query string, limit int) ([]RecallHit, error) {
+	return recall(agent, query, limit, true)
+}
+
+// RecallActivity is Recall without the KB tier: session-records and the git
+// spine only. Intuition uses it — filtering KB hits out AFTER a shared limit
+// let a dense KB (whose hits carry a refs boost) crowd every activity hit out
+// of the window, so intuition returned nothing exactly where it mattered.
+func RecallActivity(agent *Agent, query string, limit int) ([]RecallHit, error) {
+	return recall(agent, query, limit, false)
+}
+
+func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit, error) {
 	if limit < 1 {
 		limit = 10
 	}
@@ -61,7 +73,7 @@ func Recall(agent *Agent, query string, limit int) ([]RecallHit, error) {
 	var hits []RecallHit
 
 	// KB topics (authoritative; live).
-	if idx, err := computeTopics(agent); err == nil {
+	if idx, err := computeTopics(agent); err == nil && includeKB {
 		for _, t := range idx.Topics {
 			s := len(tokens) == 0 // empty query → include, score 0
 			score := 0

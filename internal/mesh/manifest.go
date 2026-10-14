@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -171,8 +172,25 @@ func AgentFromWorktreeCwd(agentsDir string) string {
 	return AgentFromWorktreePath(agentsDir, cwd)
 }
 
+// reValidName is the shape of every identifier that becomes a path segment or
+// a frontmatter scalar: agent names, request `from`, related refs. One segment,
+// no separators, no whitespace or control characters — so a value can never
+// escape its directory (`../x`) or forge a frontmatter line (`x\nstatus: done`).
+var reValidName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// ValidName rejects identifiers that are not a single safe path segment.
+func ValidName(kind, s string) error {
+	if !reValidName.MatchString(s) || strings.Contains(s, "..") {
+		return fmt.Errorf("invalid %s %q: use letters, digits, '.', '_' or '-' only (max 64 chars, no '..', no '/')", kind, s)
+	}
+	return nil
+}
+
 // FindAgent loads a single agent by name; error if its manifest is missing.
 func FindAgent(agentsDir, name string) (*Agent, error) {
+	if err := ValidName("agent name", name); err != nil {
+		return nil, err
+	}
 	mp := ManifestPath(agentsDir, name)
 	if !fileExists(mp) {
 		return nil, fmt.Errorf("agent %q has no manifest (%s not found)", name, mp)

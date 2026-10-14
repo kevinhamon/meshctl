@@ -29,7 +29,7 @@ approve.
 - **The roster is computed, not maintained.** The agent directory is derived on demand
   from per-agent `agent.yaml` manifests, so there is no hand-edited roster file to drift.
 - **Messaging is one preapprovable command.** `meshctl send`/`ask` write a well-formed
-  request file so a harness can allow `Bash(meshctl:*)` once instead of approving ad-hoc
+  request file so a harness can preapprove the `meshctl` messaging verbs once instead of approving ad-hoc
   file writes into peers' inboxes.
 - **Dispatch is single-flight and guarded.** Headless dispatch (`meshctl ask`) is
   protected by four layered anti-cascade guards (prompt, depth, a filesystem lock, an

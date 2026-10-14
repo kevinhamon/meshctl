@@ -200,17 +200,44 @@ func poolMigrateCmd() *cobra.Command {
 }
 
 func poolTeardownCmd() *cobra.Command {
-	var purge bool
+	var purge, yes, dryRun bool
 	c := &cobra.Command{
 		Use:   "teardown",
 		Short: "Remove the pool's mesh infra (.agentmesh/) + deregister; agent repos are kept unless --purge",
+		Long: `Remove the pool marker, runtime state and registry entry. Agent workspaces are
+kept unless --purge, which DELETES them (and any knowledge not pushed to a remote).
+
+--purge is irreversible, so it needs confirmation: pass --yes, or type the pool's
+directory name at the prompt. --dry-run lists what would be removed and exits.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {
 				return err
 			}
+			if dryRun {
+				fmt.Printf("would tear down pool: %s\n", dir)
+				fmt.Printf("  remove %s/\n", mesh.PoolMarkerDir)
+				if purge {
+					agents, _, _ := mesh.ScanAgents(dir)
+					for _, a := range agents {
+						fmt.Printf("  DELETE agent workspace %s\n", a.Dir())
+					}
+				}
+				return nil
+			}
 			if purge {
 				fmt.Fprintln(os.Stderr, "⚠ --purge will DELETE agent workspaces (and any UNPUSHED knowledge) in "+dir)
+				if !yes {
+					if !isTerminal(os.Stdin) {
+						return fmt.Errorf("refusing --purge without confirmation: add --yes (non-interactive) or run from a terminal")
+					}
+					fmt.Fprintf(os.Stderr, "Type the pool directory name (%s) to confirm: ", filepath.Base(dir))
+					var typed string
+					fmt.Fscanln(os.Stdin, &typed)
+					if strings.TrimSpace(typed) != filepath.Base(dir) {
+						return fmt.Errorf("confirmation did not match; nothing removed")
+					}
+				}
 			}
 			did, err := mesh.TeardownPool(dir, purge)
 			if err != nil {
@@ -227,7 +254,15 @@ func poolTeardownCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&purge, "purge", false, "ALSO delete agent workspaces (destructive — unpushed knowledge is lost)")
+	c.Flags().BoolVar(&yes, "yes", false, "with --purge: skip the interactive confirmation")
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "print what would be removed and exit")
 	return c
+}
+
+// isTerminal reports whether f is an interactive terminal (character device).
+func isTerminal(f *os.File) bool {
+	st, err := f.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
 func agentCmd() *cobra.Command {
@@ -1108,9 +1143,12 @@ func inboxCmd() *cobra.Command {
 				return nil
 			}
 			if archiveAnswered {
-				ids, err := mesh.ArchiveAnswered(a)
+				ids, skipped, err := mesh.ArchiveAnswered(a, archiveForce)
 				if err != nil {
 					return err
+				}
+				if len(skipped) > 0 {
+					fmt.Printf("kept %d answered request(s) the requester has not read back yet (--force to archive anyway): %s\n", len(skipped), strings.Join(skipped, ", "))
 				}
 				if len(ids) == 0 {
 					fmt.Println("(no answered requests to archive)")
@@ -1132,7 +1170,7 @@ func inboxCmd() *cobra.Command {
 	}
 	archive.Flags().BoolVar(&archiveAnswered, "answered", false, "archive every request whose status is 'answered'")
 	archive.Flags().BoolVar(&archiveClosed, "closed", false, "archive every closed request (answered/filed/declined) the requester has read back")
-	archive.Flags().BoolVar(&archiveForce, "force", false, "with --closed: also archive ones not yet read back")
+	archive.Flags().BoolVar(&archiveForce, "force", false, "with --answered/--closed: also archive ones the requester has not read back")
 
 	// Bare `inbox` lists.
 	parent.RunE = inboxList
@@ -1534,6 +1572,22 @@ func hookCmd() *cobra.Command {
 		Short: "UserPromptSubmit: inject intuition pointers + a distillation boundary nudge",
 		RunE:  run("UserPromptSubmit", mesh.HookUserPrompt),
 	}
+	sessionBeat := &cobra.Command{
+		Use:   "session-beat",
+		Short: "Heartbeat: refresh presence for a session that is still open (no output)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			b, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return nil
+			}
+			dir, err := agentsDir()
+			if err != nil {
+				return nil
+			}
+			mesh.HookSessionBeat(dir, mesh.ParseHookPayload(b), time.Now())
+			return nil
+		},
+	}
 	sessionEnd := &cobra.Command{
 		Use:   "session-end",
 		Short: "SessionEnd: deregister presence",
@@ -1557,20 +1611,26 @@ func hookCmd() *cobra.Command {
 		Use:   "pre-tool-use",
 		Short: "PreToolUse: fail-closed deny-gate (blocks writes to competing memory stores + hand-written intake)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			b, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				return nil
-			}
 			// Pool resolution is best-effort: the gate's rules are path-shaped and
 			// machine-global, so it must still fire when cwd is outside a pool.
 			dir, _ := agentsDir()
-			p := mesh.ParseHookPayload(b)
-			_ = mesh.HarnessForPayload(dir, p, harness).EmitGate(os.Stdout, mesh.GatePreToolUse(dir, p))
+			b, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				// Fail CLOSED: a gate that cannot read the call must not allow it.
+				_ = mesh.HarnessForPayload(dir, mesh.HookPayload{}, harness).EmitGate(os.Stdout, mesh.GateUnavailable("could not read stdin"))
+				return nil
+			}
+			p, perr := mesh.ParseHookPayloadStrict(b)
+			if perr != nil {
+				_ = mesh.HarnessForPayload(dir, p, harness).EmitGate(os.Stdout, mesh.GateUnavailable(perr.Error()))
+				return nil
+			}
+			_ = mesh.HarnessForPayload(dir, p, harness).EmitGate(os.Stdout, mesh.HookPreToolUse(dir, p, time.Now()))
 			return nil
 		},
 	}
 
-	cmd.AddCommand(sessionStart, userPrompt, sessionEnd, preToolUse)
+	cmd.AddCommand(sessionStart, userPrompt, sessionBeat, sessionEnd, preToolUse)
 	return cmd
 }
 

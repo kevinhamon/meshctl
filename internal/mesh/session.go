@@ -215,5 +215,5 @@ func readSession(p string) (*Session, error) {
 
 func writeSession(s *Session) error {
 	b, _ := json.Marshal(s)
-	return os.WriteFile(s.path, b, 0o644)
+	return writeFileAtomic(s.path, b, 0o644)
 }

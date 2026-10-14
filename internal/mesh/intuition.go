@@ -138,15 +138,14 @@ func RecallIntuition(agent *Agent, query string, limit int) []IntuitionHit {
 	if agent == nil {
 		return nil
 	}
-	hits, err := Recall(agent, query, limit*3)
+	// Intuition = past *activity*; KB topics are `memory recall`'s job, so the
+	// KB tier is excluded before ranking, not filtered after the limit.
+	hits, err := RecallActivity(agent, query, limit)
 	if err != nil {
 		return nil
 	}
 	var out []IntuitionHit
 	for _, h := range hits {
-		if h.Kind == "kb" { // intuition = past *activity*; KB topics are `memory recall`'s job
-			continue
-		}
 		out = append(out, IntuitionHit{Title: h.Title, Date: h.Date})
 		if len(out) >= limit {
 			break

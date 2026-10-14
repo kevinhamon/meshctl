@@ -93,14 +93,82 @@ func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
 
 	// 2/3. File writes: inspect the target path(s).
 	for _, path := range gateEditPaths(p) {
-		if reason := deniedWritePath(path); reason != "" {
+		if reason := deniedWritePath(agentsDir, path); reason != "" {
 			return GateDecision{true, reason}
 		}
+	}
+
+	// 2b. Shell writes aimed at the same stores. A file-edit tool is not the
+	//     only way to write a file; `echo > intake/x.md` or `sed -i` on one
+	//     must meet the same rule, or the gate is decorative.
+	if reason := deniedShellWrite(agentsDir, p); reason != "" {
+		return GateDecision{true, reason}
 	}
 
 	// 4. Standing rules from the agent's own KB (kbrules.go): deny once per
 	//    session per matching rule, with the rule as the reason.
 	return gateKBRules(agentsDir, p)
+}
+
+// shellTools name the tools whose input is a shell command line.
+var shellTools = map[string]bool{"Bash": true, "bash": true, "shell": true}
+
+// reShellWriteOp matches a command that can create, modify or delete a file:
+// a redirection, or a mutating utility at the start of a (sub)command.
+var reShellWriteOp = regexp.MustCompile(`(>|(?:^|[\s;&|(])(?:tee|sed\s+-[a-zA-Z]*i|mv|cp|rm|touch|truncate|dd|install|ln|rsync)\b)`)
+
+// reShellIntakePath matches a request or claim file path under an intake/
+// directory, or a competing memory store path, anywhere on the command line.
+var reShellIntakePath = regexp.MustCompile(`(?:^|[\s"'=])(?:[^\s"']*/)?` + IntakeDir + `/[^\s"']*\.(?:md|claim)\b|/\.claude/[^\s"']*/memory/|/\.claude-mem/`)
+
+// deniedShellWrite returns a reason when a shell command both names a gated
+// path and carries a write operation. Reads (`cat intake/x.md`, `grep`) pass.
+// The sanctioned meshctl verbs never trip this: they take no redirection and
+// the path they write is not on the command line.
+func deniedShellWrite(agentsDir string, p HookPayload) string {
+	if !shellTools[p.ToolName] || len(p.ToolInput) == 0 {
+		return ""
+	}
+	var in struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(p.ToolInput, &in) != nil || in.Command == "" {
+		return ""
+	}
+	if !reShellIntakePath.MatchString(in.Command) || !reShellWriteOp.MatchString(in.Command) {
+		return ""
+	}
+	// Scope the intake rule to this pool when the pool is known: a command
+	// writing some unrelated repo's intake/ is not the mesh's business.
+	if agentsDir != "" && !strings.Contains(in.Command, "/.claude") && !strings.Contains(in.Command, "/.claude-mem") {
+		if abs := shellIntakePathAbs(in.Command, p.Cwd); abs != "" && !underDir(abs, agentsDir) {
+			return ""
+		}
+	}
+	return "mesh: this shell command writes a mesh-owned store (intake/ or a competing memory store). " +
+		"Intake is written only through `meshctl send`/`ask`/`inbox respond`/`inbox decline`; " +
+		"knowledge through `meshctl kb`/`meshctl memory`."
+}
+
+// shellIntakePathAbs returns the first intake path on a command line, resolved
+// against cwd when relative ("" if none).
+func shellIntakePathAbs(command, cwd string) string {
+	m := reShellIntakePath.FindString(command)
+	m = strings.TrimLeft(m, " \t\"'=")
+	if m == "" || !strings.Contains(m, IntakeDir+"/") {
+		return ""
+	}
+	if !filepath.IsAbs(m) && cwd != "" {
+		m = filepath.Join(cwd, m)
+	}
+	return m
+}
+
+// underDir reports whether path is inside dir (both cleaned; no symlink
+// resolution — the gate compares what the tool was told, not where it lands).
+func underDir(path, dir string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(path))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // gateEditPaths returns the absolute target paths of a file-writing tool call
@@ -172,7 +240,7 @@ func patchFilePaths(raw json.RawMessage) []string {
 // The mesh's OWN stores — <agent>/knowledge/ and <agent>/.memory/ — are not
 // matched: ".memory" never contains the "/memory/" segment, and neither carries
 // a ".claude"/".claude-mem"/"intake" segment.
-func deniedWritePath(path string) string {
+func deniedWritePath(agentsDir, path string) string {
 	s := filepath.ToSlash(path)
 
 	// Claude Code's built-in auto-memory: ~/.claude/**/memory/**
@@ -185,13 +253,25 @@ func deniedWritePath(path string) string {
 		return "mesh: this writes the claude-mem store, which the mesh replaces. Use `meshctl memory` / `meshctl kb`."
 	}
 	// Hand-written intake (ADR-0043): intake/ is an ephemeral queue owned by
-	// meshctl, never authored by hand.
-	if strings.Contains(s, "/"+IntakeDir+"/") || strings.HasSuffix(s, "/"+IntakeDir) {
+	// meshctl, never authored by hand. Scoped to this pool when the pool is
+	// known — some other repo's intake/ directory is not the mesh's.
+	inPool := agentsDir == "" || !filepath.IsAbs(path) || underDir(path, agentsDir)
+	if inPool && (strings.Contains(s, "/"+IntakeDir+"/") || strings.HasSuffix(s, "/"+IntakeDir)) {
 		return "mesh: intake/ is an ephemeral queue owned by meshctl — do not hand-write it. " +
 			"Send work with `meshctl send`/`meshctl ask`; write an outcome back with `meshctl inbox respond`, " +
 			"or `meshctl inbox decline --reason … [--redirect <agent>]` if it is not yours."
 	}
 	return ""
+}
+
+// GateUnavailable is the decision when the gate could not evaluate a call at
+// all (unreadable stdin, a payload that is not JSON). The gate is the mesh's one
+// fail-CLOSED hook, so "could not check" must deny — an attacker-shaped or
+// merely broken payload that slipped through as "allow" would make every rule
+// above optional.
+func GateUnavailable(why string) GateDecision {
+	return GateDecision{true, "mesh gate could not evaluate this tool call (" + why + ") and refuses rather than fail open. " +
+		"Re-run the call; if this persists, run `meshctl doctor` in the agent workspace."}
 }
 
 // EmitGateDecision writes Claude Code's PreToolUse permission-decision envelope.

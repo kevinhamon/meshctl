@@ -10,7 +10,7 @@ Canonical reference for how an agent mesh coordinates. Agent workspaces in a poo
 2. **To ask something of an agent, use `meshctl send` or `meshctl ask`** — never hand-write a
    file into a peer's `intake/`, and never mutate another agent's KB/board directly. The two
    verbs are defined below; they write the request file for you with a well-formed header, a
-   stable id, and a `dispatch.log` entry. Hand-authored intake files skip all of that and
+   stable id (and, for `ask`, a `dispatch.log` entry). Hand-authored intake files skip all of that and
    drift from the format the inbox owner's `meshctl inbox` expects.
 3. **The inbox owner writes the outcome back with `meshctl inbox respond`** (`status` + a
    response section; intake files are meshctl-owned and the PreToolUse gate blocks hand
@@ -94,10 +94,10 @@ an answer *now*:
 | **`meshctl ask <target> <type> "…"`** | Writes the intake request **and** dispatches the target **headlessly now**, blocking for the answer, which the peer writes back into the request file. | You are **blocked mid-task** on a decision only an advisory peer can make. |
 
 Both write the same request file (schema below) — `ask` just also runs the peer immediately.
-`meshctl ask --detach` writes + dispatches without blocking (poll the id later).
+`meshctl ask --detach` writes the request only — no dispatch; poll the id later.
 
 **Synchronous unblock flow** (`meshctl ask`): the target runs **headlessly in its own
-workspace** with a scoped allowlist (Read/Grep/Glob/Edit/Write, auto-accept edits) — the peer
+workspace** with a scoped allowlist (Read/Grep/Glob plus the `meshctl inbox respond|decline` and recall verbs — **no file edits**; on opencode the same policy is passed as an inline permission config) — the peer
 reads the request + code and writes its answer back into the request file, nothing else. When it
 returns, re-read the request file and continue.
 
@@ -109,10 +109,10 @@ Rules:
 Anti-cascade guards (budget protection) — layered, cheapest→strongest, so a runaway/expensive chain can't happen even if a model ignores the prompt:
 1. **Prompt** — the dispatched agent is told it may not dispatch (soft).
 2. **Depth guard** — `AGENT_DISPATCH_DEPTH>=1` refused (env-based).
-3. **Single-flight lock** — a `mkdir` lock at `<pool>/.dispatch.lock` means **no dispatch can start while one is in flight**; hard, independent of the model and of env propagation. Stale locks (>15m) auto-reclaimed; a lock the dispatcher didn't create is never deleted.
-4. **Hourly cap** — max dispatches per rolling hour (default 12, from `<pool>/.dispatch.count`); a circuit-breaker against fan-out across many experts.
+3. **Single-flight lock** — a `mkdir` lock at `<pool>/.agentmesh/dispatch.lock` means **one dispatch at a time per pool**; hard, independent of the model and of env propagation. A caller queues behind an in-flight dispatch (up to `AGENT_DISPATCH_LOCK_WAIT_SEC`, default 120s) and then reports BUSY — a queue, not an unreachable peer. A lock whose holder process is dead is reclaimed at once; one past the stale window (`AGENT_DISPATCH_STALE_SEC`, 900s) with an unknown holder is reclaimed; a live holder is never reclaimed. Ctrl-C releases the lock and the request claim.
+4. **Hourly cap** — max dispatches per rolling hour (default 12, from `<pool>/.agentmesh/dispatch.count`), charged before the lock wait and refunded if the dispatch never runs; a circuit-breaker against fan-out across many experts.
 
-Tunables (env): `AGENT_DISPATCH_HOURLY_MAX`, `AGENT_DISPATCH_STALE_SEC`, `AGENT_DISPATCH_TIMEOUT_SEC` (per-dispatch, default 420s), `AGENT_DISPATCH_MODEL` (pin a cheaper model for dispatched runs). All dispatches + blocks logged to `<pool>/.dispatch.log`. Exit codes: 2 unknown target · 3 depth · 4 hourly cap · 6 lock held.
+Tunables (env): `AGENT_DISPATCH_HOURLY_MAX`, `AGENT_DISPATCH_STALE_SEC`, `AGENT_DISPATCH_TIMEOUT_SEC` (per-dispatch, default 420s), `AGENT_DISPATCH_MODEL` (pin a cheaper model for dispatched runs). All dispatches, queues, blocks and aborts are logged to `<pool>/.agentmesh/dispatch.log`. Exit codes: 2 unknown target · 3 depth · 4 hourly cap · 6 lock held (BUSY) · 124 timed out · 130 interrupted.
 
 ## Request log (example)
 
@@ -184,7 +184,7 @@ knowledge (the KB). This is the retrieval loop's **Learn** stage, made concrete.
 frontmatter carries `rule:` + `triggers:`. `meshctl hook pre-tool-use` matches every
 Bash / Write|Edit / MCP tool call against those triggers; the first match per session is
 **denied** with the rule text + note path, and the retry is allowed. Zero context cost
-unless a rule fires; fail-open on error. Prose "recall before acting" is skipped under
+unless a rule fires. The gate is fail-closed: a tool call it cannot read is denied, not waved through; a rule note that does not parse is skipped. Shell commands that write a gated path (`> intake/x.md`, `sed -i`, `rm` a claim) are denied like file-edit tools. Prose "recall before acting" is skipped under
 task pressure — only gates hold. **Every new standing rule is written this way.**
 
 ```

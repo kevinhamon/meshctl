@@ -29,7 +29,7 @@ type AgentSpec struct {
 	// installed binary's. Not persisted: the installed binary is the truth at
 	// runtime, and doctor flags wiring that no longer matches it.
 	HarnessVersion int
-	Bare         bool   // if false, New appends the "-agent" repo suffix (ADR-0038)
+	Bare           bool // if false, New appends the "-agent" repo suffix (ADR-0038)
 }
 
 // ScaffoldOptions controls optional extras when creating/onboarding an agent.
@@ -125,6 +125,9 @@ func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error)
 	if !spec.Bare && spec.Name != "" && !strings.HasSuffix(spec.Name, "-agent") {
 		spec.Name += "-agent"
 	}
+	if err := ValidName("agent name", spec.Name); err != nil {
+		return "", err
+	}
 	dest := AgentDir(agentsDir, spec.Name)
 	if _, err := os.Stat(dest); err == nil {
 		return "", fmt.Errorf("%s already exists — aborting", dest)
@@ -212,6 +215,9 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 	}
 	res := &OnboardResult{Dir: abs}
 	name := filepath.Base(abs)
+	if err := ValidName("agent name", name); err != nil {
+		return nil, err
+	}
 	if spec.Name == "" {
 		spec.Name = name
 	}
@@ -458,15 +464,15 @@ func writeManifest(dir string, spec AgentSpec) error {
 	fmt.Fprintf(&b, "title: %s\n", yamlScalar(spec.Title))
 	fmt.Fprintf(&b, "role: >\n  %s\n", indentFold(spec.Role))
 	fmt.Fprintf(&b, "inbox: %s/\n", IntakeDir)
-	fmt.Fprintf(&b, "owns: [%s]\n", strings.Join(spec.Owns, ", "))
-	fmt.Fprintf(&b, "domains: [%s]\n", strings.Join(spec.Domains, ", "))
+	fmt.Fprintf(&b, "owns: [%s]\n", yamlFlowList(spec.Owns))
+	fmt.Fprintf(&b, "domains: [%s]\n", yamlFlowList(spec.Domains))
 	fmt.Fprintf(&b, "accepts:\n")
 	for _, a := range spec.Accepts {
-		fmt.Fprintf(&b, "  - { type: %-16s desc: %s }\n", a.Type+",", a.Desc)
+		fmt.Fprintf(&b, "  - { type: %-16s desc: %s }\n", yamlFlowScalar(a.Type)+",", yamlFlowScalar(a.Desc))
 	}
 	fmt.Fprintf(&b, "dispatchable: %t\n", dispatchable)
-	fmt.Fprintf(&b, "mutates: [%s]\n", strings.Join(spec.Mutates, ", "))
-	fmt.Fprintf(&b, "badge: { label: %s, r: %g, g: %g, b: %g }\n", spec.Badge.Label, spec.Badge.R, spec.Badge.G, spec.Badge.B)
+	fmt.Fprintf(&b, "mutates: [%s]\n", yamlFlowList(spec.Mutates))
+	fmt.Fprintf(&b, "badge: { label: %s, r: %g, g: %g, b: %g }\n", yamlFlowScalar(spec.Badge.Label), spec.Badge.R, spec.Badge.G, spec.Badge.B)
 	model := spec.Model
 	if model == "" {
 		model = "default"
@@ -493,10 +499,32 @@ func specFromAgent(a *Agent) AgentSpec {
 
 func yamlScalar(s string) string {
 	s = strings.TrimSpace(s)
-	if strings.ContainsAny(s, ":#") {
-		return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+	if strings.ContainsAny(s, ":#\n\"") {
+		return yamlQuote(s)
 	}
 	return s
+}
+
+// yamlFlowScalar is yamlScalar for a value inside a flow list/map (`[a, b]`,
+// `{ k: v }`), where a comma, bracket or brace would also be read as structure.
+func yamlFlowScalar(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.ContainsAny(s, ":#,[]{}\"'\n") || s != strings.TrimSpace(s) {
+		return yamlQuote(s)
+	}
+	return s
+}
+
+// yamlFlowList renders items as the inside of a flow list.
+func yamlFlowList(items []string) string {
+	out := make([]string, 0, len(items))
+	for _, x := range items {
+		if strings.TrimSpace(x) == "" {
+			continue
+		}
+		out = append(out, yamlFlowScalar(x))
+	}
+	return strings.Join(out, ", ")
 }
 
 func indentFold(s string) string {

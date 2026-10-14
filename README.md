@@ -103,7 +103,7 @@ existing pool with `meshctl agent bootstrap`.
 ## Command surface (noun → verb)
 
 ```
-meshctl pool    init [path] | upgrade [--force] | list
+meshctl pool    init [path] | upgrade [--force] | list | teardown [--purge --yes] [--dry-run]
 meshctl agent   new <name> | onboard <name|path> | bootstrap | list | identity
 meshctl msg     ask <target> <type> "…" | send <target> <type> "…"
 meshctl inbox   list | next [--claim] | claim <id> | release <id>
@@ -115,7 +115,7 @@ meshctl memory  recall "<q>" | sessions | rebuild
 meshctl session start | end | list
 meshctl handoff show | set          (set reads the body from stdin)
 meshctl intuition recall "<q>"
-meshctl hook    session-start | user-prompt | session-end | pre-tool-use   (wired per-agent; not run by hand)
+meshctl hook    session-start | user-prompt | session-beat | session-end | pre-tool-use   (wired per-agent; not run by hand)
 meshctl doctor
 meshctl ask … | send …               (top-level aliases for msg ask|send)
 ```
@@ -147,12 +147,23 @@ python, no loose scripts, no machine-absolute paths):
 | skills | `.claude/skills/<n>/SKILL.md` | `.opencode/skills/<n>/SKILL.md` | `.opencode/skills/<n>/SKILL.md` |
 | hooks | settings.json → `meshctl hook …` | `.opencode/plugin/meshctl.js` → `meshctl hook …` | `.opencode/plugins/meshctl.js` → `meshctl hook …` |
 | inject | `hookSpecificOutput` JSON | `experimental.chat.system.transform` | `session.hook("context")` |
-| capture | SessionEnd | `session.idle` event | `session.execution.succeeded` event |
+| capture | SessionEnd | `session.idle` = heartbeat; session-end after an idle window | `session.execution.succeeded` = heartbeat; session-end after an idle window (`AGENT_MESH_OPENCODE_IDLE_SEC`, 600s) or `session.deleted` |
 | gate | PreToolUse deny envelope | — (advisory only) | `tool.hook("execute.before")` throws the reason |
 | dispatch | `claude -p` | `opencode run --pure --auto` | `opencode run --standalone --auto` |
 
 `meshctl agent new --harness …` picks it; `onboard` autodetects; it's recorded in
 `agent.yaml`. Adding a harness = one adapter (`internal/mesh/harness.go`).
+
+**Safety defaults.** The PreToolUse gate is fail-closed: a tool call it cannot read is
+denied, and shell commands that write a mesh-owned path (`> intake/x.md`, `sed -i`,
+`rm` a claim) are denied like file-edit tools; the intake rule is scoped to the current
+pool. Onboarding pre-approves a scoped set of `meshctl` verbs (messaging, inbox,
+cognition, roster, doctor) — not `pool teardown`, `pool forget` or `update`; `pool
+teardown --purge` asks for the pool name (or `--yes`) and supports `--dry-run`. A
+dispatched peer (`meshctl ask`) gets Read/Grep/Glob plus the `meshctl inbox respond|decline`
+verbs and no file edits, on both harnesses. Request headers are validated (agent names,
+requester, priority, related refs) and written once with `O_EXCL`; state files
+(claims, presence, counts, stamps) are written atomically.
 
 **opencode V1 vs V2.** Both lines are supported under the one `opencode` harness; their
 plugin APIs are incompatible (V2 skips a V1 plugin with only a log warning). meshctl
@@ -174,7 +185,10 @@ experience, reference) and learns over time:
   past-work pointers from the **owned engine** by default (session-records + git spine).
   An external episodic engine is optional (`MESH_INTUITION_ENGINE=…`).
 - **Distill:** turn recurring intuition into durable KB via `meshctl kb begin` → write a
-  candidate → consolidate → `meshctl kb finish`. See the `mesh-cognition` skill.
+  candidate → consolidate → `meshctl kb finish`. See the `mesh-cognition` skill. The
+  boundary nudge (wind-down phrase or 8 prompts) is on for every agent; on Claude Code it
+  spawns the scaffolded `.claude/agents/distiller.md` subagent, on opencode the session-end
+  hook runs the distiller. Narrow it with `AGENT_MESH_DISTILL_NUDGE_AGENTS=a,b` or `none`.
 - **Handoff:** `meshctl handoff set` writes the resume point; auto-injected at session
   start. `meshctl doctor` validates manifests + KB + harness wiring.
 

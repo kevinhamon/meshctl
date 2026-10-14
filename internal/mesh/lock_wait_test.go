@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,7 @@ func TestAcquireLock_WaitsForAnInFlightDispatch(t *testing.T) {
 		_ = os.RemoveAll(lockPath)
 	}()
 
-	l, err := acquireDispatchLock(dir, "caller", "architect", os.Getpid(), time.Now())
+	l, err := acquireDispatchLock(context.Background(), dir, "caller", "architect", os.Getpid(), time.Now())
 	if err != nil {
 		t.Fatalf("should have queued and acquired, got: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestAcquireLock_TimeoutSaysBusyNotUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := acquireDispatchLock(dir, "caller", "architect", os.Getpid(), time.Now())
+	_, err := acquireDispatchLock(context.Background(), dir, "caller", "architect", os.Getpid(), time.Now())
 	if err == nil {
 		t.Fatal("expected a timeout while the lock stayed held")
 	}
@@ -92,7 +93,7 @@ func TestAcquireLock_ReclaimsStaleLockWithoutWaiting(t *testing.T) {
 	}
 
 	start := time.Now()
-	l, err := acquireDispatchLock(dir, "caller", "architect", os.Getpid(), time.Now())
+	l, err := acquireDispatchLock(context.Background(), dir, "caller", "architect", os.Getpid(), time.Now())
 	if err != nil {
 		t.Fatalf("stale lock should be reclaimed, got: %v", err)
 	}
@@ -107,7 +108,7 @@ func TestAcquireLock_UncontendedIsImmediate(t *testing.T) {
 	dir := t.TempDir()
 
 	start := time.Now()
-	l, err := acquireDispatchLock(dir, "caller", "architect", os.Getpid(), time.Now())
+	l, err := acquireDispatchLock(context.Background(), dir, "caller", "architect", os.Getpid(), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

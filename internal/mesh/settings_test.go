@@ -34,8 +34,8 @@ func TestSettings_WiresHooksAndPermission(t *testing.T) {
 	// Permission present.
 	perms := m["permissions"].(map[string]any)
 	allow := perms["allow"].([]any)
-	if !anyStr(allow, meshctlAllowRule) {
-		t.Fatalf("missing %s in permissions.allow", meshctlAllowRule)
+	if !anyStr(allow, "Bash(meshctl inbox:*)") {
+		t.Fatalf("missing %s in permissions.allow", "Bash(meshctl inbox:*)")
 	}
 	// All three hook events wired.
 	hooks := m["hooks"].(map[string]any)
@@ -87,7 +87,7 @@ func TestSettings_PreservesExisting(t *testing.T) {
 	}
 	perms := m["permissions"].(map[string]any)
 	allow := perms["allow"].([]any)
-	if !anyStr(allow, "Bash(git status)") || !anyStr(allow, meshctlAllowRule) {
+	if !anyStr(allow, "Bash(git status)") || !anyStr(allow, "Bash(meshctl inbox:*)") {
 		t.Fatalf("permissions not merged additively: %v", allow)
 	}
 	// Existing SessionStart hook must survive alongside the new one.

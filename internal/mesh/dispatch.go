@@ -7,10 +7,18 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
+
+// notifyInterrupt returns a context cancelled on SIGINT/SIGTERM. Tests replace
+// it to simulate an interrupt without signalling the test process.
+var notifyInterrupt = func(parent context.Context) (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+}
 
 // The headless system prompt. Kept verbatim from the original dispatch script — the
 // "you may not dispatch; on a new consequential decision set needs-human and
@@ -90,7 +98,9 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 				"  Resolve by returning 'needs-human' in the request file (name the agent + question); the human drives the next hop.", depth)
 	}
 
-	// Guard 4: hourly cap (bounds fan-out / runaway).
+	// Guard 4: hourly cap (bounds fan-out / runaway). Charged NOW, before the
+	// lock wait, so N callers queuing at max-1 cannot all pass; refunded below
+	// if this dispatch never runs.
 	recent, err := hourlyCount(agentsDir, now)
 	if err != nil {
 		return req, 1, err
@@ -101,10 +111,27 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 			"BLOCKED — hourly dispatch cap reached (%d/%d in the last hour).\n"+
 				"  This is a budget circuit-breaker. Wait, raise AGENT_DISPATCH_HOURLY_MAX, or resolve remaining requests with the human.", recent, hourlyMax())
 	}
+	_ = recordDispatch(agentsDir, now)
+	ran := false
+	defer func() {
+		if !ran {
+			unrecordDispatch(agentsDir, now)
+		}
+	}()
+
+	// An interrupt (Ctrl-C, SIGTERM) must release the lock and the claim, not
+	// leave the pool blocked for the stale window. The context is cancelled on
+	// signal; the lock wait and the child both watch it.
+	sigCtx, stopSignals := notifyInterrupt(context.Background())
+	defer stopSignals()
 
 	// Guard 3: single-flight lock (hard; mkdir is atomic).
-	lock, err := acquireDispatchLock(agentsDir, caller, target.Name, os.Getpid(), now)
+	lock, err := acquireDispatchLock(sigCtx, agentsDir, caller, target.Name, os.Getpid(), now)
 	if err != nil {
+		if sigCtx.Err() != nil {
+			dispatchLog(agentsDir, caller, target.Name, depth, now, "ABORTED reason=interrupted phase=lock-wait")
+			return req, 130, coded(130, "interrupted while waiting for the dispatch lock; %s was not dispatched", target.Name)
+		}
 		var ce *CodedError
 		if errors.As(err, &ce) {
 			// Distinct from the old "lock-held": the caller waited the full
@@ -128,8 +155,7 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 	_, _ = ClaimRequest(req.path, dispatchSession, os.Getpid(), now)
 	defer func() { _ = ReleaseClaim(req.path, dispatchSession, time.Now()) }()
 
-	// Record for the hourly cap + audit.
-	_ = recordDispatch(agentsDir, now)
+	ran = true
 	dispatchLog(agentsDir, caller, target.Name, depth, now, "DISPATCH id=%s", req.ID)
 
 	// Build the child invocation.
@@ -145,16 +171,25 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 		// The child's meshctl calls act as the dispatch session, so it can
 		// release/re-claim the request we hold instead of being refused.
 		"CLAUDE_SESSION_ID="+dispatchSession,
+		// opencode reads an inline config from this env (V1 and V2): scope the
+		// headless run to reads + the meshctl write-back verbs, the same
+		// policy the Claude allowlist expresses (see dispatchArgv).
+		"OPENCODE_CONFIG_CONTENT="+opencodeDispatchConfig,
 	)
 
 	runner := o.Runner
 	if runner == nil {
 		runner = realDispatch
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec())*time.Second)
+	ctx, cancel := context.WithTimeout(sigCtx, time.Duration(timeoutSec())*time.Second)
 	defer cancel()
 
 	rc := runner(ctx, target.Dir(), msg, sys, model, childEnv, o.Stdout, o.Stderr)
+	if sigCtx.Err() != nil {
+		dispatchLog(agentsDir, caller, target.Name, depth, now, "ABORTED reason=interrupted id=%s", req.ID)
+		fmt.Fprintf(o.Stderr, "meshctl ask: interrupted; %q was stopped and the request is left %s for a human.\n", target.Name, req.Status)
+		return req, 130, nil
+	}
 	dispatchLog(agentsDir, caller, target.Name, depth, now, "DONE rc=%d", rc)
 
 	if rc == 124 || ctx.Err() == context.DeadlineExceeded {
@@ -190,10 +225,15 @@ func dispatchArgv(harness string, ocMajor int, msg, sys, model string) (name str
 		args = append(args, sys+"\n\n"+msg)
 		return "opencode", args
 	default: // claude
+		// Reads plus the meshctl write-back verbs, nothing else. A dispatched
+		// peer answers through `meshctl inbox respond`; it has no business
+		// editing files, so Edit/Write are not granted and the permission mode
+		// is the default (in -p mode an un-allowlisted tool is simply denied).
 		args = []string{"-p", msg,
-			"--permission-mode", "acceptEdits",
-			"--allowedTools", "Read", "Grep", "Glob", "Edit", "Write",
+			"--permission-mode", "default",
+			"--allowedTools", "Read", "Grep", "Glob",
 			"Bash(meshctl inbox respond:*)", "Bash(meshctl inbox decline:*)", "Bash(meshctl agent list:*)",
+			"Bash(meshctl memory recall:*)", "Bash(meshctl intuition recall:*)",
 			"--append-system-prompt", sys,
 		}
 		if model != "" {
@@ -202,6 +242,14 @@ func dispatchArgv(harness string, ocMajor int, msg, sys, model string) (name str
 		return "claude", args
 	}
 }
+
+// opencodeDispatchConfig is the inline opencode config a dispatched run gets
+// through OPENCODE_CONFIG_CONTENT: file edits denied, shell denied except the
+// meshctl verbs a peer needs to answer. `--auto` only auto-approves "ask"
+// decisions; a "deny" stays denied.
+const opencodeDispatchConfig = `{"permission":{"edit":"deny","webfetch":"deny","bash":{"*":"deny",` +
+	`"meshctl inbox respond*":"allow","meshctl inbox decline*":"allow","meshctl agent list*":"allow",` +
+	`"meshctl memory recall*":"allow","meshctl intuition recall*":"allow"}}}`
 
 // realDispatch runs the target's harness headlessly in its workspace to process
 // the intake request. The runtime is chosen by the TARGET agent's manifest harness
@@ -222,6 +270,9 @@ func realDispatch(ctx context.Context, targetDir, msg, sys, model string, env []
 	cmd.Env = env
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	// Own process group: a timeout or interrupt kills the harness AND the MCP
+	// servers it spawned, instead of orphaning them.
+	setProcGroup(cmd)
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
 		return 124

@@ -70,12 +70,21 @@ func cognitionTriggerFindings(a *Agent) []DoctorFinding {
 		auto = false
 	}
 
-	// No background primitive leaves the boundary nudge as the only trigger,
-	// and the nudge is allowlist-gated (default: pm only).
-	if !auto && !distillNudgeAllowlist()[a.Name] {
+	// No background primitive leaves the boundary nudge as the only trigger;
+	// it is on for every agent unless $AGENT_MESH_DISTILL_NUDGE_AGENTS narrows it.
+	if !auto && !distillNudgeEnabled(a.Name) {
 		out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
-			Message: "distillation has no trigger: this harness has no background primitive and the agent " +
-				"is not in AGENT_MESH_DISTILL_NUDGE_AGENTS — the KB fills only if the model volunteers"})
+			Message: "distillation has no trigger: this harness has no background primitive and " +
+				distillNudgeAgentsEnv + " excludes this agent — the KB fills only if the model volunteers"})
+	}
+	// The nudge tells the model to spawn the `distiller` subagent; on Claude
+	// Code that is a definition file meshctl scaffolds. Without it the nudge
+	// asks for something that does not exist.
+	if !auto && distillNudgeEnabled(a.Name) && a.HarnessName() == HarnessClaude &&
+		!fileExists(filepath.Join(a.Dir(), ".claude", "agents", "distiller.md")) {
+		out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
+			Message: "distillation nudge is on but .claude/agents/distiller.md is missing — " +
+				"run `meshctl agent onboard " + a.Name + "` to scaffold the distiller subagent"})
 	}
 	return out
 }

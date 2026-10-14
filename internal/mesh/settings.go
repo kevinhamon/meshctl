@@ -11,10 +11,11 @@ import (
 // The mesh's Claude Code integration is wired per-agent into
 // <agent>/.claude/settings.json (committed, so it travels with the workspace) —
 // not into a machine-global settings file. Two things are wired:
-//   - the three hooks, each invoking `meshctl hook …` (resolved on $PATH, so
+//   - the four hooks, each invoking `meshctl hook …` (resolved on $PATH, so
 //     the wiring carries no machine-absolute path), and
-//   - a Bash(meshctl:*) permission so mesh messaging/cognition commands are
-//     preapproved.
+//   - a scoped set of Bash(meshctl <verb>:*) permissions so mesh messaging,
+//     inbox and cognition commands are preapproved — but not the destructive
+//     ones (pool teardown/forget, update).
 //
 // EnsureAgentSettings is idempotent and near add-only: it inserts what is
 // missing and never removes a key. The one rewrite is the matcher on the mesh's
@@ -22,14 +23,32 @@ import (
 // are never touched. Safe over a hand-tuned settings.json; a second run is a
 // no-op.
 
-const meshctlAllowRule = "Bash(meshctl:*)"
+// legacyMeshctlAllowRule pre-approved every meshctl verb — including
+// `pool teardown --purge`, which deletes agent workspaces. Replaced by the
+// scoped set below; an existing legacy rule the mesh itself wrote is upgraded
+// in place (hand-added rules are never touched).
+const legacyMeshctlAllowRule = "Bash(meshctl:*)"
+
+// meshctlAllowRules pre-approves the verbs an agent uses in a session: the
+// steward's scaffolding, messaging, inbox work, cognition, and read-only
+// diagnostics. Deliberately absent: `pool teardown`, `pool forget`, `update`.
+var meshctlAllowRules = []string{
+	"Bash(meshctl ask:*)", "Bash(meshctl send:*)", "Bash(meshctl msg:*)",
+	"Bash(meshctl inbox:*)", "Bash(meshctl sent:*)",
+	"Bash(meshctl kb:*)", "Bash(meshctl memory:*)", "Bash(meshctl intuition:*)",
+	"Bash(meshctl handoff:*)", "Bash(meshctl session:*)",
+	"Bash(meshctl agent:*)",
+	"Bash(meshctl pool init:*)", "Bash(meshctl pool upgrade:*)", "Bash(meshctl pool list:*)",
+	"Bash(meshctl pool register:*)", "Bash(meshctl pool migrate:*)",
+	"Bash(meshctl doctor:*)", "Bash(meshctl version:*)", "Bash(meshctl help:*)", "Bash(meshctl --help:*)",
+}
 
 // MeshWiringVersion is the version of the per-agent harness wiring (hook set +
 // gate policy). It is stamped into each agent's .claude/.mesh-wiring.json so
 // doctor can detect an agent left on older wiring after a meshctl upgrade and
 // tell you to re-onboard. Bump it whenever hookWiring OR the gate's deny policy
-// (gate.go) changes materially.
-const MeshWiringVersion = 2
+// (gate.go) changes materially. v3: scoped allow rules, shell-write gate.
+const MeshWiringVersion = 3
 
 const meshWiringStampFile = ".mesh-wiring.json"
 
@@ -64,8 +83,8 @@ func EnsureAgentSettings(dest string) ([]string, error) {
 	var notes []string
 	changed := false
 
-	if ensureMeshctlPermission(root) {
-		notes = append(notes, "added "+meshctlAllowRule+" permission")
+	if n := ensureMeshctlPermission(root); n != "" {
+		notes = append(notes, n)
 		changed = true
 	}
 	if added := ensureHooks(root); len(added) > 0 {
@@ -124,22 +143,48 @@ func WiringVersion(dest string) int {
 	return cur.Version
 }
 
-// ensureMeshctlPermission appends the meshctl allow-rule to
-// permissions.allow if absent. Returns true if it added it.
-func ensureMeshctlPermission(root map[string]any) bool {
+// ensureMeshctlPermission adds any missing scoped meshctl allow-rule to
+// permissions.allow, and drops the legacy wildcard the mesh itself used to
+// write (it covered destructive verbs). Returns a note, or "" if nothing changed.
+func ensureMeshctlPermission(root map[string]any) string {
 	perms, _ := root["permissions"].(map[string]any)
 	if perms == nil {
 		perms = map[string]any{}
 		root["permissions"] = perms
 	}
 	allow, _ := perms["allow"].([]any)
+	have := map[string]bool{}
+	var kept []any
+	droppedLegacy := false
 	for _, r := range allow {
-		if s, ok := r.(string); ok && s == meshctlAllowRule {
-			return false
+		if s, ok := r.(string); ok {
+			if s == legacyMeshctlAllowRule {
+				droppedLegacy = true
+				continue
+			}
+			have[s] = true
+		}
+		kept = append(kept, r)
+	}
+	added := 0
+	for _, rule := range meshctlAllowRules {
+		if !have[rule] {
+			kept = append(kept, rule)
+			added++
 		}
 	}
-	perms["allow"] = append(allow, meshctlAllowRule)
-	return true
+	if added == 0 && !droppedLegacy {
+		return ""
+	}
+	perms["allow"] = kept
+	switch {
+	case droppedLegacy && added > 0:
+		return fmt.Sprintf("replaced %s with %d scoped meshctl permissions", legacyMeshctlAllowRule, len(meshctlAllowRules))
+	case droppedLegacy:
+		return "removed legacy " + legacyMeshctlAllowRule + " permission"
+	default:
+		return fmt.Sprintf("added %d scoped meshctl permissions", added)
+	}
 }
 
 // ensureHooks inserts any missing mesh hook entry. A hook is considered present
