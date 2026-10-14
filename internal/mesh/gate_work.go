@@ -21,7 +21,7 @@ import (
 
 // rePeerWorkDeniedCmd is the subset of rePeerDeniedCmd a delegated peer still
 // may not run: dispatch and pool-level state. KB, handoff and git are its own.
-var rePeerWorkDeniedCmd = regexp.MustCompile(`(?:^|[\s;&|(])meshctl\s+(?:(?:msg\s+)?(?:ask|send)|pool|update|session)\b`)
+var rePeerWorkDeniedCmd = regexp.MustCompile(`(?:^|[\s;&|(])meshctl\s+(?:(?:msg\s+)?(?:ask|send)|pool|update|session|work\s+merge)\b`)
 
 // reWorkWriteOp matches a command that can change files or git state.
 var reWorkWriteOp = regexp.MustCompile(`(?:^|[\s;&|(])(?:` +
@@ -37,19 +37,21 @@ var (
 )
 
 const peerWorkDenyDispatch = "mesh: you are a peer doing delegated work in-session — you may not dispatch or touch pool state " +
-	"(`meshctl ask|send|pool|update|session`, Agent). If the work needs another agent or a new decision, " +
+	"(`meshctl ask|send|pool|update|session|work merge`, Agent). If the work needs another agent or a new decision, " +
 	"respond `needs-human` naming it, give your recommendation, and stop."
 
 // peerWorkRoots are the directories a delegated peer may write: its
-// workspace, its delegated-work worktrees, and its declared workdirs.
+// workspace, its worktrees (delegated-work and `kb begin` ones alike), and its
+// declared workdirs.
 func peerWorkRoots(agentsDir string, peer *Agent) []string {
 	roots := []string{peer.Dir()}
 	if agentsDir != "" {
-		wt := filepath.Join(agentsDir, ".worktrees")
+		wt := filepath.Join(agentsDir, WorktreesDir)
 		if entries, err := os.ReadDir(wt); err == nil {
 			for _, e := range entries {
-				if e.IsDir() && strings.HasPrefix(e.Name(), peer.Name+PeerWorkSuffix+"-") {
-					roots = append(roots, filepath.Join(wt, e.Name()))
+				p := filepath.Join(wt, e.Name())
+				if e.IsDir() && AgentFromWorktreePath(agentsDir, p) == peer.Name {
+					roots = append(roots, p)
 				}
 			}
 		}

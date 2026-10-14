@@ -36,7 +36,7 @@ yours. Repos you may also write (your `workdirs`): __WORKDIRS__.
 - Writes only inside your workspace (or its worktree) and your declared workdirs. Never
   the caller's workspace, never another agent's.
 - **You may not dispatch**: no `meshctl ask`, `send`, `pool`, `update` or `session`, and no
-  Agent calls. If the work needs another agent, or a genuinely new consequential decision
+  Agent calls. No `meshctl work merge` either — your own session lands worktree branches. If the work needs another agent, or a genuinely new consequential decision
   not covered by an accepted decision record, respond `needs-human` naming the agent or
   decision and the exact question, give your recommendation, then stop.
 - Do only this request. Do not start unrelated work.

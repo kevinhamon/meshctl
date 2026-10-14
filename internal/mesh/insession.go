@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -27,6 +28,9 @@ type InSessionOptions struct {
 	From     string
 	Priority string
 	Related  []string
+	// Work delegates write-capable work to the peer's mesh-<peer>-work
+	// definition instead of a read-only consult (ADR-0063).
+	Work bool
 
 	Now    time.Time
 	Stdout io.Writer
@@ -49,7 +53,12 @@ func AskInSession(agentsDir string, target *Agent, o InSessionOptions) (*Request
 	}
 	caller := o.From
 
-	if !target.IsDispatchable() {
+	if o.Work {
+		if !target.IsWorkDelegable() {
+			return nil, 1, fmt.Errorf("refusing to delegate work to %q: it is neither dispatchable nor a declared state-mutating agent. Use `meshctl send %s %s \"…\"` and let the human trigger it",
+				target.Name, target.Name, o.Type)
+		}
+	} else if !target.IsDispatchable() {
 		reason := "not dispatchable"
 		if len(target.Mutates) > 0 {
 			reason = fmt.Sprintf("mutates %v — state-mutating agents stay human-triggered", target.Mutates)
@@ -68,14 +77,18 @@ func AskInSession(agentsDir string, target *Agent, o InSessionOptions) (*Request
 		return nil, 1, fmt.Errorf("in-session dispatch runs the peer as a Claude Code subagent; %q runs on %s — use `meshctl ask %s %s \"…\"` (headless) instead",
 			caller, callerAgent.HarnessName(), target.Name, o.Type)
 	}
-	if !fileExists(PeerAgentFile(callerAgent.Dir(), target.Name)) {
-		return nil, 1, fmt.Errorf("no in-session definition for %q in %s/.claude/agents/ — run `meshctl agent onboard %s` (or `meshctl pool upgrade`) to render the peer subagents, then retry",
-			target.Name, caller, caller)
+	defFile, subagent, mode := PeerAgentFile(callerAgent.Dir(), target.Name), PeerAgentName(target.Name), "in-session"
+	if o.Work {
+		defFile, subagent, mode = PeerWorkAgentFile(callerAgent.Dir(), target.Name), PeerWorkAgentName(target.Name), "in-session-work"
+	}
+	if !fileExists(defFile) {
+		return nil, 1, fmt.Errorf("no in-session definition %s in %s/.claude/agents/ — run `meshctl agent onboard %s` (or `meshctl pool upgrade`) to render the peer subagents, then retry",
+			filepath.Base(defFile), caller, caller)
 	}
 
 	depth := envInt("AGENT_DISPATCH_DEPTH", 0)
 	if depth >= 1 {
-		dispatchLog(agentsDir, caller, target.Name, depth, now, "BLOCKED reason=depth mode=in-session")
+		dispatchLog(agentsDir, caller, target.Name, depth, now, "BLOCKED reason=depth mode=%s", mode)
 		return nil, ExitDepth, coded(ExitDepth,
 			"BLOCKED — dispatch depth %d>=1. A dispatched agent may not dispatch again.\n"+
 				"  Resolve by returning 'needs-human' in the request file (name the agent + question); the human drives the next hop.", depth)
@@ -85,7 +98,7 @@ func AskInSession(agentsDir string, target *Agent, o InSessionOptions) (*Request
 		return nil, 1, err
 	}
 	if recent >= hourlyMax() {
-		dispatchLog(agentsDir, caller, target.Name, depth, now, "BLOCKED reason=hourly-cap mode=in-session recent=%d max=%d", recent, hourlyMax())
+		dispatchLog(agentsDir, caller, target.Name, depth, now, "BLOCKED reason=hourly-cap mode=%s recent=%d max=%d", mode, recent, hourlyMax())
 		return nil, ExitHourlyCap, coded(ExitHourlyCap,
 			"BLOCKED — hourly dispatch cap reached (%d/%d in the last hour).\n"+
 				"  This is a budget circuit-breaker. Wait, raise AGENT_DISPATCH_HOURLY_MAX, or resolve remaining requests with the human.", recent, hourlyMax())
@@ -94,6 +107,22 @@ func AskInSession(agentsDir string, target *Agent, o InSessionOptions) (*Request
 	req, err := WriteRequest(target, o.Type, o.Prompt, caller, o.Priority, o.Related, now)
 	if err != nil {
 		return nil, 1, err
+	}
+	fields := map[string]string{"status": StatusInProgress}
+	if o.Work {
+		fields["mode"] = "work"
+		// The peer's own live session holds its checkout: give this request a
+		// worktree of its own, merged later by `meshctl work merge`.
+		if len(liveSessions(target.Dir(), now)) > 0 {
+			wt, err := WorkBegin(agentsDir, target, req.ID)
+			if err != nil {
+				_ = os.Remove(req.Path())
+				return nil, 1, fmt.Errorf("%s has a live session, so delegated work needs its own worktree, and creating it failed: %w", target.Name, err)
+			}
+			fields["worktree"] = wt
+			req.Worktree = wt
+		}
+		req.Mode = "work"
 	}
 	_ = recordDispatch(agentsDir, now)
 
@@ -105,14 +134,21 @@ func AskInSession(agentsDir string, target *Agent, o InSessionOptions) (*Request
 	if sid := harnessSessionID(); sid != "" {
 		_, _ = ClaimRequest(req.Path(), sid, os.Getpid(), now)
 	}
-	_ = setFrontmatterFields(req.Path(), map[string]string{"status": StatusInProgress})
+	_ = setFrontmatterFields(req.Path(), fields)
 	req.Status = StatusInProgress
-	dispatchLog(agentsDir, caller, target.Name, depth, now, "DISPATCH mode=in-session id=%s", req.ID)
+	dispatchLog(agentsDir, caller, target.Name, depth, now, "DISPATCH mode=%s id=%s", mode, req.ID)
 
 	fmt.Fprintf(o.Stdout, "wrote intake %s → %s (%s)\n", req.ID, target.Name, req.Path())
 	fmt.Fprintf(o.Stdout, "in-session dispatch recorded (%d/%d this hour). Now delegate with the Agent tool:\n", recent+1, hourlyMax())
-	fmt.Fprintf(o.Stdout, "  subagent_type: %s\n", PeerAgentName(target.Name))
+	fmt.Fprintf(o.Stdout, "  subagent_type: %s\n", subagent)
 	fmt.Fprintf(o.Stdout, "  prompt: %s\n", DelegationPrompt(target.Name, req.ID))
+	if o.Work && len(target.Mutates) > 0 {
+		fmt.Fprintf(o.Stdout, "%s mutates %v — the harness will ask the human to approve this delegation.\n", target.Name, target.Mutates)
+	}
+	if req.Worktree != "" {
+		fmt.Fprintf(o.Stdout, "%s has a live session: the work goes to worktree %s (branch %s); %s lands it with `meshctl work merge %s`.\n",
+			target.Name, req.Worktree, workBranch(req.ID), target.Name, req.ID)
+	}
 	fmt.Fprintf(o.Stdout, "When it returns, read the answer: meshctl sent   (then `meshctl sent ack %s`)\n", req.ID)
 	return req, 0, nil
 }
@@ -162,15 +198,21 @@ func Brief(agentsDir string, a *Agent, requestID string) (string, error) {
 	}
 
 	query := ""
+	var req *Request
 	if requestID != "" {
 		r, err := findRequest(a, requestID)
 		if err != nil {
 			return "", err
 		}
+		req = r
 		ask := strings.TrimSpace(askSection(r.Body))
 		query = ask
-		fmt.Fprintf(&b, "## Request `%s`\n\nfrom: `%s` · type: `%s` · priority: %s · status: %s · file: `%s`\n\n",
-			r.ID, r.From, r.Type, r.Priority, r.Status, r.Path())
+		mode := "consult (read-only)"
+		if r.Mode == "work" {
+			mode = "delegated work"
+		}
+		fmt.Fprintf(&b, "## Request `%s`\n\nfrom: `%s` · type: `%s` · priority: %s · status: %s · mode: %s · file: `%s`\n\n",
+			r.ID, r.From, r.Type, r.Priority, r.Status, mode, r.Path())
 		if len(r.Related) > 0 {
 			fmt.Fprintf(&b, "related: %s\n\n", strings.Join(r.Related, ", "))
 		}
@@ -199,16 +241,46 @@ func Brief(agentsDir string, a *Agent, requestID string) (string, error) {
 		b.WriteString(strings.TrimSpace(handoff))
 		b.WriteString("\n\n")
 	}
-	b.WriteString("## Write-back contract\n\n")
 	id := "<id>"
 	if requestID != "" {
 		id = requestID
 	}
+	if req != nil && req.Mode == "work" {
+		writeWorkContract(&b, a, req)
+		return b.String(), nil
+	}
+	b.WriteString("## Write-back contract\n\n")
 	fmt.Fprintf(&b, "- Answer ONLY through `meshctl inbox respond %s --agent %s --status answered|needs-info|needs-human --response-file -` (response markdown on stdin).\n", id, a.Name)
 	fmt.Fprintf(&b, "- Not yours: `meshctl inbox decline %s --agent %s --reason \"…\" --redirect <owner>`.\n", id, a.Name)
 	b.WriteString("- No file edits, commits, KB writes or dispatch (`meshctl ask|send`) — the gate denies them. Needs another agent or a new consequential decision ⇒ `needs-human` with the question and your recommendation.\n")
 	b.WriteString("- Finish with a short summary (status, one-paragraph answer, request path).\n")
 	return b.String(), nil
+}
+
+// writeWorkContract is the brief's contract for delegated work (ADR-0063):
+// the peer edits and commits as itself, inside its own workspace (or the
+// request's worktree) and its workdirs, and ends with a receipt.
+func writeWorkContract(b *strings.Builder, a *Agent, r *Request) {
+	b.WriteString("## Work contract (delegated work — you may edit and commit)\n\n")
+	if r.Worktree != "" {
+		fmt.Fprintf(b, "- **Worktree:** your own live session holds `%s`. Do every workspace edit in `%s` (branch `%s`) and commit there; your owner session lands it with `meshctl work merge %s`.\n",
+			a.Dir(), r.Worktree, workBranch(r.ID), r.ID)
+	} else {
+		fmt.Fprintf(b, "- **Workspace:** `%s` — edit and commit there (path-limited commits). Your subagent's cwd is the caller's workspace: name targets with absolute paths, `cd <dir> &&` or `git -C <dir>`.\n", a.Dir())
+	}
+	fmt.Fprintf(b, "- **KB changes** go through `meshctl kb begin|finish --agent %s`, as in your own session.\n", a.Name)
+	if wd := a.WorkdirPaths(); len(wd) > 0 {
+		fmt.Fprintf(b, "- **Product repos** you may write: %s — follow their branch / PR convention; never push to a default branch.\n", "`"+strings.Join(wd, "`, `")+"`")
+	} else {
+		b.WriteString("- **No workdirs** are declared for you: writes outside your workspace are denied. Work that needs a product repo ⇒ `needs-human` naming the repo.\n")
+	}
+	b.WriteString("- **No dispatch**: no `meshctl ask|send|pool|update|session` and no Agent calls — the gate denies them. Needs another agent or a new consequential decision ⇒ `needs-human` with the question and your recommendation, then stop.\n")
+	fmt.Fprintf(b, "- Write the outcome back with `meshctl inbox respond %s --agent %s --status answered|needs-info|needs-human --response-file -`; not yours ⇒ `meshctl inbox decline %s --agent %s --reason \"…\" --redirect <owner>`.\n", r.ID, a.Name, r.ID, a.Name)
+	b.WriteString("- **End with a receipt** the caller can relay as-is: files changed per repo; commits and branches")
+	if r.Worktree != "" {
+		fmt.Fprintf(b, " (incl. `%s`, pending `meshctl work merge`)", workBranch(r.ID))
+	}
+	b.WriteString("; candidates or decisions filed in your KB; open questions for the human.\n")
 }
 
 // contextSection extracts the "## Context" section of a request body, or ""

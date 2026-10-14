@@ -150,6 +150,12 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 		b.WriteString(nag)
 		b.WriteString("\n\n")
 	}
+	// Delegated work (ADR-0063) done in a worktree while this session was
+	// live: it waits on the owner to merge it.
+	if nag := WorkNag(agentsDir, a); nag != "" {
+		b.WriteString(nag)
+		b.WriteString("\n\n")
+	}
 	// Requester read-back: peers' answers/declines on requests this agent sent.
 	if sent, err := ListSent(agentsDir, a.Name, true); err == nil {
 		if md := SentMarkdown(sent); md != "" {

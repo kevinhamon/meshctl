@@ -29,6 +29,12 @@ type Request struct {
 	RedirectedTo string `yaml:"redirected_to,omitempty"`
 	ReadBack     string `yaml:"read_back,omitempty"`
 
+	// Set by `ask --in-session --work` (ADR-0063): Mode "work" marks delegated
+	// write-capable work; Worktree is the peer's delegated-work checkout when
+	// its own session was live at dispatch.
+	Mode     string `yaml:"mode,omitempty"`
+	Worktree string `yaml:"worktree,omitempty"`
+
 	// path is the on-disk file (set on read); Body is the markdown after the
 	// frontmatter.
 	path string `yaml:"-"`

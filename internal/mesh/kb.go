@@ -34,8 +34,8 @@ func ListKBSessions(agentsDir string, agent *Agent) []string {
 	prefix := agent.Name + "-"
 	var out []string
 	for _, e := range entries {
-		if !e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
-			continue
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), prefix) || workWorktreeReq(agent.Name, e.Name()) != "" {
+			continue // delegated-work worktrees are not KB sessions (work.go)
 		}
 		out = append(out, strings.TrimPrefix(e.Name(), prefix))
 	}

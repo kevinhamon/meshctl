@@ -136,6 +136,9 @@ func poolLevelHygiene(agentsDir string, now time.Time) []HygieneItem {
 			}
 			wt := filepath.Join(wtRoot, e.Name())
 			agent := AgentFromWorktreePath(agentsDir, wt)
+			if agent != "" && workWorktreeReq(agent, e.Name()) != "" {
+				continue // delegated-work worktree: lives until `meshctl work merge`
+			}
 			session := strings.TrimPrefix(e.Name(), agent+"-")
 			if agent != "" && sessionAlive(AgentDir(agentsDir, agent), session, now) {
 				continue

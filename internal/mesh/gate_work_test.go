@@ -27,7 +27,7 @@ func workPool(t *testing.T) (dir string, caller, arch *Agent, repo string) {
 	if _, err := addManifestWorkdirs(ManifestPath(dir, "architect"), []string{repo}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, ".worktrees", "architect-work-req1"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, WorktreesDir, "architect-work-req1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	arch, _ = FindAgent(dir, "architect")
@@ -48,6 +48,7 @@ func TestGate_InSessionPeerWorkContract(t *testing.T) {
 		"cd ../architect && meshctl msg send pm fyi x",
 		"meshctl pool upgrade",
 		"meshctl session list",
+		"meshctl work merge req1 --agent architect",
 		"echo hi > notes.md",                       // cwd is the caller: unresolvable ⇒ caller's workspace
 		"echo hi > ../developer/notes.md",          // the caller's workspace
 		"cd ../architect && cp x.md ../developer/", // path argument into the caller
@@ -65,7 +66,7 @@ func TestGate_InSessionPeerWorkContract(t *testing.T) {
 		"echo hi > ../architect/knowledge/candidates/x.md",
 		"cd " + repo + " && git switch -c fix/x && git commit -am x",
 		"git -C " + repo + " push -u origin fix/x",
-		"cd " + filepath.Join(dir, ".worktrees", "architect-work-req1") + " && git commit -am x",
+		"cd " + filepath.Join(dir, WorktreesDir, "architect-work-req1") + " && git commit -am x",
 		"git -C ../architect log --oneline -5",
 		"grep -rn split ../developer/ | head",
 		"cd ../architect && cp knowledge/a.md /tmp/a.md",
@@ -83,7 +84,7 @@ func TestGate_InSessionPeerWorkContract(t *testing.T) {
 	for _, p := range []string{
 		filepath.Join(arch.Dir(), "knowledge", "playbooks", "x.md"),
 		filepath.Join(repo, "src", "main.go"),
-		filepath.Join(dir, ".worktrees", "architect-work-req1", "state.md"),
+		filepath.Join(dir, WorktreesDir, "architect-work-req1", "state.md"),
 		"../architect/knowledge/decisions/0001-x.md",
 	} {
 		if d := GatePreToolUse(dir, edit(p)); d.Deny {

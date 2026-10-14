@@ -161,7 +161,7 @@ func rootCmd() *cobra.Command {
 		msgCmd(),   // ask | send
 		inboxCmd(), // list | next | claim | release | respond | decline | archive
 		sentCmd(),  // requester side: responses awaiting read-back
-		kbCmd(), memoryCmd(), sessionCmd(), handoffCmd(), stateCmd(), intuitionCmd(), hookCmd(),
+		kbCmd(), workCmd(), memoryCmd(), sessionCmd(), handoffCmd(), stateCmd(), intuitionCmd(), hookCmd(),
 		doctorCmd(),
 		// Top-level aliases for high-frequency verbs (muscle memory + one preapproval).
 		askCmd(), sendCmd(),
@@ -944,7 +944,7 @@ func directoryCmd() *cobra.Command {
 // --- ask / send ---
 
 func askCmd() *cobra.Command {
-	var detach, inSession bool
+	var detach, inSession, work bool
 	var priority, from, related string
 	cmd := &cobra.Command{
 		Use:   "ask <target> <type> <prompt>",
@@ -954,7 +954,11 @@ func askCmd() *cobra.Command {
 			"the Agent-tool delegation to make next (subagent_type mesh-<peer>), so the peer runs inside this\n" +
 			"Claude Code session instead of a second terminal. Either way the answer lands in the request file\n" +
 			"(`meshctl sent`). --in-session needs the peer's subagent definition in this workspace\n" +
-			"(.claude/agents/mesh-<peer>.md, rendered by `agent onboard` / `pool upgrade`).",
+			"(.claude/agents/mesh-<peer>.md, rendered by `agent onboard` / `pool upgrade`).\n\n" +
+			"--in-session --work delegates write-capable work instead (subagent_type mesh-<peer>-work): the peer\n" +
+			"edits and commits as itself in its own workspace and declared workdirs, and ends with a receipt.\n" +
+			"If the peer has a live session, the work goes to a mesh/work/<id> worktree that the peer lands with\n" +
+			"`meshctl work merge <id>`. Delegating to a state-mutating peer asks the human for approval.",
 		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
@@ -965,13 +969,16 @@ func askCmd() *cobra.Command {
 			if err != nil {
 				return &mesh.CodedError{Code: mesh.ExitUnknownTarget, Msg: err.Error()}
 			}
+			if work && !inSession {
+				return fmt.Errorf("--work needs --in-session (delegated work runs as a subagent of this session)")
+			}
 			if inSession {
 				if detach {
 					return fmt.Errorf("--in-session and --detach are exclusive")
 				}
 				_, rc, err := mesh.AskInSession(dir, target, mesh.InSessionOptions{
 					Type: args[1], Prompt: args[2], From: from,
-					Priority: priority, Related: splitCSV(related), Now: time.Now(),
+					Priority: priority, Related: splitCSV(related), Work: work, Now: time.Now(),
 				})
 				if err != nil {
 					return err
@@ -998,6 +1005,7 @@ func askCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.BoolVar(&detach, "detach", false, "write-only + return the id to poll later (no blocking dispatch)")
 	f.BoolVar(&inSession, "in-session", false, "record the dispatch and print the Agent-tool delegation (peer runs as a subagent of this Claude Code session)")
+	f.BoolVar(&work, "work", false, "with --in-session: delegate write-capable work (mesh-<peer>-work) instead of a read-only consult")
 	f.StringVar(&priority, "priority", "P2", "P1|P2|P3")
 	f.StringVar(&from, "from", "", "requester name (default: $AGENT_NAME or cwd)")
 	f.StringVar(&related, "related", "", "comma-separated refs (decision/risk/tracker keys)")
