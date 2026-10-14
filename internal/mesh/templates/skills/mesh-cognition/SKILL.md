@@ -68,10 +68,10 @@ unrelated → empty). Chat-only rules stay prose. Every new standing rule is wri
 
 ## Cross-agent learning capture on dispatch return (ADR-0018)
 
-A headless `meshctl ask` run may not commit, so anything the answering peer learned
-lives only in the answered `intake/` file and is lost if never distilled. On
-returning from a dispatch, judge the answer and write durable learning as a
-candidate **into the OWNING agent's KB, not your own**:
+A dispatched peer (headless `meshctl ask`, or `--in-session` as a subagent) may not
+commit, so anything the answering peer learned lives only in the answered `intake/`
+file and is lost if never distilled. On returning from a dispatch, judge the answer and
+write durable learning as a candidate **into the OWNING agent's KB, not your own**:
 
 ```
 meshctl kb begin  --agent <owner>

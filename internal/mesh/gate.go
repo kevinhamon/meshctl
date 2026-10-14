@@ -91,6 +91,16 @@ func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
 			"Persist through `meshctl memory` / `meshctl kb` (knowledge), or `meshctl send` / `meshctl ask` (messages)."}
 	}
 
+	// 1b. In-session peer: the peer answers through `meshctl inbox
+	//     respond` and nothing else. Its subagent definition grants no edit
+	//     tools, but the `tools` list cannot scope Bash, so the no-dispatch /
+	//     no-write / no-commit contract is enforced here.
+	if p.InSession {
+		if reason := deniedPeerAction(p); reason != "" {
+			return GateDecision{true, reason}
+		}
+	}
+
 	// 2/3. File writes: inspect the target path(s).
 	for _, path := range gateEditPaths(p) {
 		if reason := deniedWritePath(agentsDir, path); reason != "" {
@@ -112,6 +122,50 @@ func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
 
 // shellTools name the tools whose input is a shell command line.
 var shellTools = map[string]bool{"Bash": true, "bash": true, "shell": true}
+
+// rePeerDeniedCmd matches, at the start of a (sub)command, what a consulted
+// peer may never do: dispatch (ask/send), write its KB or handoff, touch pool
+// state, or change git state. Flags between words are allowed.
+var rePeerDeniedCmd = regexp.MustCompile(`(?:^|[\s;&|(])(?:` +
+	`meshctl\s+(?:(?:msg\s+)?(?:ask|send)|kb|handoff\s+set|pool|update|session|sent\s+ack)\b` +
+	`|git\s+(?:-C\s+\S+\s+)?(?:commit|push|add|rm|mv|checkout|switch|merge|rebase|reset|stash|cherry-pick|am|apply|tag|worktree)\b` +
+	`|(?:tee|sed\s+-[a-zA-Z]*i|mv|cp|rm|touch|truncate|dd|install|ln|rsync|mkdir|chmod|chown)\b` +
+	`)`)
+
+// rePeerRedirect finds shell redirections with their target; anything but
+// /dev/null is a file write.
+var rePeerRedirect = regexp.MustCompile(`>>?\s*([^\s&;|)]+)`)
+
+const peerDenyReason = "mesh: you are a peer consulted in-session — answer only through `meshctl inbox respond <id> --agent <you>` " +
+	"(or `inbox decline`). No file writes, commits, KB/handoff writes, pool commands or dispatch (`meshctl ask|send`); " +
+	"if another agent's input or a new decision is needed, respond `needs-human` and stop."
+
+// deniedPeerAction returns a reason when an in-session peer's tool call is
+// outside its write-back contract: any file-edit or patch tool by name, and a
+// shell command that dispatches, mutates git, writes files or the KB.
+func deniedPeerAction(p HookPayload) string {
+	if fileEditTools[p.ToolName] || patchTools[p.ToolName] {
+		return peerDenyReason
+	}
+	if !shellTools[p.ToolName] || len(p.ToolInput) == 0 {
+		return ""
+	}
+	var in struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(p.ToolInput, &in) != nil || in.Command == "" {
+		return ""
+	}
+	if rePeerDeniedCmd.MatchString(in.Command) {
+		return peerDenyReason
+	}
+	for _, m := range rePeerRedirect.FindAllStringSubmatch(in.Command, -1) {
+		if m[1] != "/dev/null" {
+			return peerDenyReason
+		}
+	}
+	return ""
+}
 
 // reShellWriteOp matches a command that can create, modify or delete a file:
 // a redirection, or a mutating utility at the start of a (sub)command.

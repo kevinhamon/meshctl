@@ -50,6 +50,26 @@ func gateWiringFindings(a *Agent) []DoctorFinding {
 			Message: fmt.Sprintf("mesh wiring stale (v%d < v%d) — run `meshctl agent onboard %s` to pick up gate/policy changes",
 				v, MeshWiringVersion, a.Name)})
 	}
+	out = append(out, peerWiringFindings(a)...)
+	return out
+}
+
+// peerWiringFindings verifies the in-session peer definitions match the
+// roster. A stale set means `msg ask --in-session` refuses (missing peer) or
+// delegates to an outdated contract; a missing pool-root grant means the peer
+// cannot read its own KB without a prompt.
+func peerWiringFindings(a *Agent) []DoctorFinding {
+	poolRoot := filepath.Dir(a.Dir())
+	var out []DoctorFinding
+	if plan := PlanPeerAgents(poolRoot, a.Dir()); !plan.Empty() {
+		n := len(plan.Write) + len(plan.Update) + len(plan.Remove)
+		out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
+			Message: fmt.Sprintf("in-session peer subagents out of date (%d to write/refresh/remove) — run `meshctl pool upgrade`", n)})
+	}
+	if IsPool(poolRoot) && !PoolAccessWired(poolRoot, a.Dir()) {
+		out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
+			Message: "pool root not in .claude/settings.local.json additionalDirectories — in-session peers cannot read their own KB without prompts; run `meshctl agent onboard " + a.Name + "`"})
+	}
 	return out
 }
 

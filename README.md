@@ -105,8 +105,8 @@ existing pool with `meshctl agent bootstrap`.
 
 ```
 meshctl pool    init [path] | upgrade [--force] | list | teardown [--purge --yes] [--dry-run]
-meshctl agent   new <name> | onboard <name|path> | bootstrap | list | identity
-meshctl msg     ask <target> <type> "…" | send <target> <type> "…"
+meshctl agent   new <name> | onboard <name|path> | bootstrap | list | identity | brief --agent <peer> [--request <id>]
+meshctl msg     ask <target> <type> "…" [--in-session | --detach] | send <target> <type> "…"
 meshctl inbox   list | next [--claim] | claim <id> | release <id>
                 respond <id> --status <s> --response "…" | decline <id> --reason "…" [--redirect <agent>]
                 archive <id> | --answered | --closed [--force]
@@ -178,6 +178,24 @@ dispatched peer (`meshctl ask`) gets Read/Grep/Glob plus the `meshctl inbox resp
 verbs and no file edits, on both harnesses. Request headers are validated (agent names,
 requester, priority, related refs) and written once with `O_EXCL`; state files
 (claims, presence, counts, stamps) are written atomically.
+
+**In-session dispatch (Claude Code).** `meshctl ask <peer> <type> "…" --in-session` runs an
+advisory peer as a subagent of the caller's own session instead of a second `claude`
+process in a second terminal. Every dispatchable peer is rendered from the roster into
+each Claude agent's `.claude/agents/mesh-<peer>.md` (by `agent new|onboard` and `pool
+upgrade`; refreshed when the roster changes, removed when a peer stops being
+dispatchable; hand-authored files are left alone). The command writes the same intake
+file, charges the same hourly cap, logs `mode=in-session`, claims the request for the
+harness session, and prints the exact Agent-tool call to make (`subagent_type:
+mesh-<peer>`). Inside the subagent the peer starts with `meshctl agent brief --agent
+<peer> --request <id>` (identity, handoff, recall pointers and the ask in one shot, since
+its own session hooks do not fire there), reads its KB read-only, and answers with
+`meshctl inbox respond … --agent <peer>`. Its definition grants no Agent/Write/Edit tools
+and its frontmatter hooks run the mesh gate in peer mode, which denies dispatch, file
+writes, git and KB writes — so a consulted peer cannot chain or drift. The pool root is
+added to the caller's `.claude/settings.local.json` `additionalDirectories` (machine-local,
+git-ignored) so the peer can read its own workspace. Session start lists the installed
+peers. opencode callers keep the headless `ask`.
 
 **opencode V1 vs V2.** Both lines are supported under the one `opencode` harness; their
 plugin APIs are incompatible (V2 skips a V1 plugin with only a log warning). meshctl

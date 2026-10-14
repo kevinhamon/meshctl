@@ -33,6 +33,30 @@ type HookPayload struct {
 	// per-tool input shapes.
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
+	// Set when the hook fires inside a subagent (Claude Code adds them).
+	AgentID   string `json:"agent_id"`
+	AgentType string `json:"agent_type"`
+
+	// PeerAgent names the agent this hook acts for when the payload cwd is not
+	// its workspace: an in-session peer subagent runs in the CALLER's cwd, so
+	// its definition passes `--agent <peer>` and the hook must not resolve the
+	// caller. InSession marks that mode (the peer gate applies). Flags, never
+	// payload fields.
+	PeerAgent string `json:"-"`
+	InSession bool   `json:"-"`
+}
+
+// payloadAgent resolves the agent a hook acts for: the explicit --agent
+// override, else the workspace the payload cwd names. nil if neither resolves.
+func payloadAgent(agentsDir string, p HookPayload) *Agent {
+	if p.PeerAgent != "" {
+		a, err := FindAgent(agentsDir, p.PeerAgent)
+		if err != nil {
+			return nil
+		}
+		return a
+	}
+	return hookAgent(agentsDir, p.Cwd)
 }
 
 // ParseHookPayload decodes a hook payload, tolerating an empty/invalid stdin.
@@ -63,7 +87,7 @@ func ParseHookPayloadStrict(b []byte) (HookPayload, error) {
 // refreshes the session heartbeat: a long autonomous turn makes no prompts, so
 // without this its presence would look dead and its claims reclaimable.
 func HookPreToolUse(agentsDir string, p HookPayload, now time.Time) GateDecision {
-	if agentsDir != "" && p.SessionID != "" {
+	if agentsDir != "" && p.SessionID != "" && !p.InSession {
 		if a := hookAgent(agentsDir, p.Cwd); a != nil {
 			_ = TouchSession(a, p.SessionID, os.Getppid(), now)
 		}
@@ -108,6 +132,10 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 	var b strings.Builder
 	b.WriteString(IdentityLine(agentsDir, a))
 	b.WriteString("\n\n")
+	if line := PeerLine(a); line != "" {
+		b.WriteString(line)
+		b.WriteString("\n\n")
+	}
 	if warn != "" {
 		b.WriteString(warn)
 		b.WriteString("\n\n")
@@ -156,13 +184,31 @@ func IdentityLine(poolRoot string, a *Agent) string {
 // HookSessionEnd captures an extractive session-record (ADR-0033) then
 // deregisters session presence. No output. Fail-open throughout.
 func HookSessionEnd(agentsDir string, p HookPayload, pid int, now time.Time) {
-	a := hookAgent(agentsDir, p.Cwd)
+	a := payloadAgent(agentsDir, p)
 	if a == nil {
 		return
 	}
 	id := p.SessionID
 	if id == "" {
 		id = ResolveSessionID(pid, now)
+	}
+	if p.InSession {
+		// A peer consulted in-session (Stop → SubagentStop): capture the
+		// subagent's transcript as the peer's own episodic record, keyed by
+		// the subagent so repeated consults in one session do not overwrite
+		// each other; there is no presence to deregister and nothing to
+		// distil (the caller's session end covers it). Close the audit line
+		// `ask --in-session` opened.
+		if p.AgentID != "" {
+			id = id + "-peer-" + sanitizeID(p.AgentID)
+		}
+		_, _ = CaptureSession(a, p.TranscriptPath, id, "", now)
+		caller := "unknown"
+		if c := hookAgent(agentsDir, p.Cwd); c != nil {
+			caller = c.Name
+		}
+		dispatchLog(agentsDir, caller, a.Name, 0, now, "DONE mode=in-session agent_id=%s", p.AgentID)
+		return
 	}
 	// Read the session's start time from presence BEFORE deregistering, so the
 	// record's git-since window and duration are accurate.

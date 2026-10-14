@@ -267,7 +267,41 @@ func isTerminal(f *os.File) bool {
 
 func agentCmd() *cobra.Command {
 	c := &cobra.Command{Use: "agent", Short: "Agent lifecycle: scaffold (new), onboard existing, bootstrap the steward, list roster, print identity"}
-	c.AddCommand(newCmd(), onboardCmd(), bootstrapCmd(), directoryCmd(), identityCmd())
+	c.AddCommand(newCmd(), onboardCmd(), bootstrapCmd(), directoryCmd(), identityCmd(), briefCmd())
+	return c
+}
+
+// briefCmd prints the context a peer consulted in-session gets at session
+// start: identity, role, the request with recall pointers, handoff, and the
+// write-back contract. The subagent's first command.
+func briefCmd() *cobra.Command {
+	var agent, request string
+	c := &cobra.Command{
+		Use:   "brief --agent <peer> [--request <id>]",
+		Short: "Print an agent's session-start context on demand (identity, role, request + recall, handoff, write-back contract)",
+		Long: "For a peer consulted in-session (`meshctl msg ask … --in-session`): its SessionStart/UserPromptSubmit\n" +
+			"hooks do not fire inside a subagent, so this command delivers the same context in one shot. With\n" +
+			"--request it includes the request's ask and recall pointers for it.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, err := agentsDir()
+			if err != nil {
+				return err
+			}
+			a, err := resolveContextAgent(dir, agent)
+			if err != nil {
+				return err
+			}
+			out, err := mesh.Brief(dir, a, request)
+			if err != nil {
+				return err
+			}
+			fmt.Print(out)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&agent, "agent", "", "the agent being briefed (default: $AGENT_NAME or cwd — pass it explicitly from a subagent)")
+	c.Flags().StringVar(&request, "request", "", "intake request id to include (ask text + recall pointers)")
 	return c
 }
 
@@ -908,12 +942,18 @@ func directoryCmd() *cobra.Command {
 // --- ask / send ---
 
 func askCmd() *cobra.Command {
-	var detach bool
+	var detach, inSession bool
 	var priority, from, related string
 	cmd := &cobra.Command{
 		Use:   "ask <target> <type> <prompt>",
-		Short: "Write intake + dispatch an advisory peer headlessly, block for the answer",
-		Args:  cobra.ExactArgs(3),
+		Short: "Write intake + dispatch an advisory peer (headless process, or --in-session as a subagent of this session)",
+		Long: "Writes the intake request, runs the anti-cascade guards, then either runs the peer headlessly in its own\n" +
+			"workspace and blocks for the answer (default), or — with --in-session — records the dispatch and prints\n" +
+			"the Agent-tool delegation to make next (subagent_type mesh-<peer>), so the peer runs inside this\n" +
+			"Claude Code session instead of a second terminal. Either way the answer lands in the request file\n" +
+			"(`meshctl sent`). --in-session needs the peer's subagent definition in this workspace\n" +
+			"(.claude/agents/mesh-<peer>.md, rendered by `agent onboard` / `pool upgrade`).",
+		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {
@@ -922,6 +962,22 @@ func askCmd() *cobra.Command {
 			target, err := mesh.FindAgent(dir, args[0])
 			if err != nil {
 				return &mesh.CodedError{Code: mesh.ExitUnknownTarget, Msg: err.Error()}
+			}
+			if inSession {
+				if detach {
+					return fmt.Errorf("--in-session and --detach are exclusive")
+				}
+				_, rc, err := mesh.AskInSession(dir, target, mesh.InSessionOptions{
+					Type: args[1], Prompt: args[2], From: from,
+					Priority: priority, Related: splitCSV(related), Now: time.Now(),
+				})
+				if err != nil {
+					return err
+				}
+				if rc != 0 {
+					os.Exit(rc)
+				}
+				return nil
 			}
 			_, rc, err := mesh.Ask(dir, target, mesh.AskOptions{
 				Type: args[1], Prompt: args[2], From: from,
@@ -939,6 +995,7 @@ func askCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.BoolVar(&detach, "detach", false, "write-only + return the id to poll later (no blocking dispatch)")
+	f.BoolVar(&inSession, "in-session", false, "record the dispatch and print the Agent-tool delegation (peer runs as a subagent of this Claude Code session)")
 	f.StringVar(&priority, "priority", "P2", "P1|P2|P3")
 	f.StringVar(&from, "from", "", "requester name (default: $AGENT_NAME or cwd)")
 	f.StringVar(&related, "related", "", "comma-separated refs (decision/risk/tracker keys)")
@@ -1581,12 +1638,21 @@ func handoffCmd() *cobra.Command {
 // `meshctl` on $PATH). Every handler is fail-open: any error ⇒ no output,
 // exit 0 (a hook must never break a turn).
 func hookCmd() *cobra.Command {
-	var harness string
+	var harness, peer string
+	var inSession bool
 	cmd := &cobra.Command{
 		Use:   "hook session-start|user-prompt|session-end|pre-tool-use",
 		Short: "Harness hook handlers (self-contained; wired per-agent by agent new/onboard)",
 	}
 	cmd.PersistentFlags().StringVar(&harness, "harness", "", "output envelope: claude|opencode (default: agent's harness)")
+	cmd.PersistentFlags().StringVar(&peer, "agent", "", "act for this agent instead of the payload cwd's (in-session peer subagents)")
+	cmd.PersistentFlags().BoolVar(&inSession, "in-session", false, "the hook fires inside an in-session peer subagent (peer gate; Stop closes the dispatch)")
+	// stamp applies the override flags to a parsed payload.
+	stamp := func(p mesh.HookPayload) mesh.HookPayload {
+		p.PeerAgent = peer
+		p.InSession = inSession
+		return p
+	}
 
 	// run reads the stdin payload, invokes fn, and prints the injected context
 	// in the resolved harness's envelope. Fail-open: never errors to the caller.
@@ -1600,7 +1666,7 @@ func hookCmd() *cobra.Command {
 			if err != nil {
 				return nil
 			}
-			p := mesh.ParseHookPayload(b)
+			p := stamp(mesh.ParseHookPayload(b))
 			h := mesh.HarnessForPayload(dir, p, harness)
 			_ = h.EmitContext(os.Stdout, event, fn(dir, p, time.Now()))
 			return nil
@@ -1647,7 +1713,7 @@ func hookCmd() *cobra.Command {
 			if err != nil {
 				return nil
 			}
-			mesh.HookSessionEnd(dir, mesh.ParseHookPayload(b), os.Getpid(), time.Now())
+			mesh.HookSessionEnd(dir, stamp(mesh.ParseHookPayload(b)), os.Getpid(), time.Now())
 			return nil
 		},
 	}
@@ -1668,6 +1734,7 @@ func hookCmd() *cobra.Command {
 				return nil
 			}
 			p, perr := mesh.ParseHookPayloadStrict(b)
+			p = stamp(p)
 			if perr != nil {
 				_ = mesh.HarnessForPayload(dir, p, harness).EmitGate(os.Stdout, mesh.GateUnavailable(perr.Error()))
 				return nil

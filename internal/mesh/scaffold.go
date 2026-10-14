@@ -584,6 +584,7 @@ Bidirectional file-based handoff — canonical protocol: your pool's ` + "`../.a
 - **Read-back:** ` + "`meshctl sent`" + ` lists requests you sent that came back (answered / declined / needs-info); read each, act, then ` + "`meshctl sent ack <id>`" + `. The session start surfaces them automatically.
 - **Outbound:** ` + "`meshctl send <target> <type> \"…\"`" + ` writes a request into a peer's inbox; ` + "`meshctl ask <target> <type> \"…\"`" + ` also dispatches an advisory peer headlessly and blocks for the answer. State-mutating peers (pm→tracker, developer→code) are ` + "`send`" + `-only and human-triggered.
 - **Blocked on a decision mid-task?** ` + "`meshctl ask <advisor> <type> \"…\"`" + ` for a synchronous answer; if it returns ` + "`needs-human`" + `, stop and surface to the user.
+- **Under Claude Code, prefer ` + "`meshctl ask <advisor> <type> \"…\" --in-session`" + `:** it records the dispatch and prints an Agent-tool delegation (` + "`subagent_type: mesh-<advisor>`" + `) — make that call, then read the answer with ` + "`meshctl sent`" + `. The peer runs inside this session; no second terminal.
 `
 
 func appendCommsSection(claudePath, name string) error {

@@ -81,7 +81,29 @@ func (claudeHarness) WireAgent(dest string) ([]string, error) {
 		return notes, err
 	}
 	n, err := ensureDistillerAgent(dest)
-	return append(notes, n...), err
+	notes = append(notes, n...)
+	if err != nil {
+		return notes, err
+	}
+	// In-session peers: one subagent definition per dispatchable
+	// peer, plus pool-root read access for the caller's session. The pool root
+	// is the workspace's parent (agents are direct children of the pool).
+	poolRoot := filepath.Dir(dest)
+	n, err = ensurePeerAgents(poolRoot, dest)
+	notes = append(notes, n...)
+	if err != nil {
+		return notes, err
+	}
+	if IsPool(poolRoot) {
+		note, err := ensurePoolAccess(poolRoot, dest)
+		if err != nil {
+			return notes, err
+		}
+		if note != "" {
+			notes = append(notes, note)
+		}
+	}
+	return notes, nil
 }
 
 // distillerAgentMarker tags the meshctl-managed distiller subagent so upgrades

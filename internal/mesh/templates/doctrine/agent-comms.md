@@ -98,6 +98,20 @@ an answer *now*:
 Both write the same request file (schema below) — `ask` just also runs the peer immediately.
 `meshctl ask --detach` writes the request only — no dispatch; poll the id later.
 
+**`meshctl ask … --in-session`** (Claude Code callers): same request file, same guards and
+audit trail, but the peer runs as a **subagent of your own session** instead of a second
+process in a second terminal. The command records the dispatch and prints the exact
+Agent-tool call to make next (`subagent_type: mesh-<peer>`, prompt naming the request id);
+make it, and when it returns read the answer with `meshctl sent`. Each dispatchable peer has
+a generated definition in your `.claude/agents/mesh-<peer>.md` (rendered from the roster by
+`meshctl agent onboard` / `pool upgrade`; session start lists the ones installed). Inside
+it the peer starts with `meshctl agent brief --agent <peer> --request <id>` (its identity,
+handoff, recall and the ask in one shot — its own hooks do not fire in a subagent), reads
+its KB read-only, and answers through `meshctl inbox respond … --agent <peer>`. It has no
+Agent tool and its gate denies dispatch, file writes, git and KB writes, so it cannot chain
+or drift. Limits: the caller's session pays the peer's tokens; opencode callers use plain
+`ask`.
+
 **Synchronous unblock flow** (`meshctl ask`): the target runs **headlessly in its own
 workspace** with a scoped allowlist (Read/Grep/Glob plus the `meshctl inbox respond|decline` and recall verbs — **no file edits**; on opencode the same policy is passed as an inline permission config) — the peer
 reads the request + code and writes its answer back into the request file, nothing else. When it
@@ -115,6 +129,8 @@ Anti-cascade guards (budget protection) — layered, cheapest→strongest, so a 
 4. **Hourly cap** — max dispatches per rolling hour (default 12, from `<pool>/.agentmesh/dispatch.count`), charged before the lock wait and refunded if the dispatch never runs; a circuit-breaker against fan-out across many experts.
 
 Tunables (env): `AGENT_DISPATCH_HOURLY_MAX`, `AGENT_DISPATCH_STALE_SEC`, `AGENT_DISPATCH_TIMEOUT_SEC` (per-dispatch, default 420s), `AGENT_DISPATCH_MODEL` (pin a cheaper model for dispatched runs). All dispatches, queues, blocks and aborts are logged to `<pool>/.agentmesh/dispatch.log`. Exit codes: 2 unknown target · 3 depth · 4 hourly cap · 6 lock held (BUSY) · 124 timed out · 130 interrupted.
+
+In-session dispatch keeps guards 1, 2 and 4 (the prompt, the depth guard, the hourly cap — logged as `mode=in-session`) and replaces the process-level ones: the peer subagent has no Agent tool (it cannot spawn), and its PreToolUse gate denies `meshctl ask|send`, so chaining is impossible rather than discouraged. No lock is needed — there is no second process to serialize.
 
 ## Request log (example)
 
@@ -209,8 +225,8 @@ triggers:
 **Optional automation:** a future `meshctl memory distill` may do steps 1–2 (mine +
 draft candidates) only. Step 3 (promotion into truth) always stays human/agent-reviewed.
 
-**Capture cross-agent learning on dispatch return.** A headless `meshctl ask`
-run may not commit, so anything the answering peer *learned* lives only in the answered
+**Capture cross-agent learning on dispatch return.** A dispatched peer (headless or
+in-session) may not commit, so anything the answering peer *learned* lives only in the answered
 `intake/` file and is lost if never distilled. Close the loop from the **caller** side:
 when a `meshctl ask` dispatch returns, judge the answer, and for any durable learning write
 a **candidate into the OWNING agent's KB** — not your own:
@@ -227,7 +243,7 @@ meshctl kb finish --agent <owner>     # run from a normal cwd, not inside the wo
 - It lands as a **candidate** (a proposal), so the review gate still holds — the owning
   agent promotes it on its next *interactive* session.
 - Interactive sessions still distill their *own* learning the normal way (steps 1–4); this
-  rule only covers the headless dispatched path, where the peer itself can't commit.
+  rule only covers the dispatched path (headless or in-session), where the peer itself can't commit.
 - `kb --agent` uses the same worktree+merge conflict guard, so a concurrent write on the
   owner is handled (conflict → `needs-human`).
 

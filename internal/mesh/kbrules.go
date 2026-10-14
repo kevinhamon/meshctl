@@ -200,7 +200,7 @@ func saveRuleAcks(path string, acks map[string]bool) {
 // for the first not-yet-acked matching rules of this session, acking them as it
 // denies; otherwise allow.
 func gateKBRules(agentsDir string, p HookPayload) GateDecision {
-	a := hookAgent(agentsDir, p.Cwd)
+	a := payloadAgent(agentsDir, p)
 	if a == nil {
 		return GateDecision{}
 	}
