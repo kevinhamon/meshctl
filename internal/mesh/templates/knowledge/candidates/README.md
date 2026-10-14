@@ -10,4 +10,5 @@ one is verified and durable, consolidate it into the right area
 (`playbooks/`, `experience/`, a decision, `glossary.md`, …) and remove/supersede
 the candidate — an ordinary `meshctl kb finish` commit.
 
-`meshctl doctor` warns if candidates pile up unconsolidated.
+`meshctl doctor` warns on any candidate older than 14 days; `meshctl kb consolidate`
+lists them with the rest of the KB's debt.

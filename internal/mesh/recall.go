@@ -1,6 +1,8 @@
 package mesh
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -12,9 +14,19 @@ import (
 //   - session-records (owned episodic capture),
 //   - the git time-spine (always-on floor: recent commits, even before any
 //     session was captured).
-// Returns compact pointers (title + where + date), never file bodies — the
-// caller reads the KB/handoff/session that a hit points to. Backend is
-// keyword/BM25-ish today; embeddings slot behind this same function later.
+// Returns compact pointers (title + where + date) by default; RecallWithBodies
+// also inlines the top current-tier KB hits within a token budget, so what the
+// KB knows stays in view instead of behind a pointer the model may not follow.
+// Backend is keyword/BM25-ish today; embeddings slot behind this same function
+// later.
+//
+// KB tiers (S1): a KB has a current tier — architecture/, playbooks/,
+// reference/, the state docs (direction.md, risks.md, state.md, glossary.md,
+// system-map.md) and rule notes — maintained in place and stating what is true
+// now, and a log tier — decisions/ and experience/ — append-only history.
+// Recall ranks current above log for the same match, ranks candidates/ (the
+// KB inbox) below both, and drops decisions whose status is superseded,
+// deprecated or rejected: history must not outrank its replacement.
 
 // RecallHit is one compact pointer from any recall source.
 type RecallHit struct {
@@ -24,6 +36,66 @@ type RecallHit struct {
 	Date   string   `json:"date,omitempty"`   // freshness / ended / commit time
 	Detail string   `json:"detail,omitempty"` // refs, files, extra context
 	Score  int      `json:"score"`
+	Tier   string   `json:"tier,omitempty"` // kb hits: "current" | "log" | "inbox"
+	Body   string   `json:"body,omitempty"` // RecallWithBodies: the source text, within budget
+}
+
+// KB tiers.
+const (
+	TierCurrent = "current" // maintained in place; states what is true now
+	TierLog     = "log"     // append-only history (decisions/, experience/)
+	TierInbox   = "inbox"   // candidates/ — proposals, not truth
+)
+
+// kbTier classifies a KB-relative path (knowledge/decisions/x.md → log).
+func kbTier(rel string) string {
+	rel = strings.TrimPrefix(filepath.ToSlash(rel), KnowledgeDir+"/")
+	switch {
+	case strings.HasPrefix(rel, "candidates/"):
+		return TierInbox
+	case strings.HasPrefix(rel, "decisions/"), strings.HasPrefix(rel, "experience/"):
+		return TierLog
+	}
+	return TierCurrent
+}
+
+// bestTier is the highest tier among a topic's sources.
+func bestTier(sources []string) string {
+	best := ""
+	for _, s := range sources {
+		t := kbTier(s)
+		switch {
+		case t == TierCurrent:
+			return TierCurrent
+		case t == TierLog, best == "":
+			best = t
+		}
+	}
+	if best == "" {
+		return TierCurrent
+	}
+	return best
+}
+
+// tierBonus is the ranking prior per tier: a current-tier match outranks the
+// same match in the log, which outranks it in the inbox.
+func tierBonus(tier string) int {
+	switch tier {
+	case TierCurrent:
+		return 2
+	case TierLog:
+		return 1
+	}
+	return 0
+}
+
+// refsPrior caps the cross-reference boost: a heavily cited decision is
+// familiar, not three times as relevant.
+func refsPrior(refs int) int {
+	if refs > 3 {
+		return 3
+	}
+	return refs
 }
 
 // queryTokens lowercases + kebab-splits a query into terms of length ≥3.
@@ -72,7 +144,8 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 	tokens := queryTokens(query)
 	var hits []RecallHit
 
-	// KB topics (authoritative; live).
+	// KB topics (authoritative; live). Inactive decisions are already gone
+	// (computeTopics drops them); tiers rank what is left.
 	if idx, err := computeTopics(agent); err == nil && includeKB {
 		for _, t := range idx.Topics {
 			s := len(tokens) == 0 // empty query → include, score 0
@@ -82,9 +155,13 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 				score = tokenScore(hay, tokens)
 			}
 			if s || score > 0 {
+				tier := bestTier(t.Sources)
+				if score > 0 {
+					score = score*3 + tierBonus(tier) + refsPrior(t.Refs)
+				}
 				hits = append(hits, RecallHit{
 					Kind: "kb", Title: t.Topic, Where: t.Sources,
-					Date: t.Freshness, Score: score + t.Refs, // KB refs as a mild prior
+					Date: t.Freshness, Score: score, Tier: tier,
 				})
 			}
 		}
@@ -99,7 +176,7 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 		}, " ")
 		score := 0
 		if len(tokens) > 0 {
-			score = tokenScore(hay, tokens)
+			score = tokenScore(hay, tokens) * 3
 			if score == 0 {
 				continue
 			}
@@ -139,6 +216,74 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 	return hits, nil
 }
 
+// RecallWithBodies is Recall plus the text of the top current-tier KB hits,
+// inlined in rank order until budgetTokens (≈4 chars per token) is spent. A
+// hit whose source does not fit is left as a pointer; nothing is truncated
+// mid-file except the last one that fits partially. Log-tier and inbox hits
+// stay pointers: history is for following up, not for reading by default.
+func RecallWithBodies(agent *Agent, query string, limit, budgetTokens int) ([]RecallHit, error) {
+	hits, err := Recall(agent, query, limit)
+	if err != nil || budgetTokens <= 0 {
+		return hits, err
+	}
+	remaining := budgetTokens * 4
+	for i := range hits {
+		h := &hits[i]
+		if h.Kind != "kb" || h.Tier != TierCurrent || len(h.Where) == 0 || remaining <= 0 {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(agent.Dir(), h.Where[0]))
+		if err != nil {
+			continue
+		}
+		_, body := splitFrontmatter(string(b))
+		body = strings.TrimSpace(body)
+		if body == "" {
+			continue
+		}
+		if len(body) > remaining {
+			if remaining < 400 {
+				break // too little left to be worth a fragment
+			}
+			body = body[:remaining] + "\n…(truncated — read " + h.Where[0] + ")"
+		}
+		h.Body = body
+		remaining -= len(body)
+	}
+	return hits, nil
+}
+
+// RecallMarkdown renders hits as a list; a hit with a body gets it inlined
+// under the pointer.
+func RecallMarkdown(hits []RecallHit) string {
+	var b strings.Builder
+	for _, h := range hits {
+		fmt.Fprintf(&b, "- [%s", h.Kind)
+		if h.Tier != "" {
+			fmt.Fprintf(&b, "/%s", h.Tier)
+		}
+		fmt.Fprintf(&b, "] %s", h.Title)
+		if len(h.Where) > 0 {
+			fmt.Fprintf(&b, " — %s", strings.Join(h.Where, "  "))
+		}
+		if h.Date != "" {
+			fmt.Fprintf(&b, " (%s)", h.Date)
+		}
+		b.WriteString("\n")
+		if h.Detail != "" {
+			fmt.Fprintf(&b, "  %s\n", h.Detail)
+		}
+		if h.Body != "" {
+			b.WriteString("\n  ```\n")
+			for _, ln := range strings.Split(h.Body, "\n") {
+				b.WriteString("  " + ln + "\n")
+			}
+			b.WriteString("  ```\n")
+		}
+	}
+	return b.String()
+}
+
 // gitSpineHits reads recent commits from the agent's repo and returns those whose
 // subject matches the query tokens (or the most recent, for an empty query). This
 // is the harness-neutral floor: "what did we do" derived from git alone.
@@ -161,7 +306,7 @@ func gitSpineHits(agent *Agent, tokens []string) []RecallHit {
 		sha, date, subj := parts[0], parts[1], parts[2]
 		score := 0
 		if len(tokens) > 0 {
-			score = tokenScore(subj, tokens)
+			score = tokenScore(subj, tokens) * 3
 			if score == 0 {
 				continue
 			}

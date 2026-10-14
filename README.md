@@ -111,10 +111,11 @@ meshctl inbox   list | next [--claim] | claim <id> | release <id>
                 respond <id> --status <s> --response "…" | decline <id> --reason "…" [--redirect <agent>]
                 archive <id> | --answered | --closed [--force]
 meshctl sent    [--all] | ack <id>...      # responses to requests you sent
-meshctl kb      begin | finish [--abort]
-meshctl memory  recall "<q>" | sessions
+meshctl kb      begin | finish [--abort] | consolidate [--json]
+meshctl memory  recall "<q>" [--budget N] | sessions
 meshctl session start | end | list
-meshctl handoff show | set          (set reads the body from stdin)
+meshctl handoff show | template | set   (set reads the body from stdin; refuses a body that fails lint)
+meshctl state   show | template | set   (the ≤40-line current-state digest, injected at session start)
 meshctl intuition recall "<q>"
 meshctl hook    session-start | user-prompt | session-beat | session-end | pre-tool-use   (wired per-agent; not run by hand)
 meshctl doctor  [--fix]              # manifests, wiring, KB consistency, pool hygiene
@@ -206,11 +207,22 @@ doctor` flags any agent still wired for the other major.
 
 ## Cognition — how agents learn
 
-Every agent maintains a git-tracked `knowledge/` KB (decisions, risks, playbooks,
-experience, reference) and learns over time:
+Every agent maintains a git-tracked `knowledge/` KB in two tiers — a **current tier**
+(`state.md` digest, `direction.md`, `risks.md`, `architecture/`, `playbooks/`,
+`reference/`) that states what is true now, and a **log tier** (`decisions/`,
+`experience/`) that is append-only history — and learns over time:
 
 - **Recall:** `meshctl memory recall "<q>"` — live, unified over KB topics + captured
-  session-records + the git commit time-spine; returns compact pointers, never bodies.
+  session-records + the git commit time-spine. Current tier outranks log, `candidates/`
+  ranks last, superseded decisions never appear. Pointers by default; `--budget N`
+  inlines the top current-tier bodies within about N tokens.
+- **Decisions are machine-readable:** ADR frontmatter (`status`, `supersedes`,
+  `superseded_by`, `updates`); `meshctl doctor --fix` migrates the bullet form.
+- **Consolidate:** `meshctl kb consolidate` lists the KB's debt — accepted decisions not
+  landed in the docs they `updates:` (a doctor error), decisions the `state.md` digest
+  predates, candidates older than 14 days, a handoff or digest that fails lint. The agent
+  works it off in a `kb begin`/`finish` worktree and rewrites the digest with
+  `meshctl state set`.
 - **Episodic capture:** at session end the harness hook writes an extractive
   session-record (files touched, commands, tools, refs, commits, handoff) — no LLM.
 - **Intuition:** `meshctl intuition recall` / the per-prompt hook surface compact
@@ -221,8 +233,10 @@ experience, reference) and learns over time:
   boundary nudge (wind-down phrase or 8 prompts) is on for every agent; on Claude Code it
   spawns the scaffolded `.claude/agents/distiller.md` subagent, on opencode the session-end
   hook runs the distiller. Narrow it with `AGENT_MESH_DISTILL_NUDGE_AGENTS=a,b` or `none`.
-- **Handoff:** `meshctl handoff set` writes the resume point; auto-injected at session
-  start. `meshctl doctor` validates manifests + KB + harness wiring.
+- **Handoff and state:** `meshctl handoff set` writes the resume point and `meshctl state
+  set` the current-state digest, both from a fixed template and both refusing a body that
+  fails lint; both are injected at session start. `meshctl doctor` validates manifests +
+  KB + harness wiring.
 
 Authoritative protocol: `internal/mesh/templates/doctrine/agent-comms.md` (emitted into
 each pool as `.agentmesh/doctrine/agent-comms.md`). Design rationale lives in `docs/`.

@@ -7,14 +7,14 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 var (
-	reSupersededBy = regexp.MustCompile(`(?i)superseded by\s+#?0*(\d{1,4})`)
+	reSupersededBy = regexp.MustCompile(`(?i)superseded by\s+(?:ADR[-\s]?)?#?0*(\d{1,4})`)
 	reLeadingNum   = regexp.MustCompile(`^0*(\d{1,4})`)
 	reADRRef       = regexp.MustCompile(`(?i)\bADR[-\s]0*(\d{1,4})\b`)
 	reReadmeRow    = regexp.MustCompile(`\(0*(\d{1,4})-[^)]*\.md\)`) // README's own bare links, e.g. (0007-arck.md)
-	reStatusLine   = regexp.MustCompile(`(?im)^\s*-?\s*\*\*status:\*\*\s*([a-z]+)`)
 	reStatusWord   = regexp.MustCompile(`(?i)\b(accepted|proposed|rejected|deprecated|superseded)\b`)
 	rePendingADR   = regexp.MustCompile(`(?i)pending[^.|\n]{0,24}?\badr\b|\badr\b[^.|\n]{0,12}?pending`)
 	reEffective    = regexp.MustCompile(`(?im)^\s*effective\s*:`)
@@ -45,16 +45,14 @@ func referenceMissingEffective(kbRoot string) []string {
 	return out
 }
 
-// fileStatus reads an ADR's `- **Status:** <word>` (first status word, lowercased).
+// fileStatus reads an ADR's status: frontmatter `status:` when present, else
+// the `- **Status:** <word>` bullet (bold and trailing notes tolerated).
 func fileStatus(path string) string {
-	b, err := os.ReadFile(path)
+	d, err := ParseADR(path)
 	if err != nil {
 		return ""
 	}
-	if m := reStatusLine.FindStringSubmatch(string(b)); m != nil {
-		return strings.ToLower(m[1])
-	}
-	return ""
+	return d.Status
 }
 
 // kbConsistencyFindings reports mechanizable ADR/direction drift — all warn-level
@@ -67,7 +65,7 @@ func kbConsistencyFindings(agent, kbRoot string) []DoctorFinding {
 		return nil
 	}
 	entries, _ := os.ReadDir(decisionsDir)
-	byNum := map[string]string{}      // num -> filename
+	byNum := map[string]string{}       // num -> filename
 	statusByNum := map[string]string{} // num -> in-file status
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
@@ -144,6 +142,14 @@ func kbConsistencyFindings(agent, kbRoot string) []DoctorFinding {
 	return out
 }
 
+// groupList joins up to n items and counts the rest, so a long list is one line.
+func groupList(items []string, n int) string {
+	if len(items) <= n {
+		return strings.Join(items, ", ")
+	}
+	return strings.Join(items[:n], ", ") + fmt.Sprintf(", … (+%d more)", len(items)-n)
+}
+
 // dirEmptyish is true when a dir has no real entries (README.md/.dotfiles don't count).
 func dirEmptyish(dir string) bool {
 	entries, err := os.ReadDir(dir)
@@ -181,15 +187,21 @@ func supersededDefects(decisionsDir string) []string {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(decisionsDir, e.Name()))
+		d, err := ParseADR(filepath.Join(decisionsDir, e.Name()))
 		if err != nil {
 			continue
 		}
-		m := reSupersededBy.FindStringSubmatch(string(b))
-		if m == nil {
+		var target string
+		if len(d.SupersededBy) > 0 {
+			target = strings.TrimLeft(d.SupersededBy[0], "0")
+		} else if b, err := os.ReadFile(filepath.Join(decisionsDir, e.Name())); err == nil {
+			if m := reSupersededBy.FindStringSubmatch(string(b)); m != nil {
+				target = m[1]
+			}
+		}
+		if target == "" {
 			continue
 		}
-		target := m[1]
 		tf, ok := byNum[target]
 		if !ok {
 			defects = append(defects, fmt.Sprintf("%s is marked superseded by %s, but no such decision file exists", e.Name(), target))
@@ -301,6 +313,41 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 			// ADR-0019: reference notes must carry an `effective:` date (warn).
 			for _, msg := range referenceMissingEffective(kbRoot) {
 				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
+			}
+			// S1 — the KB's two tiers stay consistent: an accepted decision must
+			// land in the state docs it names (error: the doc is stale by the
+			// decision's own account); the state digest must not predate accepted
+			// decisions (warn); candidates must not age unjudged (warn).
+			for _, debt := range adrLandingDebt(a.Dir()) {
+				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: fmt.Sprintf(
+					"decisions/%s (accepted) updates %s, but that doc is older than the decision — fold the decision in (`meshctl kb consolidate`)",
+					debt.ADR.File, strings.Join(debt.Targets, ", "))})
+			}
+			if dirExists(filepath.Join(kbRoot, "decisions")) || dirExists(filepath.Join(kbRoot, "architecture")) {
+				if st, _ := os.ReadFile(filepath.Join(kbRoot, StateFile)); strings.TrimSpace(string(st)) == "" {
+					findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no knowledge/" + StateFile + " digest — sessions start without a current-state view; write one (`meshctl state template`, `meshctl state set`)"})
+				} else {
+					if w := StateLint(string(st)); len(w) > 0 {
+						findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + StateFile + ": " + strings.Join(w, "; ") + " — rewrite with `meshctl state set`"})
+					}
+					if debt := stateDigestDebt(a.Dir()); len(debt) > 0 {
+						nums := make([]string, 0, len(debt))
+						for _, d := range debt {
+							nums = append(nums, "ADR-"+d.Num)
+						}
+						findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: fmt.Sprintf(
+							"knowledge/%s predates %d accepted decision(s): %s — run `meshctl kb consolidate`", StateFile, len(debt), groupList(nums, 6))})
+					}
+				}
+			}
+			if aged := agedCandidates(a.Dir(), time.Now()); len(aged) > 0 {
+				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: fmt.Sprintf(
+					"%d candidate(s) older than 14 days, unconsolidated: %s — judge them (`meshctl kb consolidate`)", len(aged), groupList(aged, 4))})
+			}
+			if h, _ := HandoffShow(a); strings.TrimSpace(h) != "" {
+				if w := HandoffLint(h); len(w) > 0 {
+					findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + HandoffFile + ": " + strings.Join(w, "; ") + " — rewrite with `meshctl handoff set`"})
+				}
 			}
 			// (ADR-0033) The persisted memory index is off the routing path — recall
 			// reads live — so its staleness is no longer a doctor warning.

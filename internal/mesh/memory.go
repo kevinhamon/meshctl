@@ -132,8 +132,17 @@ func computeTopics(agent *Agent) (*MemoryIndex, error) {
 	var files []fileInfo
 	var newest time.Time
 
+	// Superseded/deprecated/rejected decisions are history, not knowledge:
+	// they never enter the topic index, so recall cannot route to them.
+	inactive := inactiveKBFiles(kb)
+
 	err := filepath.WalkDir(kb, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".md") {
+			return nil
+		}
+		if kbRel, _ := filepath.Rel(kb, p); inactive[filepath.ToSlash(kbRel)] || kbRel == HandoffFile {
+			// The handoff is injected whole at session start; its headings
+			// are session-local and would pollute the topic space.
 			return nil
 		}
 		info, _ := d.Info()

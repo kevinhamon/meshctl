@@ -144,21 +144,41 @@ Coordination (above) is *how agents talk*. **Cognition** is *how one agent
 organizes what it knows and recognizes what it has seen* — bound to the same
 file substrate, no new store.
 
-**Knowledge base** — each agent's git-tracked `knowledge/` holds these areas:
-`decisions/` (decision records), domain files + `architecture/`, `playbooks/` (repeatable
-procedures), `experience/` (retrospectives / failure modes), `direction.md` +
-`risks.md` (state), and `candidates/` (proposed learning awaiting consolidation —
-the KB inbox, distinct from the mesh `intake/`). The agent **contract** stays in
-`CLAUDE.md` + `agent.yaml` (single source — no `knowledge/contract.md`).
-`meshctl agent onboard` scaffolds missing areas add-only; `meshctl doctor` warns on
-empty areas and errors only on a broken `superseded by NNNN`.
+**Knowledge base** — each agent's git-tracked `knowledge/` holds these areas, in two
+tiers. The **current tier** states what is true now and is maintained in place:
+`state.md` (a ≤40-line digest — Now / Active / Recently decided / Open questions —
+injected at session start beside the handoff), `direction.md` + `risks.md`, domain
+files + `architecture/`, `playbooks/` (repeatable procedures), `reference/` (dated
+external-source notes), rule notes. The **log tier** is append-only history:
+`decisions/` (decision records) and `experience/` (retrospectives / failure modes).
+`candidates/` is the KB inbox (proposed learning awaiting consolidation, distinct
+from the mesh `intake/`). The agent **contract** stays in `CLAUDE.md` + `agent.yaml`
+(single source — no `knowledge/contract.md`). `meshctl agent onboard` scaffolds
+missing areas add-only.
 
-**Memory** — a generated, disposable, `.gitignore`d index (`.memory/index.json`),
-a pure function of `knowledge/` + `agent.yaml`. Advisory; the KB is authoritative.
-`meshctl memory rebuild` (auto-run after `kb finish`) and `memory recall
-"<topic>"` return KB locations + familiarity facts (freshness, refs) **without
-reading file bodies**. Recovery is a property: `rm -rf .memory && meshctl memory
-rebuild` fully reconstructs it.
+**Decision records are machine-readable.** Every ADR carries YAML frontmatter —
+`status:` (`proposed | accepted | rejected | deprecated | superseded`), `date:`,
+`supersedes:` / `superseded_by:` (numbers), and `updates:` (the current-tier docs the
+decision changes) — with the human `- **Status:**` bullet kept for the reader.
+`meshctl doctor --fix` adds the block to decisions that only have the bullet. Recall
+never returns a superseded, deprecated or rejected decision, so retiring a decision
+means marking it, not deleting it (superseded knowledge stays traceable, clearly
+inactive).
+
+**A decision must land.** `meshctl doctor` errors when a doc named in an accepted
+decision's `updates:` is older than the decision, warns when `state.md` predates an
+accepted decision, warns when a candidate is older than 14 days, and warns on a
+handoff or digest that fails lint. `meshctl kb consolidate` lists that debt in the
+order to work it off; the agent does the work in a `kb begin`/`kb finish` worktree and
+rewrites the digest with `meshctl state set` (fixed template, refuses a body that
+fails lint).
+
+**Memory** — computed live from `knowledge/` + `agent.yaml` on every call; nothing is
+persisted. Advisory; the KB is authoritative. `meshctl memory recall "<topic>"` returns
+tiered pointers (current tier outranks log, which outranks `candidates/`) with
+freshness and refs; `--budget N` inlines the top current-tier bodies within about N
+tokens so what the KB knows is in view rather than behind a pointer. Log-tier hits stay
+pointers.
 
 **Retrieval loop (agent behavior, not code)** — Recognize → **Recall**
 (`memory recall`) → **Retrieve** (read the KB files it points to — authoritative)
@@ -189,7 +209,10 @@ knowledge (the KB). This is the retrieval loop's **Learn** stage, made concrete.
    rest. `meshctl kb finish` merges the change and auto-rebuilds the memory
    index, so `memory recall` now routes to it.
 4. **Leave candidates/ clean.** It is a holding area, not a graveyard — consolidate or
-   delete; `doctor` warns if candidates pile up unconsolidated.
+   delete; `doctor` warns on any candidate older than 14 days.
+5. **Consolidate.** Distilling only adds. After a decision is accepted, rewrite the
+   current-tier docs it `updates:` and fold it into `state.md`; `meshctl kb consolidate`
+   says what is outstanding.
 
 **Guardrails:**
 - **Review gate** — a human or the owning agent approves before a candidate becomes truth.
@@ -253,11 +276,14 @@ An authoritative, git-tracked **`knowledge/handoff.md`** per agent: *where we ar
 next concrete step*. The deliberate-tier complement to the episodic engine's fuzzy recap; distinct
 from strategic State (`direction.md`/`risks.md`) and from cross-agent `intake/`.
 
-- **Read at start:** the SessionStart surface auto-injects it (`meshctl handoff show`).
-- **Write at end / when attention shifts:** compose the body and
-  `meshctl handoff set` (Learn stage). Suggested body — *Current focus · Status · Next
-  step (the resume point) · Open threads/blockers · Pointers*. Keep it a handoff, not a
-  journal; rewrite it (don't append). git history preserves prior handoffs.
+- **Read at start:** the SessionStart surface auto-injects it (`meshctl handoff show`),
+  after the `state.md` digest — the digest says what the world looks like, the handoff
+  says where the last session stopped.
+- **Write at end / when attention shifts:** fill in `meshctl handoff template` (Current
+  State · Next Step · Open Threads · Pointers, ≤40 lines) and `meshctl handoff set` (Learn
+  stage). `set` refuses a body with a missing section, a leftover placeholder or over
+  budget. Keep it a handoff, not a journal; rewrite it (don't append). git history
+  preserves prior handoffs.
 
 ### Tool reference — what's in your toolbox + the house rules
 

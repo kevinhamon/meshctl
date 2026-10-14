@@ -1,6 +1,6 @@
 ---
 name: mesh-cognition
-description: How this agent maintains its own knowledge base and learns over time — the retrieval loop (recall → retrieve → verify → act → learn), the distillation ritual (turn recurring intuition into durable KB via kb begin/finish), cross-agent learning capture on dispatch return, and session handoff. Invoke at session start (to recall), whenever a session yields a reusable procedure / failure mode / consequential decision (to distill), when recording an ADR or logging a risk, on returning from an `meshctl ask` dispatch, and at session end (to write the handoff). Every mesh agent's primary cognition instructions.
+description: How this agent maintains its own knowledge base and learns over time — the retrieval loop (recall → retrieve → verify → act → learn), the distillation ritual (turn recurring intuition into durable KB via kb begin/finish), consolidation (land decisions in the current tier, keep the state digest true, judge candidates), cross-agent learning capture on dispatch return, and session handoff. Invoke at session start (to recall), whenever a session yields a reusable procedure / failure mode / consequential decision (to distill), when recording an ADR or logging a risk, when `meshctl doctor` or `kb consolidate` reports KB debt, on returning from an `meshctl ask` dispatch, and at session end (to write the handoff). Every mesh agent's primary cognition instructions.
 ---
 
 # Mesh cognition — maintain your own KB, learn over time
@@ -11,20 +11,28 @@ substrate, no new store. This skill is the operative trigger; the **authoritativ
 full spec is `.agentmesh/doctrine/agent-comms.md` §Knowledge & Memory (ADR-0014–0018)**.
 When this skill and that section disagree, that section wins — read it.
 
-Your KB is your own git-tracked `knowledge/` tree:
-`decisions/` (ADRs) · domain files + `architecture/` · `playbooks/` (repeatable
-procedures) · `experience/` (retros / failure modes) · `direction.md` + `risks.md`
-(state) · `candidates/` (the KB inbox — proposed learning awaiting review) ·
-`reference/` (cited external-doc notes). Your contract stays in `CLAUDE.md` +
-`agent.yaml`. Memory (`.memory/index.json`) is a generated, disposable index —
-advisory; the KB is authoritative.
+Your KB is your own git-tracked `knowledge/` tree, in **two tiers**:
+
+- **Current tier — what is true now**, maintained in place: `state.md` (the ≤40-line
+  digest, injected at session start), `direction.md` + `risks.md`, domain files +
+  `architecture/`, `playbooks/` (repeatable procedures), `reference/` (cited
+  external-doc notes), rule notes.
+- **Log tier — history**, append-only: `decisions/` (ADRs) and `experience/` (retros /
+  failure modes). A decision is a *change* to the current tier, not a place to read
+  the current tier from.
+- `candidates/` is the KB inbox — proposed learning awaiting review, not truth.
+
+Your contract stays in `CLAUDE.md` + `agent.yaml`. Memory is computed live from
+`knowledge/` — advisory; the KB is authoritative.
 
 ## Retrieval loop (do this every session)
 
 Recognize → **Recall** → **Retrieve** → Reconcile → **Verify** → Act → **Learn**
 
-1. **Recall.** `meshctl memory recall "<topic>"` returns KB locations + freshness
-   without reading bodies. Your `knowledge/handoff.md` is auto-injected at start.
+1. **Recall.** `meshctl memory recall "<topic>"` returns tiered pointers — current
+   tier outranks log, superseded decisions never appear. Add `--budget 4000` to inline
+   the top current-tier bodies so the knowledge is in view. Your `state.md` digest and
+   `handoff.md` are auto-injected at start.
 2. **Retrieve.** Read the KB files recall points to — they are authoritative.
 3. **Reconcile** conflicts in favor of the maintained KB; **Verify** against live
    systems / MCP before acting.
@@ -45,7 +53,54 @@ doctor` warns `playbooks/`/`experience/` are empty. Quality over volume.
    into the right area — `playbooks/`, `experience/`, a **decision** (ADR in
    `decisions/`), or `glossary.md`/`system-map.md`. Log new risks in `risks.md`.
    Drop the rest. `meshctl kb finish` merges + auto-rebuilds the memory index.
-4. **Leave `candidates/` clean** — a holding area, not a graveyard.
+4. **Leave `candidates/` clean** — a holding area, not a graveyard. `doctor` warns
+   when a candidate is older than 14 days.
+
+## Consolidation — keep the current tier true (do this when doctor or `kb consolidate` says so)
+
+Distilling only ever *adds*. Consolidation is what keeps a growing KB a brain rather
+than a log. `meshctl kb consolidate` lists the debt in the order to work it off:
+
+- **Decisions must be machine-readable.** Every ADR carries YAML frontmatter the
+  tooling reads (the human `- **Status:**` bullet stays for the reader):
+  ```yaml
+  ---
+  status: accepted            # proposed | accepted | rejected | deprecated | superseded
+  date: 2026-10-14
+  supersedes: [0045]          # when this replaces an earlier decision
+  superseded_by: [0050]       # set on the OLD decision when it is replaced
+  updates: [architecture/backend-apis.md, state.md]   # the current-tier docs this changes
+  ---
+  ```
+  `meshctl doctor --fix` adds it to decisions that only have the bullet. Recall drops
+  `superseded` / `deprecated` / `rejected` decisions, so marking the old one is what
+  retires it. Write new ADRs with the frontmatter from the start.
+- **A decision must land.** Each doc in `updates:` is rewritten to reflect the decision;
+  until it is, `doctor` reports an error (the doc is older than the decision that changed
+  it). Accepted decisions newer than `state.md` are a warning until the digest absorbs them.
+- **Keep the digest true.** `knowledge/state.md` is the current tier's front page — Now /
+  Active / Recently decided / Open questions, ≤40 lines, standing facts only. Rewrite it
+  after consolidating, in one pass, from the fixed template:
+  ```
+  meshctl state set <<'EOF'
+  ## Now
+  <3-8 lines: the standing truths of this domain today>
+
+  ## Active
+  - <initiative / migration in flight — where it stands> (or: none)
+
+  ## Recently decided
+  - ADR-NNNN <what changed because of it> (or: none)
+
+  ## Open questions
+  - <unresolved conflict / pending decision — who owns it> (or: none)
+  EOF
+  ```
+  `state set` refuses a body with a missing section, a leftover placeholder or over
+  budget (`--force` overrides). `meshctl state template` prints the shape.
+- **Judge aged candidates.** Promote into `playbooks/` / `experience/` / a decision, or
+  delete. All of this is ordinary KB work: `meshctl kb begin` → edit → commit →
+  `meshctl kb finish`; the digest and handoff go through `state set` / `handoff set`.
 
 **Off the main thread.** Steps 1–2 are slow and mechanical, so they run in the
 background: on Claude Code, spawn the scaffolded `distiller` subagent
@@ -122,8 +177,9 @@ Rules — that is all there is to decide:
 - **Facts only**, no session narrative ("I then…"), no hedging. At most 40 lines.
 - **Rewrite the whole thing** each time; never append. Git keeps prior handoffs.
 - Keep the quoted `'EOF'` so nothing is shell-expanded. meshctl adds the timestamp.
-- Don't re-read or second-guess it after writing; `meshctl handoff set` reports any
-  missing section or leftover placeholder.
+- Don't re-read or second-guess it after writing; `meshctl handoff set` refuses a body
+  with a missing section, a leftover placeholder or over budget — fix and resend
+  (`--force` writes it anyway).
 
 ## Repo hygiene — knowledge is only safe once pushed (ADR-0039)
 

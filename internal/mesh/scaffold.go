@@ -610,14 +610,19 @@ const cognitionSection = `
 You own a git-tracked ` + "`knowledge/`" + ` KB and **learn over time** — this is not optional.
 Run the **` + "`mesh-cognition`" + ` skill** for the full procedure; its short form:
 
-- **Recall at start.** ` + "`meshctl memory recall \"<topic>\"`" + `, then read the KB files it
-  points to. Your ` + "`knowledge/handoff.md`" + ` is auto-injected.
+- **Recall at start.** ` + "`meshctl memory recall \"<topic>\" --budget 4000`" + ` (current tier first,
+  bodies inlined), then read the KB files it points to. Your ` + "`knowledge/state.md`" + ` digest
+  and ` + "`knowledge/handoff.md`" + ` are auto-injected.
 - **Distill as you learn.** When a session yields a recurring pattern, a reusable
   procedure, a failure mode, or a consequential decision: ` + "`meshctl kb begin`" + ` →
   write ` + "`knowledge/candidates/<slug>.md`" + ` → consolidate into ` + "`playbooks/`" + ` /
   ` + "`experience/`" + ` / a decision (ADR) → ` + "`meshctl kb finish`" + `.
 - **Record decisions & risks.** Consequential domain choices become ADRs in
-  ` + "`knowledge/decisions/`" + `; new risks get logged in ` + "`knowledge/risks.md`" + `.
+  ` + "`knowledge/decisions/`" + ` with status frontmatter (` + "`status:`, `supersedes:`, `updates:`" + `);
+  new risks get logged in ` + "`knowledge/risks.md`" + `.
+- **Consolidate.** When ` + "`meshctl doctor`" + ` or ` + "`meshctl kb consolidate`" + ` reports debt: land the
+  decision in the docs it updates, judge aged candidates, rewrite the digest with
+  ` + "`meshctl state set`" + ` (fixed template, ≤40 lines).
 - **Handoff at end.** Fill in ` + "`meshctl handoff template`" + ` (fixed sections, ≤40 lines, facts only) and
   write it in one pass: ` + "`meshctl handoff set <<'EOF' … EOF`" + `.
 - **Repo hygiene (your knowledge is only as safe as your remote).** Your workspace

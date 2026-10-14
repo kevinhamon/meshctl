@@ -157,6 +157,12 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 		b.WriteString(md)
 		b.WriteString("\n\n")
 	}
+	// Current-state digest (S1): what the world looks like, before where the
+	// last session stopped.
+	if st := StateBlock(a); st != "" {
+		b.WriteString(st)
+		b.WriteString("\n\n")
+	}
 	if handoff != "" {
 		b.WriteString("# Session handoff — resume point (authoritative; rewrite it before you leave)\n\n")
 		b.WriteString(handoff)

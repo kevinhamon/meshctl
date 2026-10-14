@@ -197,6 +197,24 @@ func agentHygiene(agentsDir string, a *Agent, now time.Time) []HygieneItem {
 		}
 	}
 
+	// Decisions whose status lives only in the human bullet: recall cannot
+	// tell a superseded decision from its replacement without frontmatter.
+	// The fix prepends the YAML block and leaves the text untouched.
+	if need := adrNeedsFrontmatter(filepath.Join(dir, KnowledgeDir)); len(need) > 0 {
+		paths := make([]string, 0, len(need))
+		for _, d := range need {
+			paths = append(paths, filepath.Join(dir, KnowledgeDir, "decisions", d.File))
+		}
+		add(fmt.Sprintf("%d decision(s) without status frontmatter (recall cannot drop superseded ones; adds `status:` from the Status bullet)", len(need)), func() error {
+			for _, p := range paths {
+				if err := migrateADRFrontmatter(p); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+
 	// Retired memory index (recall computes live since v1.1; the file is dead).
 	if p := filepath.Join(dir, MemoryDir, MemoryIndexFile); fileExists(p) {
 		add("retired "+MemoryDir+"/"+MemoryIndexFile+" (recall is computed live; the file is unused)", removeFix(p))

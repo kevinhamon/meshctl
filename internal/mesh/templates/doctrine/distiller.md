@@ -47,6 +47,11 @@ silently queries the WRONG namespace and returns nothing. Pass `--agent <agent>`
    current truth in either store is always a DECISION.
 3. **Draft** one candidate note per surviving learning (see output contract).
 4. **Triage** each candidate into exactly one bucket (rubric below).
+5. **Report the KB's debt.** Run `meshctl kb consolidate --agent <agent>` and include
+   its non-empty sections in the return (counts + the first items). Consolidation —
+   landing accepted decisions in the docs they update, rewriting `state.md`, judging
+   candidates older than 14 days — is promotion, so the live session does it; the
+   distiller only makes sure it is seen.
 
 ## Triage rubric (conservative — when unsure, never AUTO)
 
@@ -74,7 +79,8 @@ silently queries the WRONG namespace and returns nothing. Pass `--agent <agent>`
 - **Each DECISION** → also append an entry to `knowledge/pending-decisions.md`:
   `- [ ] <id> — <one-line> · rec: <keep as playbook | open ADR | drop | …> · candidate: candidates/<slug>.md`
 - **Return** (to whatever launched it) a short summary: counts per bucket + the DECISION
-  one-liners **only**. This return is the sole thing the main thread relays to the user.
+  one-liners, plus the consolidation debt (step 5) when there is any. This return is the
+  sole thing the main thread relays to the user.
 
 ## Guardrails
 

@@ -161,7 +161,7 @@ func rootCmd() *cobra.Command {
 		msgCmd(),   // ask | send
 		inboxCmd(), // list | next | claim | release | respond | decline | archive
 		sentCmd(),  // requester side: responses awaiting read-back
-		kbCmd(), memoryCmd(), sessionCmd(), handoffCmd(), intuitionCmd(), hookCmd(),
+		kbCmd(), memoryCmd(), sessionCmd(), handoffCmd(), stateCmd(), intuitionCmd(), hookCmd(),
 		doctorCmd(),
 		// Top-level aliases for high-frequency verbs (muscle memory + one preapproval).
 		askCmd(), sendCmd(),
@@ -1395,11 +1395,18 @@ func memoryCmd() *cobra.Command {
 	}
 	rebuild.Flags().StringVar(&agent, "agent", "", "agent name (default: cwd/$AGENT_NAME)")
 
-	var limit int
+	var limit, budget int
 	recall := &cobra.Command{
 		Use:   "recall <query>",
-		Short: "Live unified recall over KB + session-records + git spine (compact pointers, no bodies)",
-		Args:  cobra.MinimumNArgs(1),
+		Short: "Live unified recall over KB + session-records + git spine (tiered pointers; --budget inlines current-tier bodies)",
+		Long: `Rank KB topics, captured session-records and recent commits for a query.
+KB hits carry a tier: "current" (architecture/, playbooks/, reference/, direction.md,
+risks.md, state.md — what is true now) outranks "log" (decisions/, experience/ —
+history) which outranks "inbox" (candidates/ — proposals). Decisions whose status is
+superseded, deprecated or rejected are never returned. With --budget N the top
+current-tier hits have their text inlined (≈N tokens in total) so the knowledge is
+in view, not behind a pointer; log and inbox hits stay pointers.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {
@@ -1409,7 +1416,7 @@ func memoryCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			hits, err := mesh.Recall(a, strings.Join(args, " "), limit)
+			hits, err := mesh.RecallWithBodies(a, strings.Join(args, " "), limit, budget)
 			if err != nil {
 				return err
 			}
@@ -1425,25 +1432,14 @@ func memoryCmd() *cobra.Command {
 				fmt.Println("no matching pointers — the KB may still cover it; try a broader query or read knowledge/ directly")
 				return nil
 			}
-			for _, h := range hits {
-				fmt.Printf("[%s] %s\n", h.Kind, h.Title)
-				if len(h.Where) > 0 {
-					fmt.Printf("  %s", strings.Join(h.Where, "  "))
-					if h.Date != "" {
-						fmt.Printf("  (%s)", h.Date)
-					}
-					fmt.Println()
-				}
-				if h.Detail != "" {
-					fmt.Printf("  %s\n", h.Detail)
-				}
-			}
+			fmt.Print(mesh.RecallMarkdown(hits))
 			return nil
 		},
 	}
 	recall.Flags().StringVar(&agent, "agent", "", "agent name (default: cwd/$AGENT_NAME)")
 	recall.Flags().BoolVar(&asJSON, "json", false, "machine-readable JSON for routing")
 	recall.Flags().IntVar(&limit, "limit", 10, "max pointers")
+	recall.Flags().IntVar(&budget, "budget", 0, "inline current-tier KB bodies up to about this many tokens (0 = pointers only)")
 
 	var sessLimit int
 	sessions := &cobra.Command{
@@ -1548,6 +1544,7 @@ func intuitionCmd() *cobra.Command {
 // handoffCmd — the resumable session handoff (ADR-0017): where we are + next step.
 func handoffCmd() *cobra.Command {
 	var agent string
+	var force bool
 	cmd := &cobra.Command{
 		Use:   "handoff show|template|set",
 		Short: "Read/write the agent's authoritative session handoff (current focus + next step)",
@@ -1616,18 +1613,116 @@ func handoffCmd() *cobra.Command {
 			if strings.TrimSpace(string(b)) == "" {
 				return fmt.Errorf("handoff set: empty body on stdin")
 			}
+			if problems := mesh.HandoffLint(string(b)); len(problems) > 0 && !force {
+				for _, w := range problems {
+					fmt.Fprintln(os.Stderr, "✗ handoff: "+w)
+				}
+				return &mesh.CodedError{Code: 1, Msg: "handoff set: body fails lint (fix it, or --force to write anyway)"}
+			}
 			if err := mesh.HandoffSet(a, string(b), time.Now()); err != nil {
 				return err
 			}
 			fmt.Printf("wrote %s\n", mesh.HandoffPath(a))
-			for _, w := range mesh.HandoffLint(string(b)) {
-				fmt.Fprintln(os.Stderr, "⚠ handoff: "+w)
-			}
 			return nil
 		},
 	}
 	show.Flags().StringVar(&agent, "agent", "", "agent (default: cwd/$AGENT_NAME)")
 	set.Flags().StringVar(&agent, "agent", "", "agent (default: cwd/$AGENT_NAME)")
+	set.Flags().BoolVar(&force, "force", false, "write even when the body fails lint (missing section, placeholder, over budget)")
+	cmd.AddCommand(show, template, set)
+	return cmd
+}
+
+// stateCmd — the current-state digest (knowledge/state.md), the handoff's
+// sibling: the handoff says where the last session stopped, the digest says
+// what the world looks like. Same fixed shape, same one-command write.
+func stateCmd() *cobra.Command {
+	var agent string
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "state show|template|set",
+		Short: "Read/write the agent's current-state digest (knowledge/state.md, ≤40 lines; injected at session start)",
+	}
+	show := &cobra.Command{
+		Use:   "show",
+		Short: "Print the current digest (empty if none)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, err := agentsDir()
+			if err != nil {
+				return err
+			}
+			a, err := resolveContextAgent(dir, agent)
+			if err != nil {
+				return err
+			}
+			s, err := mesh.StateShow(a)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(s) != "" {
+				fmt.Print(s)
+			}
+			return nil
+		},
+	}
+	template := &cobra.Command{
+		Use:   "template",
+		Short: "Print the digest template to fill in (the one fixed shape)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Print(mesh.StateTemplate)
+			return nil
+		},
+	}
+	set := &cobra.Command{
+		Use:   "set",
+		Short: "Write the digest from stdin (stamps a timestamp; overwrites; refuses a body that fails lint)",
+		Long: "Replaces knowledge/state.md with the body on stdin. Fill in `meshctl state template` — four fixed\n" +
+			"sections, at most " + fmt.Sprint(mesh.StateMaxLines) + " lines, standing facts only — and rewrite the whole thing after each\n" +
+			"consolidation (`meshctl kb consolidate` lists the decisions it has not absorbed). Pass it with a quoted\n" +
+			"heredoc:\n\n" +
+			"  meshctl state set <<'EOF'\n" +
+			"  ## Now\n" +
+			"  All new services are Go on the platform; the legacy stack is maintained, not extended.\n\n" +
+			"  ## Active\n" +
+			"  - API v1 → v2 migration: 5 of 7 services complete\n\n" +
+			"  ## Recently decided\n" +
+			"  - ADR-0012 one repository per service; shared code only via published modules\n\n" +
+			"  ## Open questions\n" +
+			"  - none\n" +
+			"  EOF\n\n" +
+			"A body with a missing section, a leftover placeholder or over budget is refused (--force overrides).",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, err := agentsDir()
+			if err != nil {
+				return err
+			}
+			a, err := resolveContextAgent(dir, agent)
+			if err != nil {
+				return err
+			}
+			b, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(string(b)) == "" {
+				return fmt.Errorf("state set: empty body on stdin")
+			}
+			if problems := mesh.StateLint(string(b)); len(problems) > 0 && !force {
+				for _, w := range problems {
+					fmt.Fprintln(os.Stderr, "✗ state: "+w)
+				}
+				return &mesh.CodedError{Code: 1, Msg: "state set: body fails lint (fix it, or --force to write anyway)"}
+			}
+			if err := mesh.StateSet(a, string(b), time.Now()); err != nil {
+				return err
+			}
+			fmt.Printf("wrote %s\n", mesh.StatePath(a))
+			return nil
+		},
+	}
+	show.Flags().StringVar(&agent, "agent", "", "agent (default: cwd/$AGENT_NAME)")
+	set.Flags().StringVar(&agent, "agent", "", "agent (default: cwd/$AGENT_NAME)")
+	set.Flags().BoolVar(&force, "force", false, "write even when the body fails lint")
 	cmd.AddCommand(show, template, set)
 	return cmd
 }
@@ -1753,10 +1848,17 @@ func kbCmd() *cobra.Command {
 	var abort bool
 	var headless bool
 	var session string
+	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "kb begin|finish",
-		Short: "Worktree+branch for a KB write, then merge back to main and clean up",
-		Args:  cobra.ExactArgs(1),
+		Use:   "kb begin|finish|consolidate",
+		Short: "Worktree+branch for a KB write, merge back to main and clean up; consolidate lists the KB's debt",
+		Long: `begin / finish: an isolated worktree + branch for a KB write, merged back ff-only.
+consolidate: the KB's debt list — decisions without machine-readable status, accepted
+decisions not landed in the docs they update or in the state digest, a missing or
+over-budget state.md, candidates older than 14 days, handoff problems — in the order to
+work it off. Nothing is changed; the agent does the consolidation in a kb begin/finish
+worktree and rewrites the digest with "meshctl state set".`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {
@@ -1773,6 +1875,18 @@ func kbCmd() *cobra.Command {
 				headless = true
 			}
 			switch args[0] {
+			case "consolidate":
+				r := mesh.KBConsolidate(a, now)
+				if asJSON {
+					out, err := json.MarshalIndent(r, "", "  ")
+					if err != nil {
+						return err
+					}
+					fmt.Println(string(out))
+					return nil
+				}
+				fmt.Print(r.Markdown())
+				return nil
 			case "begin":
 				sid := id
 				if session != "" {
@@ -1803,7 +1917,7 @@ func kbCmd() *cobra.Command {
 					fmt.Println("KB changes merged to main; worktree removed")
 				}
 			default:
-				return fmt.Errorf("kb: want begin|finish, got %q", args[0])
+				return fmt.Errorf("kb: want begin|finish|consolidate, got %q", args[0])
 			}
 			return nil
 		},
@@ -1812,5 +1926,6 @@ func kbCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&abort, "abort", false, "discard the branch + worktree (finish)")
 	cmd.Flags().BoolVar(&headless, "headless", false, "never auto-resolve conflicts; leave needs-human (finish)")
 	cmd.Flags().StringVar(&session, "session", "", "explicit KB session id (finish auto-detects the sole worktree if unset)")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "machine-readable report (consolidate)")
 	return cmd
 }

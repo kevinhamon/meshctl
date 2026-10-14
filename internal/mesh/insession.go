@@ -136,6 +136,10 @@ func harnessSessionID() string {
 // role and accepted types, the request (when given) with recall pointers for
 // its ask, the current handoff, and the write-back contract. It replaces the
 // SessionStart/UserPromptSubmit injections a subagent never receives.
+// BriefRecallBudget is the token budget for KB bodies inlined into a brief: a
+// peer that cannot follow pointers (no cwd of its own) needs the text.
+const BriefRecallBudget = 3000
+
 func Brief(agentsDir string, a *Agent, requestID string) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Brief for `%s` (in-session)\n\n", a.Name)
@@ -179,19 +183,14 @@ func Brief(agentsDir string, a *Agent, requestID string) (string, error) {
 			b.WriteString("\n\n")
 		}
 	}
+	if st := StateBlock(a); st != "" {
+		b.WriteString(strings.Replace(st, "# Current state", "## Current state", 1))
+		b.WriteString("\n\n")
+	}
 	if query != "" {
-		if hits, err := Recall(a, query, 8); err == nil && len(hits) > 0 {
-			b.WriteString("## Recall for this request (pointers — read the KB files, they are authoritative)\n\n")
-			for _, h := range hits {
-				fmt.Fprintf(&b, "- [%s] %s", h.Kind, h.Title)
-				if len(h.Where) > 0 {
-					fmt.Fprintf(&b, " — %s", strings.Join(h.Where, "  "))
-				}
-				if h.Date != "" {
-					fmt.Fprintf(&b, " (%s)", h.Date)
-				}
-				b.WriteString("\n")
-			}
+		if hits, err := RecallWithBodies(a, query, 8, BriefRecallBudget); err == nil && len(hits) > 0 {
+			b.WriteString("## Recall for this request (current-tier bodies inlined; the KB files are authoritative)\n\n")
+			b.WriteString(RecallMarkdown(hits))
 			b.WriteString("\n")
 		}
 	}
