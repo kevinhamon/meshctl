@@ -311,12 +311,12 @@ func TestMemory_RebuildRecallRecovery(t *testing.T) {
 
 func TestDispatchArgv_HarnessAware(t *testing.T) {
 	// Claude: claude -p with allowlist + appended system prompt.
-	name, args := dispatchArgv(HarnessClaude, "process intake X", "SYS", "")
+	name, args := dispatchArgv(HarnessClaude, 0, "process intake X", "SYS", "")
 	if name != "claude" || !containsArg(args, "-p") || !containsArg(args, "--append-system-prompt") {
 		t.Fatalf("claude argv wrong: %s %v", name, args)
 	}
 	// opencode: opencode run --pure --auto, system prompt prepended to message.
-	name, args = dispatchArgv(HarnessOpencode, "process intake X", "SYS", "")
+	name, args = dispatchArgv(HarnessOpencode, 1, "process intake X", "SYS", "")
 	if name != "opencode" || !containsArg(args, "run") || !containsArg(args, "--pure") || !containsArg(args, "--auto") {
 		t.Fatalf("opencode argv wrong: %s %v", name, args)
 	}
@@ -325,13 +325,22 @@ func TestDispatchArgv_HarnessAware(t *testing.T) {
 		t.Fatalf("opencode should prepend system prompt to message, got %q", last)
 	}
 	// opencode --model only when provider/model-shaped.
-	_, a1 := dispatchArgv(HarnessOpencode, "m", "s", "gpt-5.5")
+	_, a1 := dispatchArgv(HarnessOpencode, 1, "m", "s", "gpt-5.5")
 	if containsArg(a1, "--model") {
 		t.Fatal("bare model alias must NOT be passed to opencode --model")
 	}
-	_, a2 := dispatchArgv(HarnessOpencode, "m", "s", "anthropic/claude-3-5")
+	_, a2 := dispatchArgv(HarnessOpencode, 1, "m", "s", "anthropic/claude-3-5")
 	if !containsArg(a2, "--model") {
 		t.Fatal("provider/model should be passed to opencode --model")
+	}
+	// opencode V2: no --pure; --standalone keeps it off the shared service.
+	name, args = dispatchArgv(HarnessOpencode, 2, "process intake X", "SYS", "anthropic/claude-3-5")
+	if name != "opencode" || containsArg(args, "--pure") || !containsArg(args, "--standalone") ||
+		!containsArg(args, "--auto") || !containsArg(args, "--model") {
+		t.Fatalf("opencode V2 argv wrong: %v", args)
+	}
+	if last := args[len(args)-1]; !contains(last, "SYS") || !contains(last, "process intake X") {
+		t.Fatalf("opencode V2 should prepend system prompt to message, got %q", last)
 	}
 }
 

@@ -179,6 +179,31 @@ knowledge (the KB). This is the retrieval loop's **Learn** stage, made concrete.
   engine; you distill *from* it, you don't curate *in* it.
 - **All writes via `kb begin/finish`** — git-tracked, reviewable, recoverable.
 
+**Standing rules are gated, not prose (ADR-0062).** A standing instruction ("never do X",
+"do not repeat this", a recorded failure, a user directive) is written as a KB note whose
+frontmatter carries `rule:` + `triggers:`. `meshctl hook pre-tool-use` matches every
+Bash / Write|Edit / MCP tool call against those triggers; the first match per session is
+**denied** with the rule text + note path, and the retry is allowed. Zero context cost
+unless a rule fires; fail-open on error. Prose "recall before acting" is skipped under
+task pressure — only gates hold. **Every new standing rule is written this way.**
+
+```
+---
+rule: "<one line: what to do / never do>"
+triggers:
+  - '<case-insensitive Go regex on the action text>'
+---
+```
+
+- Match the **action text** (command, file path, MCP tool name/args), not the topic.
+- Allow flags between words: `git\b.*\bremote\b`, not `git\s+remote` (misses `git -C <p> remote`).
+- Too broad nags on every call; too narrow never fires. Verify both ways: pipe
+  `{"cwd":"<agent dir>","session_id":"test-x","tool_name":"Bash","tool_input":{"command":"…"}}`
+  into `meshctl hook pre-tool-use` — a matching action denies, an unrelated one prints
+  nothing — then delete `.memory/rule-acks/test-*.json`.
+- Rules about chat only (nothing to match in a tool call) stay prose.
+- `candidates/` and edits under `knowledge/` are exempt from the gate.
+
 **Optional automation:** a future `meshctl memory distill` may do steps 1–2 (mine +
 draft candidates) only. Step 3 (promotion into truth) always stays human/agent-reviewed.
 

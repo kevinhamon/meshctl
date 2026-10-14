@@ -40,7 +40,9 @@ approve.
   disposable, regenerable index; the git-tracked KB is authoritative.
 - **Harness-neutral core, thin adapters.** The mesh's behavior is harness-independent;
   each supported runtime (Claude Code, opencode) binds it through one small adapter that
-  renders hooks/skills into that runtime's native form.
+  renders hooks/skills into that runtime's native form. The opencode adapter covers both
+  release lines (V1 1.x, V2 2.x), choosing by the installed binary's major; only V2 has a
+  pre-tool hook, so only V2 (like Claude Code) runs the fail-closed gate — V1 is advisory.
 
 ## A note on `ADR-NNNN` references
 

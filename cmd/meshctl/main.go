@@ -6,6 +6,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/kevinhamon/meshctl/internal/mesh"
+	"github.com/kevinhamon/meshctl/internal/selfupdate"
 	"github.com/spf13/cobra"
 )
 
@@ -63,9 +65,71 @@ func versionCmd() *cobra.Command {
 		Short: "Print the meshctl version",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fmt.Printf("meshctl %s (%s %s/%s)\n", resolveVersion(), runtime.Version(), runtime.GOOS, runtime.GOARCH)
+			if n := selfupdate.Notice(resolveVersion(), time.Now()); n != "" {
+				fmt.Println("ℹ " + n)
+			}
 			return nil
 		},
 	}
+}
+
+// updateCmd replaces this binary with a GitHub release (default: the latest).
+func updateCmd() *cobra.Command {
+	var check, force bool
+	var tag string
+	c := &cobra.Command{
+		Use:   "update",
+		Short: "Update meshctl itself to the latest GitHub release (checksum-verified, in place)",
+		Long: "Fetches the latest release of " + selfupdate.Repo + ", downloads the binary for this platform,\n" +
+			"verifies it against the release's .sha256, and replaces the running executable.\n" +
+			"--check only reports whether an update exists. A local/dev build (e.g. from `task install` or a\n" +
+			"source checkout) is never replaced without --force: it may carry code newer than any release.\n" +
+			"After updating, run `meshctl pool upgrade --check` in each pool to pick up wiring/doctrine changes.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cur := resolveVersion()
+			ctx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
+			defer cancel()
+			rel, err := selfupdate.Latest(ctx, tag)
+			if err != nil {
+				return fmt.Errorf("cannot reach releases: %w", err)
+			}
+			dev := !selfupdate.IsRelease(cur)
+			newer := selfupdate.Newer(rel.Tag, cur)
+			switch {
+			case check:
+				switch {
+				case dev:
+					fmt.Printf("meshctl %s is a local build; latest release is %s (`meshctl update --force` to switch to it)\n", cur, rel.Tag)
+				case newer:
+					fmt.Printf("update available: %s → %s (run `meshctl update`)\n", cur, rel.Tag)
+					return &mesh.CodedError{Code: 1, Msg: "update available"}
+				default:
+					fmt.Printf("meshctl %s is up to date\n", cur)
+				}
+				return nil
+			case dev && !force:
+				return fmt.Errorf("meshctl %s is a local build, which may be newer than release %s — rerun with --force to replace it", cur, rel.Tag)
+			case !dev && !newer && !force && tag == "":
+				fmt.Printf("meshctl %s is up to date\n", cur)
+				return nil
+			}
+			exe, err := selfupdate.Executable()
+			if err != nil {
+				return err
+			}
+			fmt.Printf("updating %s: %s → %s …\n", exe, cur, rel.Tag)
+			if err := selfupdate.Install(ctx, rel, exe); err != nil {
+				return err
+			}
+			fmt.Printf("meshctl %s installed. Next, in each pool: `meshctl pool upgrade --check`\n", rel.Tag)
+			return nil
+		},
+	}
+	c.Flags().BoolVar(&check, "check", false, "only report whether an update is available (exit 1 if one is)")
+	c.Flags().BoolVar(&force, "force", false, "replace a local/dev build, or reinstall the same version")
+	c.Flags().StringVar(&tag, "version", "", "install this release tag instead of the latest (e.g. v1.0.0)")
+	return c
 }
 
 func main() {
@@ -90,7 +154,7 @@ func rootCmd() *cobra.Command {
 	}
 	root.SetVersionTemplate("meshctl {{.Version}}\n")
 	root.AddCommand(
-		versionCmd(),
+		versionCmd(), updateCmd(),
 		// Resource groups (noun → verb).
 		poolCmd(),  // init | upgrade | list
 		agentCmd(), // new | onboard | list
@@ -380,43 +444,115 @@ func poolInitCmd() *cobra.Command {
 }
 
 func poolUpgradeCmd() *cobra.Command {
-	var force bool
+	var force, check, doctrineOnly bool
 	c := &cobra.Command{
 		Use:   "upgrade",
-		Short: "Refresh the pool's doctrine from this binary (never clobbers local edits without --force)",
-		Long: "Replaces doctrine files that are unchanged since meshctl wrote them. A file edited locally is left\n" +
-			"alone: the new version is written beside it as <file>.upstream for a manual merge, and the command\n" +
-			"exits non-zero. --force overwrites edited files after backing each up to <file>.bak-<timestamp>.",
+		Short: "Upgrade the pool to this binary + the installed harnesses: doctrine and every agent's wiring",
+		Long: "Brings the whole pool up to this meshctl and the harness versions installed here, in two steps:\n" +
+			"  1. doctrine — replaces doctrine files unchanged since meshctl wrote them. A file edited locally is\n" +
+			"     left alone: the new version is written beside it as <file>.upstream for a manual merge, and the\n" +
+			"     command exits non-zero. --force overwrites edited files after backing each up to <file>.bak-<timestamp>.\n" +
+			"  2. agents — re-runs `agent onboard` for every agent: re-wires hooks/plugins for the installed harness\n" +
+			"     (e.g. swaps an opencode V1 plugin for the V2 one), refreshes mesh-owned skills, adds missing\n" +
+			"     CLAUDE.md stanzas. Never touches agent.yaml or an agent's role doctrine.\n" +
+			"--check previews both steps (plus warnings: live sessions, uncommitted changes, global harness config)\n" +
+			"without writing anything; it exits 1 when an upgrade is pending.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {
 				return err
 			}
+			if check {
+				plan, err := mesh.PlanPoolUpgrade(dir, time.Now())
+				if err != nil {
+					return err
+				}
+				printUpgradePlan(plan, doctrineOnly)
+				if plan.Pending() {
+					return &mesh.CodedError{Code: 1, Msg: "upgrade pending — run `meshctl pool upgrade` to apply"}
+				}
+				return nil
+			}
 			res, err := mesh.UpgradeDoctrine(dir, force, time.Now())
 			if err != nil {
 				return err
 			}
-			if len(res.Did) == 0 && len(res.Conflicts) == 0 {
-				fmt.Println("doctrine already current")
-				return nil
-			}
 			fmt.Printf("pool: %s\n", dir)
+			if len(res.Did) == 0 && len(res.Conflicts) == 0 {
+				fmt.Println("  doctrine already current")
+			}
 			for _, d := range res.Did {
 				fmt.Println("  " + d)
-			}
-			if len(res.Conflicts) == 0 {
-				return nil
 			}
 			for _, c := range res.Conflicts {
 				p := filepath.Join(dir, c)
 				fmt.Printf("  ✗ %s has local edits — left untouched; new version at %s.upstream\n", c, c)
 				fmt.Printf("      merge: diff -u %s %s.upstream\n", p, p)
 			}
-			return &mesh.CodedError{Code: 1, Msg: fmt.Sprintf("%d doctrine file(s) not upgraded (local edits) — merge the .upstream copies by hand, or rerun with --force to overwrite (backups kept)", len(res.Conflicts))}
+			if !doctrineOnly {
+				agents, err := mesh.UpgradeAgents(dir)
+				for _, a := range agents {
+					if len(a.Actions) == 0 {
+						fmt.Printf("  %s: already current\n", a.Name)
+						continue
+					}
+					fmt.Printf("  %s (%s):\n", a.Name, a.Harness)
+					for _, n := range a.Actions {
+						fmt.Println("    · " + n)
+					}
+				}
+				if err != nil {
+					return err
+				}
+				fmt.Println("restart every open agent session — running harnesses keep the old wiring until restarted")
+			}
+			if len(res.Conflicts) > 0 {
+				return &mesh.CodedError{Code: 1, Msg: fmt.Sprintf("%d doctrine file(s) not upgraded (local edits) — merge the .upstream copies by hand, or rerun with --force to overwrite (backups kept)", len(res.Conflicts))}
+			}
+			return nil
 		},
 	}
 	c.Flags().BoolVar(&force, "force", false, "overwrite locally-edited doctrine (each is backed up first)")
+	c.Flags().BoolVar(&check, "check", false, "preview the upgrade without writing anything (exit 1 if one is pending)")
+	c.Flags().BoolVar(&doctrineOnly, "doctrine-only", false, "upgrade the pool doctrine only; leave agent wiring alone")
 	return c
+}
+
+// printUpgradePlan renders a `pool upgrade --check` preview.
+func printUpgradePlan(plan mesh.PoolUpgradePlan, doctrineOnly bool) {
+	fmt.Printf("pool: %s\n", plan.PoolRoot)
+	if plan.OpencodeMajor > 0 {
+		fmt.Printf("opencode installed: V%d\n", plan.OpencodeMajor)
+	}
+	fmt.Println("doctrine:")
+	if len(plan.Doctrine) == 0 && len(plan.Conflicts) == 0 {
+		fmt.Println("  current")
+	}
+	for _, d := range plan.Doctrine {
+		fmt.Println("  · update " + d)
+	}
+	for _, c := range plan.Conflicts {
+		fmt.Println("  ✗ " + c + " — differs from this binary's copy: left alone, a .upstream copy is written for a manual merge")
+	}
+	if !doctrineOnly {
+		fmt.Println("agents:")
+		for _, a := range plan.Agents {
+			state := "current"
+			if len(a.Actions) > 0 {
+				state = fmt.Sprintf("%d change(s)", len(a.Actions))
+			}
+			fmt.Printf("  %s (%s): %s\n", a.Name, a.Harness, state)
+			for _, x := range a.Actions {
+				fmt.Println("    · " + x)
+			}
+			for _, w := range a.Warnings {
+				fmt.Println("    ⚠ " + w)
+			}
+		}
+	}
+	for _, w := range plan.Warnings {
+		fmt.Println("⚠ " + w)
+	}
 }
 
 func poolListCmd() *cobra.Command {
@@ -520,6 +656,7 @@ func newCmd() *cobra.Command {
 		dispatchable            bool
 		iterm                   bool
 		harness                 string
+		ocVersion               int
 		bare                    bool
 	)
 	cmd := &cobra.Command{
@@ -535,6 +672,9 @@ func newCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if ocVersion < 0 || ocVersion > 2 {
+				return fmt.Errorf("--opencode-version must be 1 or 2")
+			}
 			name := args[0]
 			if badge == "" {
 				badge = strings.ToUpper(name)
@@ -543,7 +683,7 @@ func newCmd() *cobra.Command {
 				Name: name, Title: title, Role: role,
 				Owns: splitCSV(owns), Domains: splitCSV(domains),
 				Accepts: parseAccepts(accepts), Dispatchable: dispatchable,
-				Mutates: splitCSV(mutates), Model: model, Repo: repo, Harness: harness, Bare: bare,
+				Mutates: splitCSV(mutates), Model: model, Repo: repo, Harness: harness, HarnessVersion: ocVersion, Bare: bare,
 				Badge: mesh.Badge{Label: badge, R: r, G: g, B: b},
 			}
 			dest, err := mesh.New(dir, spec, mesh.ScaffoldOptions{ITerm: iterm})
@@ -570,6 +710,7 @@ func newCmd() *cobra.Command {
 	f.BoolVar(&dispatchable, "dispatchable", false, "may `meshctl ask` run it headlessly (ignored if mutates set)")
 	f.StringVar(&repo, "repo", "", "git remote URL")
 	f.StringVar(&harness, "harness", "", "coding-agent harness: claude|opencode (default: claude for new; autodetect for onboard)")
+	f.IntVar(&ocVersion, "opencode-version", 0, "opencode major to wire for: 1|2 (default: the installed opencode's; 2 if none)")
 	f.BoolVar(&iterm, "iterm2", false, "also write a macOS iTerm2 dynamic profile (.iterm2/) for window identity")
 	f.BoolVar(&bare, "bare", false, "do not append the '-agent' repo suffix to the name")
 	return cmd
@@ -586,6 +727,7 @@ func onboardCmd() *cobra.Command {
 		dispatchable            bool
 		iterm                   bool
 		harness                 string
+		ocVersion               int
 	)
 	cmd := &cobra.Command{
 		Use:   "onboard <name|path>",
@@ -600,11 +742,15 @@ func onboardCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if ocVersion < 0 || ocVersion > 2 {
+				return fmt.Errorf("--opencode-version must be 1 or 2")
+			}
 			spec := mesh.AgentSpec{
 				Title: title, Role: role,
 				Owns: splitCSV(owns), Domains: splitCSV(domains),
 				Accepts: parseAccepts(accepts), Dispatchable: dispatchable,
 				Mutates: splitCSV(mutates), Model: model, Repo: repo, Harness: harness,
+				HarnessVersion: ocVersion,
 			}
 			if badge != "" || cmd.Flags().Changed("rgb") {
 				spec.Badge = mesh.Badge{Label: badge, R: r, G: g, B: b}
@@ -651,6 +797,7 @@ func onboardCmd() *cobra.Command {
 	f.BoolVar(&dispatchable, "dispatchable", false, "may be dispatched headlessly (ignored if mutates set)")
 	f.StringVar(&repo, "repo", "", "git remote URL")
 	f.StringVar(&harness, "harness", "", "coding-agent harness: claude|opencode (default: claude for new; autodetect for onboard)")
+	f.IntVar(&ocVersion, "opencode-version", 0, "opencode major to wire for: 1|2 (default: the installed opencode's; 2 if none)")
 	f.BoolVar(&iterm, "iterm2", false, "also write a macOS iTerm2 dynamic profile (.iterm2/) if missing")
 	return cmd
 }
@@ -790,6 +937,9 @@ func doctorCmd() *cobra.Command {
 				return err
 			}
 			findings, ok := mesh.Doctor(dir)
+			if n := selfupdate.Notice(resolveVersion(), time.Now()); n != "" {
+				fmt.Println("ℹ " + n)
+			}
 			if len(findings) == 0 {
 				fmt.Println("doctor: all manifests valid ✓")
 				return nil
@@ -1389,7 +1539,7 @@ func hookCmd() *cobra.Command {
 			// machine-global, so it must still fire when cwd is outside a pool.
 			dir, _ := agentsDir()
 			p := mesh.ParseHookPayload(b)
-			_ = mesh.EmitGateDecision(os.Stdout, mesh.GatePreToolUse(dir, p))
+			_ = mesh.HarnessForPayload(dir, p, harness).EmitGate(os.Stdout, mesh.GatePreToolUse(dir, p))
 			return nil
 		},
 	}

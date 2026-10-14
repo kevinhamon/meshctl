@@ -65,7 +65,7 @@ func TestHarness_ClaudeWiring(t *testing.T) {
 
 func TestHarness_OpencodeWiring(t *testing.T) {
 	dest := t.TempDir()
-	notes, err := opencodeHarness{}.WireAgent(dest)
+	notes, err := opencodeHarness{major: 1}.WireAgent(dest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestHarness_OpencodeWiring(t *testing.T) {
 		t.Fatal("opencode skill path wrong")
 	}
 	// Idempotent: second wiring adds nothing.
-	notes2, _ := opencodeHarness{}.WireAgent(dest)
+	notes2, _ := opencodeHarness{major: 1}.WireAgent(dest)
 	if len(notes2) != 0 {
 		t.Fatalf("opencode wiring not idempotent: %v", notes2)
 	}

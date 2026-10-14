@@ -30,6 +30,9 @@ type Harness interface {
 	// its own and relies on the in-session boundary nudge instead. This is the
 	// binding distiller.md leaves to each harness.
 	DistillCmd(prompt string) []string
+	// EmitGate writes a pre-tool-use gate decision in the form this harness's
+	// hook bridge consumes. Allow ⇒ nothing written.
+	EmitGate(w io.Writer, d GateDecision) error
 }
 
 const (
@@ -37,11 +40,16 @@ const (
 	HarnessOpencode = "opencode"
 )
 
-// HarnessByName returns the adapter for a harness id (default: claude).
-func HarnessByName(name string) Harness {
+// HarnessByName returns the adapter for a harness id (default: claude). An
+// opencode adapter resolves its major version lazily from the installed binary.
+func HarnessByName(name string) Harness { return HarnessByNameVersion(name, 0) }
+
+// HarnessByNameVersion is HarnessByName with the opencode major pinned (1 or 2);
+// 0 ⇒ detect from the installed binary. Ignored for claude.
+func HarnessByNameVersion(name string, major int) Harness {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case HarnessOpencode:
-		return opencodeHarness{}
+		return opencodeHarness{major: major}
 	default:
 		return claudeHarness{}
 	}
@@ -51,8 +59,8 @@ func HarnessByName(name string) Harness {
 func HarnessFor(a *Agent) Harness { return HarnessByName(a.HarnessName()) }
 
 // DetectHarness infers the harness from a pre-existing workspace: an opencode.json
-// or .opencode/ ⇒ opencode; else claude (the default). Used by onboard when no
-// --harness is given.
+// or .opencode/ (V1 plugin/ or V2 plugins/ alike) ⇒ opencode; else claude (the
+// default). Used by onboard when no --harness is given.
 func DetectHarness(dest string) string {
 	if fileExists(filepath.Join(dest, "opencode.json")) || dirExists(filepath.Join(dest, ".opencode")) {
 		return HarnessOpencode
@@ -100,11 +108,28 @@ func (claudeHarness) EmitContext(w io.Writer, event, ctx string) error {
 // second context for it.
 func (claudeHarness) DistillCmd(string) []string { return nil }
 
+// EmitGate = Claude Code's PreToolUse permission-decision envelope.
+func (claudeHarness) EmitGate(w io.Writer, d GateDecision) error { return EmitGateDecision(w, d) }
+
 // --- opencode ---
 
-type opencodeHarness struct{}
+// opencodeHarness covers both opencode release lines (see opencode_v2.go).
+// major pins the line; 0 ⇒ detect from the installed binary.
+type opencodeHarness struct{ major int }
 
 func (opencodeHarness) Name() string { return HarnessOpencode }
+
+// Major is the opencode major this adapter renders for: the pinned value, else
+// the installed binary's, else 2 (the current line) when opencode is absent.
+func (h opencodeHarness) Major() int {
+	if h.major > 0 {
+		return h.major
+	}
+	if m := InstalledOpencodeMajor(); m > 0 {
+		return m
+	}
+	return 2
+}
 
 // RenderSkill writes .opencode/skills/<name>/SKILL.md — the Anthropic Agent
 // Skills spec form the opencode-skills plugin discovers (same body as Claude).
@@ -127,29 +152,56 @@ func (opencodeHarness) EmitContext(w io.Writer, event, ctx string) error {
 // subagent primitive, so distiller.md's "map to that harness's background-task
 // primitive" resolves here to a separate `opencode run` process. Without this
 // the opencode side of the cognition loop was a nudge and nothing else.
-func (opencodeHarness) DistillCmd(prompt string) []string {
+//
+// V2: --standalone, so the run's server inherits the distill guard env (a run
+// on the shared background service would not, and its session-end would spawn
+// another distill); --auto, because nobody is there to approve its KB writes.
+func (h opencodeHarness) DistillCmd(prompt string) []string {
+	if h.Major() >= 2 {
+		return []string{"opencode", "run", "--standalone", "--auto", prompt}
+	}
 	return []string{"opencode", "run", prompt}
 }
 
-// WireAgent for opencode (validated against opencode 1.18):
+// EmitGate = the raw deny reason; the plugin throws it to block the call.
+func (opencodeHarness) EmitGate(w io.Writer, d GateDecision) error {
+	if !d.Deny {
+		return nil
+	}
+	_, err := io.WriteString(w, d.Reason+"\n")
+	return err
+}
+
+// WireAgent for opencode:
 //   - merges opencode.json: instructions ⊇ CLAUDE.md (loads the agent's doctrine
-//     + cognition/comms stanzas). Skills are NATIVE in opencode (discovered from
-//     .opencode/skills/) — no plugin needed;
-//   - writes a local .opencode/plugin/meshctl.js that, via the real plugin hooks,
-//     injects the handoff (first message) + intuition (each message) through
-//     chat.message output.parts, and captures a session-record on session.idle.
+//     + cognition/comms stanzas on V1; inert on V2, where the plugin injects it).
+//     Skills are NATIVE in opencode (discovered from .opencode/skills/) — no
+//     plugin needed;
+//   - writes the local mesh plugin for the installed major: V1 →
+//     .opencode/plugin/meshctl.js (validated against 1.18), V2 →
+//     .opencode/plugins/meshctl.js (validated against 2.0.28) — and removes the
+//     other major's meshctl plugin, so an upgrade re-wires cleanly.
 //
-// Add-only + idempotent.
-func (opencodeHarness) WireAgent(dest string) ([]string, error) {
+// Idempotent.
+func (h opencodeHarness) WireAgent(dest string) ([]string, error) {
 	var notes []string
 	if n, err := ensureOpencodeConfig(dest); err != nil {
 		return nil, err
 	} else {
 		notes = append(notes, n...)
 	}
-	if n, err := ensureOpencodePlugin(dest); err != nil {
-		return notes, err
-	} else {
+	want, wantRel, staleRel := opencodePluginJS, opencodePluginV1Rel, opencodePluginV2Rel
+	if h.Major() >= 2 {
+		want, wantRel, staleRel = opencodePluginV2JS, opencodePluginV2Rel, opencodePluginV1Rel
+	}
+	for _, step := range []func() ([]string, error){
+		func() ([]string, error) { return writeManagedPlugin(dest, wantRel, want) },
+		func() ([]string, error) { return removeManagedPlugin(dest, staleRel) },
+	} {
+		n, err := step()
+		if err != nil {
+			return notes, err
+		}
 		notes = append(notes, n...)
 	}
 	return notes, nil
@@ -181,35 +233,7 @@ func ensureOpencodeConfig(dest string) ([]string, error) {
 	return notes, nil
 }
 
-// ensureOpencodePlugin writes/updates the local mesh plugin. It writes when
-// absent, and OVERWRITES an existing meshctl-managed plugin whose content differs
-// (so onboard upgrades agents past an older/broken plugin, ADR-0039 fix). A
-// non-meshctl file at that path is left untouched.
-func ensureOpencodePlugin(dest string) ([]string, error) {
-	out := filepath.Join(dest, ".opencode", "plugin", "meshctl.js")
-	if b, err := os.ReadFile(out); err == nil {
-		cur := string(b)
-		if !strings.Contains(cur, opencodePluginMarker) {
-			return nil, nil // someone else's plugin at this path — don't clobber
-		}
-		if cur == opencodePluginJS {
-			return nil, nil // already current
-		}
-		if err := os.WriteFile(out, []byte(opencodePluginJS), 0o644); err != nil {
-			return nil, err
-		}
-		return []string{"updated .opencode/plugin/meshctl.js (plugin upgraded)"}, nil
-	}
-	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(out, []byte(opencodePluginJS), 0o644); err != nil {
-		return nil, err
-	}
-	return []string{"wrote .opencode/plugin/meshctl.js"}, nil
-}
-
-// opencodePluginJS bridges opencode's real plugin hooks (opencode ≥1.18) to the
+// opencodePluginJS is the V1 plugin. It bridges opencode's real plugin hooks (opencode ≥1.18) to the
 // harness-neutral `meshctl hook` subcommands (on $PATH), which emit raw text under
 // --harness opencode. chat.message injects the handoff (first message of a session)
 // + intuition (each message) as a text part; the session.idle event captures a

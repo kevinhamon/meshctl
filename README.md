@@ -115,10 +115,16 @@ meshctl memory  recall "<q>" | sessions | rebuild
 meshctl session start | end | list
 meshctl handoff show | set          (set reads the body from stdin)
 meshctl intuition recall "<q>"
-meshctl hook    session-start | user-prompt | session-end   (wired per-agent; not run by hand)
+meshctl hook    session-start | user-prompt | session-end | pre-tool-use   (wired per-agent; not run by hand)
 meshctl doctor
 meshctl ask … | send …               (top-level aliases for msg ask|send)
 ```
+
+**Updating meshctl.** `meshctl update` replaces the binary with the latest GitHub release
+(checksum-verified, in place; `--check` only reports, `--version vX.Y.Z` pins a release).
+`meshctl version` and `meshctl doctor` mention a newer release (checked at most once a day;
+`MESHCTL_NO_UPDATE_CHECK=1` turns it off). A local build (`task install`) is only replaced
+with `--force`. After updating, run `meshctl pool upgrade --check` in each pool.
 
 Key flags: `agent new/onboard --harness claude|opencode`, `--dispatchable`,
 `--mutates code,tracker` (non-empty ⇒ not dispatchable), `--accepts type:desc,…`,
@@ -135,16 +141,25 @@ writes an optional macOS iTerm2 profile; it's off by default and never required.
 `meshctl` carries its own integration and renders it per harness (one binary, no
 python, no loose scripts, no machine-absolute paths):
 
-| | Claude Code | opencode |
-|---|---|---|
-| rules | `.claude/settings.json` | `opencode.json` `instructions:["CLAUDE.md"]` |
-| skills | `.claude/skills/<n>/SKILL.md` | `.opencode/skills/<n>/SKILL.md` (native, ≥1.18) |
-| hooks | settings.json → `meshctl hook …` | `.opencode/plugin/meshctl.js` → `meshctl hook …` |
-| capture | SessionEnd | `session.idle` event |
-| inject | `hookSpecificOutput` JSON | `chat.message` → text part |
+| | Claude Code | opencode V1 (1.x) | opencode V2 (2.x) |
+|---|---|---|---|
+| rules | `.claude/settings.json` | `opencode.json` `instructions:["CLAUDE.md"]` | plugin injects `CLAUDE.md` (V2 ignores `instructions`) |
+| skills | `.claude/skills/<n>/SKILL.md` | `.opencode/skills/<n>/SKILL.md` | `.opencode/skills/<n>/SKILL.md` |
+| hooks | settings.json → `meshctl hook …` | `.opencode/plugin/meshctl.js` → `meshctl hook …` | `.opencode/plugins/meshctl.js` → `meshctl hook …` |
+| inject | `hookSpecificOutput` JSON | `experimental.chat.system.transform` | `session.hook("context")` |
+| capture | SessionEnd | `session.idle` event | `session.execution.succeeded` event |
+| gate | PreToolUse deny envelope | — (advisory only) | `tool.hook("execute.before")` throws the reason |
+| dispatch | `claude -p` | `opencode run --pure --auto` | `opencode run --standalone --auto` |
 
 `meshctl agent new --harness …` picks it; `onboard` autodetects; it's recorded in
 `agent.yaml`. Adding a harness = one adapter (`internal/mesh/harness.go`).
+
+**opencode V1 vs V2.** Both lines are supported under the one `opencode` harness; their
+plugin APIs are incompatible (V2 skips a V1 plugin with only a log warning). meshctl
+wires for the installed binary's major (`opencode --version`); pin it with
+`agent new/onboard --opencode-version 1|2` or `MESHCTL_OPENCODE_MAJOR`. After upgrading
+opencode, re-run `meshctl agent onboard <name>` — it swaps the plugin — and `meshctl
+doctor` flags any agent still wired for the other major.
 
 ## Cognition — how agents learn
 

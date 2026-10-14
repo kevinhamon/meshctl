@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -47,9 +48,33 @@ var claudeMemMutators = map[string]bool{
 	"reprime_corpus":           true,
 }
 
-// fileEditTools name the tools whose input carries a target path the gate reads.
+// fileEditTools name the tools whose input carries a target path the gate reads:
+// Claude Code's, and opencode's (lowercase; V2 write/edit take a `path`).
 var fileEditTools = map[string]bool{
 	"Write": true, "Edit": true, "MultiEdit": true, "NotebookEdit": true,
+	"write": true, "edit": true, "multiedit": true,
+}
+
+// patchTools carry their target paths inside patch text (opencode apply_patch).
+var patchTools = map[string]bool{"apply_patch": true, "patch": true}
+
+// isClaudeMemMutator reports whether a tool name is a claude-mem write tool.
+// Claude Code names it mcp__plugin_claude-mem__<tool>; opencode names MCP tools
+// <server>_<tool> with a user-chosen server name, so match any name carrying
+// "claude-mem"/"claude_mem" that ends in a mutator.
+func isClaudeMemMutator(name string) bool {
+	if strings.HasPrefix(name, claudeMemPrefix) {
+		return claudeMemMutators[strings.TrimPrefix(name, claudeMemPrefix)]
+	}
+	if !strings.Contains(name, "claude-mem") && !strings.Contains(name, "claude_mem") {
+		return false
+	}
+	for m := range claudeMemMutators {
+		if strings.HasSuffix(name, "_"+m) {
+			return true
+		}
+	}
+	return false
 }
 
 // GatePreToolUse evaluates a PreToolUse payload against mesh doctrine. agentsDir
@@ -59,28 +84,50 @@ func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
 	name := p.ToolName
 
 	// 1. claude-mem write tools — competing memory store. Denied by name, so this
-	//    holds even if tool_input is missing or malformed.
-	if strings.HasPrefix(name, claudeMemPrefix) {
-		if claudeMemMutators[strings.TrimPrefix(name, claudeMemPrefix)] {
-			return GateDecision{true, "mesh: memory is owned by the mesh — do not write the claude-mem store. " +
-				"Persist through `meshctl memory` / `meshctl kb` (knowledge), or `meshctl send` / `meshctl ask` (messages)."}
-		}
-		return GateDecision{} // reads are fine
+	//    holds even if tool_input is missing or malformed. Reads fall through to
+	//    the KB-rule check.
+	if isClaudeMemMutator(name) {
+		return GateDecision{true, "mesh: memory is owned by the mesh — do not write the claude-mem store. " +
+			"Persist through `meshctl memory` / `meshctl kb` (knowledge), or `meshctl send` / `meshctl ask` (messages)."}
 	}
 
-	// 2/3. File writes: inspect the target path.
-	if fileEditTools[name] {
-		if path := gateFilePath(p.ToolInput); path != "" {
-			if reason := deniedWritePath(path); reason != "" {
-				return GateDecision{true, reason}
-			}
+	// 2/3. File writes: inspect the target path(s).
+	for _, path := range gateEditPaths(p) {
+		if reason := deniedWritePath(path); reason != "" {
+			return GateDecision{true, reason}
 		}
 	}
-	return GateDecision{}
+
+	// 4. Standing rules from the agent's own KB (kbrules.go): deny once per
+	//    session per matching rule, with the rule as the reason.
+	return gateKBRules(agentsDir, p)
 }
 
-// gateFilePath pulls file_path (Write/Edit/MultiEdit) or notebook_path
-// (NotebookEdit) out of a tool_input blob, tolerating either key or none.
+// gateEditPaths returns the absolute target paths of a file-writing tool call
+// (nil for any other tool). opencode passes paths relative to the workspace, so
+// a relative path is resolved against the payload cwd — "intake/x.md" must match
+// the same rules as "/abs/agent/intake/x.md".
+func gateEditPaths(p HookPayload) []string {
+	var paths []string
+	switch {
+	case fileEditTools[p.ToolName]:
+		if path := gateFilePath(p.ToolInput); path != "" {
+			paths = []string{path}
+		}
+	case patchTools[p.ToolName]:
+		paths = patchFilePaths(p.ToolInput)
+	}
+	for i, path := range paths {
+		if !filepath.IsAbs(path) && p.Cwd != "" {
+			paths[i] = filepath.Join(p.Cwd, path)
+		}
+	}
+	return paths
+}
+
+// gateFilePath pulls the target path out of a tool_input blob: file_path
+// (Claude Write/Edit/MultiEdit), notebook_path (NotebookEdit), filePath (opencode
+// V1) or path (opencode V2), tolerating any or none.
 func gateFilePath(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -88,12 +135,36 @@ func gateFilePath(raw json.RawMessage) string {
 	var in struct {
 		FilePath     string `json:"file_path"`
 		NotebookPath string `json:"notebook_path"`
+		CamelPath    string `json:"filePath"`
+		Path         string `json:"path"`
 	}
 	_ = json.Unmarshal(raw, &in)
-	if in.FilePath != "" {
-		return in.FilePath
+	for _, v := range []string{in.FilePath, in.NotebookPath, in.CamelPath, in.Path} {
+		if v != "" {
+			return v
+		}
 	}
-	return in.NotebookPath
+	return ""
+}
+
+var rePatchFile = regexp.MustCompile(`(?m)^\*\*\* (?:(?:Add|Update|Delete) File|Move to): *(.+?)\s*$`)
+
+// patchFilePaths extracts every file an apply_patch-style patch touches, from
+// whichever string field carries the patch text.
+func patchFilePaths(raw json.RawMessage) []string {
+	var in map[string]any
+	if json.Unmarshal(raw, &in) != nil {
+		return nil
+	}
+	var paths []string
+	for _, v := range in {
+		if s, ok := v.(string); ok {
+			for _, m := range rePatchFile.FindAllStringSubmatch(s, -1) {
+				paths = append(paths, m[1])
+			}
+		}
+	}
+	return paths
 }
 
 // deniedWritePath returns a non-empty reason when the path is a competing memory
@@ -125,8 +196,9 @@ func deniedWritePath(path string) string {
 
 // EmitGateDecision writes Claude Code's PreToolUse permission-decision envelope.
 // Allow ⇒ nothing written (the default flow proceeds); deny ⇒ the deny envelope
-// carrying its reason. Claude Code only — opencode has no equivalent and is not
-// wired for this event.
+// carrying its reason. opencode's form is the raw reason (Harness.EmitGate):
+// the V2 plugin throws it from tool.execute.before. opencode V1 has no
+// equivalent hook and is not gated.
 func EmitGateDecision(w io.Writer, d GateDecision) error {
 	if !d.Deny {
 		return nil

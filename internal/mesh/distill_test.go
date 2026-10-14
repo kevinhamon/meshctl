@@ -13,7 +13,7 @@ func TestDistillCmdPerHarness(t *testing.T) {
 	if got := (claudeHarness{}).DistillCmd("p"); got != nil {
 		t.Errorf("claude DistillCmd = %v, want nil", got)
 	}
-	got := (opencodeHarness{}).DistillCmd("do the thing")
+	got := (opencodeHarness{major: 1}).DistillCmd("do the thing") // V2 form: TestOpencode_DistillCmdPerMajor
 	want := []string{"opencode", "run", "do the thing"}
 	if len(got) != len(want) {
 		t.Fatalf("opencode DistillCmd = %v, want %v", got, want)

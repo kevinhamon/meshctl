@@ -16,9 +16,10 @@ import (
 //   - a Bash(meshctl:*) permission so mesh messaging/cognition commands are
 //     preapproved.
 //
-// EnsureAgentSettings is ADD-ONLY and idempotent: it inserts only what is
-// missing and never removes or rewrites an existing key, so it is safe to run
-// over an agent that already has a hand-tuned settings.json. A second run is a
+// EnsureAgentSettings is idempotent and near add-only: it inserts what is
+// missing and never removes a key. The one rewrite is the matcher on the mesh's
+// OWN hook entry, upgraded in place when hookWiring widens; hand-added entries
+// are never touched. Safe over a hand-tuned settings.json; a second run is a
 // no-op.
 
 const meshctlAllowRule = "Bash(meshctl:*)"
@@ -28,19 +29,20 @@ const meshctlAllowRule = "Bash(meshctl:*)"
 // doctor can detect an agent left on older wiring after a meshctl upgrade and
 // tell you to re-onboard. Bump it whenever hookWiring OR the gate's deny policy
 // (gate.go) changes materially.
-const MeshWiringVersion = 1
+const MeshWiringVersion = 2
 
 const meshWiringStampFile = ".mesh-wiring.json"
 
 // hookWiring is the (event, subcommand) set the mesh installs. PreToolUse is the
 // fail-closed enforcement gate (gate.go); the other three are advisory. The gate
-// matcher fires on file-edit tools and every claude-mem tool — the gate itself
-// then allows claude-mem reads and denies only the writes.
+// matcher fires on file-edit tools, Bash and every MCP tool — the gate denies
+// claude-mem writes and competing-store paths, then checks the call against the
+// agent's KB rules (kbrules.go). v2 widened the matcher for the KB-rule gate.
 var hookWiring = []struct{ event, sub, matcher string }{
 	{"SessionStart", "session-start", "startup|resume|clear"},
 	{"UserPromptSubmit", "user-prompt", ""},
 	{"SessionEnd", "session-end", ""},
-	{"PreToolUse", "pre-tool-use", "Write|Edit|MultiEdit|NotebookEdit|mcp__plugin_claude-mem__"},
+	{"PreToolUse", "pre-tool-use", "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__"},
 }
 
 // EnsureAgentSettings merges the mesh integration into <dest>/.claude/settings.json.
@@ -154,6 +156,11 @@ func ensureHooks(root map[string]any) []string {
 		cmdStr := "meshctl hook " + w.sub
 		entries, _ := hooks[w.event].([]any)
 		if hookCommandPresent(entries, cmdStr) {
+			// The mesh owns its own entry's matcher: upgrade it in place when
+			// hookWiring widens (v2: KB-rule gate needs Bash + all MCP tools).
+			if w.matcher != "" && upgradeHookMatcher(entries, cmdStr, w.matcher) {
+				added = append(added, w.event+" (matcher)")
+			}
 			continue
 		}
 		hookDef := map[string]any{
@@ -188,6 +195,23 @@ func hookCommandPresent(entries []any, cmdStr string) bool {
 				return true
 			}
 		}
+	}
+	return false
+}
+
+// upgradeHookMatcher sets the matcher on the entry whose hooks invoke cmdStr, if
+// it differs. Only the mesh's own entry is touched. Returns true if it changed.
+func upgradeHookMatcher(entries []any, cmdStr, matcher string) bool {
+	for _, e := range entries {
+		em, ok := e.(map[string]any)
+		if !ok || !hookCommandPresent([]any{em}, cmdStr) {
+			continue
+		}
+		if cur, _ := em["matcher"].(string); cur != matcher {
+			em["matcher"] = matcher
+			return true
+		}
+		return false
 	}
 	return false
 }

@@ -74,6 +74,8 @@ func TestSessionSignal_ClaudeExemptFromGitRequirement(t *testing.T) {
 func TestOpencodeInstructions_MissingClaudeMd(t *testing.T) {
 	// opencode discovers AGENTS.md only. Without CLAUDE.md in `instructions`
 	// the role file never loads and the agent runs on global config alone.
+	// (V1 only: V2 ignores `instructions` and the plugin injects CLAUDE.md.)
+	t.Setenv(opencodeMajorEnv, "1")
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "opencode.json"),
 		[]byte(`{"instructions":["OTHER.md"]}`), 0o644); err != nil {

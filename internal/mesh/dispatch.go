@@ -169,14 +169,21 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 
 // dispatchArgv builds the headless invocation for a target's harness (ADR-0032/
 // ADR-0041). Claude Code: `claude -p` with the scoped allowlist + appended system
-// prompt. opencode: `opencode run --pure --auto` (no plugins → no hook recursion /
-// mid-dispatch capture; auto-approve for non-interactive) with the system prompt
-// prepended to the message (opencode run has no --append-system-prompt). A random
-// port per run means dispatch never collides with a live TUI's server.
-func dispatchArgv(harness, msg, sys, model string) (name string, args []string) {
+// prompt. opencode V1: `opencode run --pure --auto` (no plugins → no hook recursion /
+// mid-dispatch capture; auto-approve for non-interactive). A random port per run
+// means dispatch never collides with a live TUI's server. opencode V2 has no
+// --pure: `opencode run --standalone --auto` runs a private server (off the user's
+// shared background service) that inherits AGENT_DISPATCH_DEPTH, on which the V2
+// plugin drops to doctrine + gate only. Either way the system prompt is prepended
+// to the message (opencode run has no --append-system-prompt). ocMajor is the
+// installed opencode major (ignored for claude).
+func dispatchArgv(harness string, ocMajor int, msg, sys, model string) (name string, args []string) {
 	switch harness {
 	case HarnessOpencode:
 		args = []string{"run", "--pure", "--auto"}
+		if ocMajor >= 2 {
+			args = []string{"run", "--standalone", "--auto"}
+		}
 		if strings.Contains(model, "/") { // opencode wants provider/model; skip a bare alias
 			args = append(args, "--model", model)
 		}
@@ -201,11 +208,14 @@ func dispatchArgv(harness, msg, sys, model string) (name string, args []string) 
 // (ADR-0041) — claude → `claude -p`, opencode → `opencode run` — so dispatch works
 // in an opencode mesh, not just a Claude Code one.
 func realDispatch(ctx context.Context, targetDir, msg, sys, model string, env []string, stdout, stderr io.Writer) int {
-	harness := HarnessClaude
+	harness, ocMajor := HarnessClaude, 0
 	if a, err := LoadAgent(filepath.Join(targetDir, ManifestName)); err == nil {
 		harness = a.HarnessName()
+		if oc, ok := HarnessFor(a).(opencodeHarness); ok {
+			ocMajor = oc.Major()
+		}
 	}
-	name, args := dispatchArgv(harness, msg, sys, model)
+	name, args := dispatchArgv(harness, ocMajor, msg, sys, model)
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = targetDir

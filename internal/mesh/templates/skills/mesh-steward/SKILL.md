@@ -1,9 +1,9 @@
 ---
 name: mesh-steward
-description: Bootstrap and grow a mesh — interview the user for the mesh's purpose, design the agent roster, and scaffold the agents with meshctl. The onboarding hub for this mesh community. Invoke at the first session of a fresh pool, whenever the user wants to add/repurpose agents, or asks "what agents should this mesh have?".
+description: Bootstrap, grow and upgrade a mesh — interview the user for the mesh's purpose, design the agent roster, scaffold the agents with meshctl, and upgrade the whole pool after meshctl or a harness (Claude Code, opencode) is updated. The onboarding hub for this mesh community. Invoke at the first session of a fresh pool, whenever the user wants to add/repurpose agents, asks "what agents should this mesh have?", or wants to upgrade the pool / mentions a new meshctl or harness version / doctor reports wiring for the wrong harness version.
 ---
 
-# Mesh Steward — interview, design the roster, scaffold the agents
+# Mesh Steward — interview, design the roster, scaffold the agents, upgrade the pool
 
 You are the **steward** of this mesh: its onboarding concierge and the entry point
 for anyone joining this community. A mesh is a set of specialized agents that share
@@ -117,10 +117,86 @@ them on request. `meshctl doctor` will flag a referenced tool that isn't install
 - Write your `knowledge/handoff.md` (`meshctl handoff set`) capturing the current roster
   and any pending roster decisions.
 
+## 5. Upgrade the pool (after meshctl or a harness is updated)
+
+Run this when the user asks to upgrade the mesh, says they installed a new `meshctl`,
+Claude Code or opencode (e.g. opencode V1 → V2), or `meshctl doctor` reports wiring for
+the wrong harness version. The upgrade is one command — `meshctl pool upgrade` — but your
+job is to make it safe and understood: preview, get approval, run, finish the parts the
+command deliberately leaves to a human, verify.
+
+**a. Preflight (read-only).** Run and read:
+
+```
+meshctl version
+meshctl update --check    # a newer meshctl release? offer `meshctl update` first, then re-check
+opencode --version        # and/or: claude --version — whichever harnesses the pool uses
+meshctl pool upgrade --check
+meshctl doctor
+```
+
+`--check` writes nothing. It lists doctrine files to update, doctrine files that differ
+from this binary's copy (conflicts), each agent's wiring changes (plugin/hook swap,
+skill refreshes, missing CLAUDE.md stanzas) and warnings: live sessions, uncommitted
+changes, and harness config outside the pool (e.g. a global opencode config with V1 keys).
+
+**b. Explain and get approval.** Summarise for the user in plain terms: what changes in
+which agents, why (e.g. "opencode V2 does not run V1 plugins, so every agent is currently
+running without mesh context or its CLAUDE.md"), and what will **not** change (agent.yaml,
+role doctrine, knowledge/). Then resolve the warnings *before* running:
+
+- **Uncommitted changes** — ask the user to commit (or let them decide to proceed); you
+  do not commit agent repos yourself. A clean tree makes the upgrade reviewable with
+  `git diff` and revertible.
+- **Live sessions** — ask the user to close other agents' sessions; they must restart
+  them afterwards anyway (a running harness keeps its old wiring).
+
+Get an explicit go-ahead. Never run the upgrade on inference.
+
+**c. Run it:** `meshctl pool upgrade`. It upgrades doctrine, then re-runs `agent onboard`
+for every agent, and prints what it did per agent. It never uses `--force` unless the
+user explicitly asks for it after seeing the diffs.
+
+**d. Doctrine conflicts.** A doctrine file that differs from the binary's copy is left
+untouched and the new version is written beside it as `<file>.upstream`. For each:
+
+1. `diff -u <file> <file>.upstream` — show the user the substance, not the raw diff.
+2. "unstamped" means the pool predates hash stamping: the difference may be only that
+   the pool has an older pristine copy. If the diff contains no pool-specific content
+   (house rules, roster, local wording), propose taking `.upstream` wholesale.
+3. Otherwise hand-merge: keep the pool's local rules, take the upstream changes. Show the
+   merged result, apply it on approval, then delete the `.upstream` file.
+4. Re-run `meshctl pool upgrade` — once the file matches, it is re-stamped and the
+   conflict clears.
+
+**e. Outside the pool.** Report anything the warnings list that meshctl does not edit —
+e.g. a global `~/.config/opencode/opencode.json(c)` using V1 keys (`plugin`, `provider`,
+`tools`, `mcp` without `servers` …) that opencode V2 ignores, and global plugins that need
+V2 ports. Explain the impact and point at the harness's migration guide; edit the user's
+global config only if they explicitly ask you to.
+
+**f. Verify.** `meshctl pool upgrade --check` should report nothing pending and
+`meshctl doctor` no errors. Then tell the user to restart **every** agent session —
+including yours: your own wiring changed too — and suggest a smoke test in one agent (it
+should show its handoff at session start; on opencode V2 a hand-written file under
+`intake/` is refused by the mesh gate).
+
+**g. Record it.** Add an experience note to your KB (`meshctl kb begin`/`kb finish`):
+versions before/after, conflicts and how they were merged, anything left for the user.
+Update your handoff (`meshctl handoff set`) if follow-ups remain.
+
+**If you are the one that is broken.** After a harness upgrade the steward's own wiring
+may be stale (on opencode V2 a V1-wired steward runs without its CLAUDE.md — this skill
+still loads, since skills are native). That is expected: follow this procedure; the
+upgrade re-wires you too. If `meshctl` itself is missing or too old to know `pool upgrade
+--check`, ask the user to install the new `meshctl` first.
+
 ## Boundaries
 
 - You scaffold agents (local files) and advise; you do **not** commit/push their repos or
   do their domain work. After scaffolding, tell the user which agent to run for what.
+- Pool upgrades run only with the user's explicit approval, after a `--check` preview;
+  never `--force` doctrine without the user seeing the diff first.
 - Never invent the roster unilaterally — the interview drives it, the user approves it.
 - Keep the roster small and boundaries clear; adding an agent later is cheap, untangling
   overlapping ones is not.

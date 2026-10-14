@@ -24,6 +24,10 @@ type AgentSpec struct {
 	Model        string
 	Repo         string
 	Harness      string // claude | opencode (ADR-0032); empty ⇒ claude
+	// HarnessVersion pins the opencode major (1|2) to wire for; 0 ⇒ the
+	// installed binary's. Not persisted: the installed binary is the truth at
+	// runtime, and doctor flags wiring that no longer matches it.
+	HarnessVersion int
 	Bare         bool   // if false, New appends the "-agent" repo suffix (ADR-0038)
 }
 
@@ -87,8 +91,10 @@ func scaffoldSkills(dest string, h Harness) ([]string, error) {
 // the disposable memory index (ADR-0015) AND the ephemeral intake queue + its
 // archive (ADR-0043 — intake is transient discussion; durable residue lives in the
 // KB, not in git). intake/README.md stays tracked. Idempotent via a marker line.
+const gitignoreMarker = "# meshctl-managed ignores"
+
 func ensureMemoryIgnored(dest string) error {
-	const marker = "# meshctl-managed ignores"
+	const marker = gitignoreMarker
 	gi := filepath.Join(dest, ".gitignore")
 	b, _ := os.ReadFile(gi)
 	if strings.Contains(string(b), marker) {
@@ -161,7 +167,7 @@ func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error)
 		return "", err
 	}
 	// Shared mesh skills + harness integration (ADR-0032), rendered per harness.
-	h := HarnessByName(spec.Harness)
+	h := HarnessByNameVersion(spec.Harness, spec.HarnessVersion)
 	if _, err := scaffoldSkills(dest, h); err != nil {
 		return "", err
 	}
@@ -222,7 +228,7 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 			spec.Harness = DetectHarness(abs)
 		}
 	}
-	h := HarnessByName(spec.Harness)
+	h := HarnessByNameVersion(spec.Harness, spec.HarnessVersion)
 
 	// 1. Manifest — infer where possible, never overwrite.
 	if fileExists(mp) {

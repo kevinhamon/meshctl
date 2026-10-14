@@ -21,10 +21,10 @@ import (
 // current. Without it the mesh is advisory only — the exact defect that keeps
 // looking "fixed" (hooks wired, doctrine written) while the model routes around
 // it. An unwired gate is an error, not a warning: it means doctrine is optional.
-// Claude Code only — opencode has no PreToolUse envelope.
+// opencode: see opencodeGateFindings.
 func gateWiringFindings(a *Agent) []DoctorFinding {
 	if a.HarnessName() == HarnessOpencode {
-		return nil
+		return opencodeGateFindings(a)
 	}
 	path := filepath.Join(a.Dir(), ".claude", "settings.json")
 	b, err := os.ReadFile(path)
@@ -103,10 +103,15 @@ func sessionSignalFindings(a *Agent) []DoctorFinding {
 // `instructions`. Without that the agent runs on global config alone and
 // behaves as though it has no role and no peers — because it hasn't been told
 // it has either.
+//
+// V2 accepts `instructions` but does not load it; there the mesh plugin injects
+// CLAUDE.md, and its presence is checked by opencodeGateFindings. Only the JSON
+// validity check applies.
 func opencodeInstructionsFindings(a *Agent) []DoctorFinding {
 	if a.HarnessName() != HarnessOpencode {
 		return nil
 	}
+	v2 := opencodeExpectedMajor(a.Dir()) >= 2
 	path := filepath.Join(a.Dir(), "opencode.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -119,6 +124,9 @@ func opencodeInstructionsFindings(a *Agent) []DoctorFinding {
 		return []DoctorFinding{{Agent: a.Name, Level: "error",
 			Message: "opencode.json is not valid JSON: " + err.Error()}}
 	}
+	if v2 {
+		return nil
+	}
 	for _, i := range cfg.Instructions {
 		if strings.Contains(i, "CLAUDE.md") {
 			return nil
@@ -127,6 +135,93 @@ func opencodeInstructionsFindings(a *Agent) []DoctorFinding {
 	return []DoctorFinding{{Agent: a.Name, Level: "warn",
 		Message: "opencode.json does not list CLAUDE.md under `instructions` — opencode discovers AGENTS.md " +
 			"only, so the agent's role and comms doctrine never load; run `meshctl agent onboard " + a.Name + "`"}}
+}
+
+// pluginState classifies the meshctl plugin file at one path.
+type pluginState int
+
+const (
+	pluginAbsent  pluginState = iota
+	pluginForeign             // a file meshctl did not write
+	pluginStale               // meshctl's, but not the current body
+	pluginCurrent
+)
+
+func opencodePluginState(dir, rel, want string) pluginState {
+	b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+	switch {
+	case err != nil:
+		return pluginAbsent
+	case !strings.Contains(string(b), opencodePluginMarker):
+		return pluginForeign
+	case string(b) != want:
+		return pluginStale
+	}
+	return pluginCurrent
+}
+
+func managed(s pluginState) bool { return s == pluginStale || s == pluginCurrent }
+
+// opencodeExpectedMajor is the opencode major an agent's wiring must match: the
+// installed binary's, else (opencode not on this machine) whichever variant the
+// workspace is wired for, defaulting to the current line.
+func opencodeExpectedMajor(dir string) int {
+	if m := InstalledOpencodeMajor(); m > 0 {
+		return m
+	}
+	if managed(opencodePluginState(dir, opencodePluginV1Rel, opencodePluginJS)) &&
+		!managed(opencodePluginState(dir, opencodePluginV2Rel, opencodePluginV2JS)) {
+		return 1
+	}
+	return 2
+}
+
+// opencodeGateFindings verifies an opencode agent's mesh plugin matches the
+// installed opencode major. A mismatch is silent at runtime — V2 skips a V1
+// plugin with a log warning, so doctrine, context and the gate all just stop —
+// which is why it is an error here. On V2 the plugin is also the enforcement
+// gate (tool.execute.before) and the only thing that loads CLAUDE.md. V1 has no
+// pre-tool hook, so a V1 agent is advisory-only; say so rather than imply it is
+// enforced.
+func opencodeGateFindings(a *Agent) []DoctorFinding {
+	v1 := opencodePluginState(a.Dir(), opencodePluginV1Rel, opencodePluginJS)
+	v2 := opencodePluginState(a.Dir(), opencodePluginV2Rel, opencodePluginV2JS)
+	onboard := "run `meshctl agent onboard " + a.Name + "`"
+	f := func(level, msg string) DoctorFinding { return DoctorFinding{Agent: a.Name, Level: level, Message: msg} }
+	var out []DoctorFinding
+
+	if opencodeExpectedMajor(a.Dir()) >= 2 {
+		switch v2 {
+		case pluginAbsent:
+			if managed(v1) {
+				return []DoctorFinding{f("error", "wired for opencode V1 but opencode 2.x is installed — V2 ignores V1 plugins, "+
+					"so CLAUDE.md doctrine, mesh context and the enforcement gate are all off; "+onboard)}
+			}
+			return []DoctorFinding{f("error", "mesh plugin not installed ("+opencodePluginV2Rel+") — on opencode V2 it loads "+
+				"CLAUDE.md and is the enforcement gate; "+onboard)}
+		case pluginForeign:
+			out = append(out, f("warn", opencodePluginV2Rel+" is not meshctl's plugin — mesh gate and doctrine loading cannot be verified"))
+		case pluginStale:
+			out = append(out, f("warn", "mesh plugin stale ("+opencodePluginV2Rel+") — "+onboard+" to pick up gate/context changes"))
+		}
+		if managed(v1) {
+			out = append(out, f("warn", "leftover opencode V1 plugin ("+opencodePluginV1Rel+") — V2 warns on it every start; "+onboard))
+		}
+		return out
+	}
+
+	if managed(v2) {
+		return []DoctorFinding{f("error", "wired for opencode V2 but opencode 1.x is installed — V1 cannot run the V2 plugin; "+
+			onboard+" (or upgrade opencode)")}
+	}
+	switch v1 {
+	case pluginAbsent:
+		out = append(out, f("warn", "mesh plugin not installed ("+opencodePluginV1Rel+") — no handoff/intuition/session capture; "+onboard))
+	case pluginStale:
+		out = append(out, f("warn", "mesh plugin stale ("+opencodePluginV1Rel+") — "+onboard))
+	}
+	return append(out, f("warn", "opencode V1 has no pre-tool hook — the mesh enforcement gate is unavailable and doctrine "+
+		"is advisory only; upgrade to opencode V2 and "+onboard))
 }
 
 // doctrineFlagFindings catches doctrine instructing agents to pass flags that

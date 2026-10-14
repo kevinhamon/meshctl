@@ -51,6 +51,13 @@ Guardrails: **review gate** (a human/the owning agent approves before a candidat
 becomes truth) · **KB is authoritative, claude-mem is never edited** (distill *from*
 it) · **all writes via `kb begin`/`kb finish`** (git-tracked, recoverable).
 
+**Standing rules → gated (ADR-0062).** A "never / do not repeat / user directive" note gets
+`rule: "<one line>"` + `triggers: ['<case-insensitive Go regex on the action text>']`
+frontmatter, so `meshctl hook pre-tool-use` denies the first matching tool call with the
+rule. Match the command/path/MCP args, not the topic; allow flags between words
+(`git\b.*\bremote\b`). Verify by piping a sample payload into the hook (match → deny,
+unrelated → empty). Chat-only rules stay prose. Every new standing rule is written this way.
+
 ## Cross-agent learning capture on dispatch return (ADR-0018)
 
 A headless `meshctl ask` run may not commit, so anything the answering peer learned
