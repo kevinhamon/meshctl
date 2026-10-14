@@ -250,6 +250,7 @@ func TestGate_InSessionPeerKBRulesAreThePeers(t *testing.T) {
 
 func TestHookSessionEnd_InSessionCapturesPeerRecordAndClosesLog(t *testing.T) {
 	dir, caller, arch := inSessionPool(t)
+	t.Setenv("PATH", t.TempDir()) // no claude: the peer distill must not really spawn
 	p := HookPayload{Cwd: caller.Dir(), SessionID: "sess-1", AgentID: "agent-abc", PeerAgent: "architect", InSession: true}
 	HookSessionEnd(dir, p, 1, time.Now())
 	recs := ListSessionRecords(arch)
@@ -262,5 +263,80 @@ func TestHookSessionEnd_InSessionCapturesPeerRecordAndClosesLog(t *testing.T) {
 	logb, _ := os.ReadFile(filepath.Join(dir, DispatchLog))
 	if !strings.Contains(string(logb), "caller=developer target=architect depth=0 DONE mode=in-session agent_id=agent-abc") {
 		t.Fatalf("log: %s", logb)
+	}
+}
+
+// fakeClaude puts a stub `claude` first on PATH that records its argv.
+func fakeClaude(t *testing.T) (argvFile string) {
+	t.Helper()
+	bin := t.TempDir()
+	argvFile = filepath.Join(bin, "argv")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argvFile + "\necho distilled\n"
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	return argvFile
+}
+
+func waitFor(t *testing.T, path string) []byte {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
+			return b
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("%s never appeared", path)
+	return nil
+}
+
+func TestHookSessionEnd_InSessionStopDistillsIntoPeerKB(t *testing.T) {
+	dir, caller, arch := inSessionPool(t)
+	argvFile := fakeClaude(t)
+	t.Setenv(distillGuardEnv, "")
+	p := HookPayload{Cwd: caller.Dir(), SessionID: "sess-1", AgentID: "agent-abc", PeerAgent: "architect", InSession: true}
+	HookSessionEnd(dir, p, 1, time.Now())
+
+	id := "sess-1-peer-agent-abc"
+	if _, err := os.Stat(distillMarkerPath(arch.Dir(), id)); err != nil {
+		t.Fatalf("peer distill marker: %v", err)
+	}
+	if _, err := os.Stat(distillMarkerPath(caller.Dir(), id)); err == nil {
+		t.Fatal("the peer's window must not distil into the caller")
+	}
+	argv := string(waitFor(t, argvFile))
+	for _, want := range []string{"-p", "agent: architect", "Edit(./knowledge/candidates/**)", "Bash(meshctl kb consolidate:*)"} {
+		if !strings.Contains(argv, want) {
+			t.Errorf("argv missing %q:\n%s", want, argv)
+		}
+	}
+	if strings.Contains(argv, "Bash(meshctl ask") || strings.Contains(argv, "\nBash\n") {
+		t.Errorf("peer distill must not get ask or unscoped Bash:\n%s", argv)
+	}
+	if b := waitFor(t, DistillLogPath(arch.Dir(), id)); !strings.Contains(string(b), "distilled") {
+		t.Fatalf("log: %s", b)
+	}
+
+	// Once per window: a repeated Stop for the same subagent does not re-run.
+	if SpawnPeerDistill(dir, arch, id) {
+		t.Fatal("second distill of the same window must be refused")
+	}
+}
+
+func TestHooks_DistillRunRegistersNoPresenceOrRecord(t *testing.T) {
+	dir, _, arch := inSessionPool(t)
+	t.Setenv(distillGuardEnv, "1")
+	p := HookPayload{Cwd: arch.Dir(), SessionID: "distill-sess"}
+	if out := HookSessionStart(dir, p, 1, time.Now()); out != "" {
+		t.Fatalf("distill run got a session-start block: %q", out)
+	}
+	HookUserPrompt(dir, p, time.Now())
+	if s := SessionList(arch, time.Now()); len(s) != 0 {
+		t.Fatalf("distill run registered presence: %+v", s)
+	}
+	HookSessionEnd(dir, p, 1, time.Now())
+	if recs := ListSessionRecords(arch); recs != nil {
+		t.Fatalf("distill run captured a record: %+v", recs)
 	}
 }

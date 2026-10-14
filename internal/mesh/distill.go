@@ -88,7 +88,43 @@ func SpawnDistill(poolRoot string, a *Agent, sessionID string) bool {
 	if a == nil || DistillingNow() {
 		return false
 	}
-	argv := HarnessFor(a).DistillCmd(DistillPrompt(poolRoot, a, sessionID))
+	return spawnDistillArgv(a, sessionID, HarnessFor(a).DistillCmd(DistillPrompt(poolRoot, a, sessionID)))
+}
+
+// SpawnPeerDistill distils a peer's in-session window (a subagent that ran
+// under a caller's Claude Code session, ADR-0063) into the PEER's own KB. The
+// in-session subagent has no session end of its own and the caller's session
+// end distils the caller, so without this a correction made to a consulted or
+// delegated peer is never learned by it.
+//
+// The caller is Claude Code, so the run is `claude -p` whatever the peer's own
+// harness — and deliberately not claudeHarness.DistillCmd, which stays nil so
+// a normal Claude session keeps its in-session distiller. The allowlist covers
+// the distiller procedure and nothing more: reads, the recall/consolidate
+// verbs, and writes confined to the peer's candidates and pending decisions.
+func SpawnPeerDistill(poolRoot string, a *Agent, sessionID string) bool {
+	if a == nil || DistillingNow() {
+		return false
+	}
+	return spawnDistillArgv(a, sessionID, peerDistillArgv(DistillPrompt(poolRoot, a, sessionID)))
+}
+
+// peerDistillArgv is the headless Claude Code invocation for a peer distill.
+// Path rules are relative to the run's cwd, the peer's workspace.
+func peerDistillArgv(prompt string) []string {
+	return []string{"claude", "-p", prompt,
+		"--permission-mode", "default",
+		"--allowedTools", "Read", "Grep", "Glob",
+		"Edit(./knowledge/candidates/**)", "Write(./knowledge/candidates/**)",
+		"Edit(./knowledge/pending-decisions.md)", "Write(./knowledge/pending-decisions.md)",
+		"Bash(meshctl memory recall:*)", "Bash(meshctl memory sessions:*)",
+		"Bash(meshctl intuition recall:*)", "Bash(meshctl kb consolidate:*)",
+	}
+}
+
+// spawnDistillArgv starts argv detached in the agent's workspace, once per
+// session window, logging to DistillLogPath. Fail-open: false on any error.
+func spawnDistillArgv(a *Agent, sessionID string, argv []string) bool {
 	if len(argv) == 0 {
 		return false
 	}

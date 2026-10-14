@@ -117,7 +117,9 @@ func hookAgent(agentsDir, cwd string) *Agent {
 // Empty return ⇒ nothing to inject. Fail-open throughout.
 func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) string {
 	a := hookAgent(agentsDir, p.Cwd)
-	if a == nil {
+	// A headless distill run (SpawnPeerDistill) fires the same hooks; it must
+	// not register as a live session of the agent it distils.
+	if a == nil || DistillingNow() {
 		return ""
 	}
 	id := p.SessionID
@@ -191,24 +193,25 @@ func IdentityLine(poolRoot string, a *Agent) string {
 // deregisters session presence. No output. Fail-open throughout.
 func HookSessionEnd(agentsDir string, p HookPayload, pid int, now time.Time) {
 	a := payloadAgent(agentsDir, p)
-	if a == nil {
-		return
+	if a == nil || DistillingNow() {
+		return // nothing to record for a distill run itself
 	}
 	id := p.SessionID
 	if id == "" {
 		id = ResolveSessionID(pid, now)
 	}
 	if p.InSession {
-		// A peer consulted in-session (Stop → SubagentStop): capture the
+		// A peer worked in-session (Stop → SubagentStop): capture the
 		// subagent's transcript as the peer's own episodic record, keyed by
 		// the subagent so repeated consults in one session do not overwrite
-		// each other; there is no presence to deregister and nothing to
-		// distil (the caller's session end covers it). Close the audit line
-		// `ask --in-session` opened.
+		// each other, then distil that window into the peer's KB — the
+		// caller's session end only distils the caller. There is no presence
+		// to deregister. Close the audit line `ask --in-session` opened.
 		if p.AgentID != "" {
 			id = id + "-peer-" + sanitizeID(p.AgentID)
 		}
 		_, _ = CaptureSession(a, p.TranscriptPath, id, "", now)
+		SpawnPeerDistill(agentsDir, a, id)
 		caller := "unknown"
 		if c := hookAgent(agentsDir, p.Cwd); c != nil {
 			caller = c.Name
@@ -249,7 +252,7 @@ func HookUserPrompt(agentsDir string, p HookPayload, now time.Time) string {
 	project := ""
 	if a != nil {
 		project = a.Name
-		if p.SessionID != "" {
+		if p.SessionID != "" && !DistillingNow() {
 			_ = TouchSession(a, p.SessionID, os.Getppid(), now) // presence heartbeat; fail-open
 		}
 	} else if p.Cwd != "" {
