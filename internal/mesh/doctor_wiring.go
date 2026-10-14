@@ -54,10 +54,11 @@ func gateWiringFindings(a *Agent) []DoctorFinding {
 	return out
 }
 
-// peerWiringFindings verifies the in-session peer definitions match the
-// roster. A stale set means `msg ask --in-session` refuses (missing peer) or
-// delegates to an outdated contract; a missing pool-root grant means the peer
-// cannot read its own KB without a prompt.
+// peerWiringFindings verifies the in-session peer definitions (consult and
+// -work) match the roster. A stale set means `msg ask --in-session` refuses
+// (missing peer) or delegates to an outdated contract; a missing pool-root
+// grant means the peer cannot read its own KB without a prompt, and a missing
+// workdir grant means delegated work cannot write the peer's repo.
 func peerWiringFindings(a *Agent) []DoctorFinding {
 	poolRoot := filepath.Dir(a.Dir())
 	var out []DoctorFinding
@@ -69,6 +70,13 @@ func peerWiringFindings(a *Agent) []DoctorFinding {
 	if IsPool(poolRoot) && !PoolAccessWired(poolRoot, a.Dir()) {
 		out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
 			Message: "pool root not in .claude/settings.local.json additionalDirectories — in-session peers cannot read their own KB without prompts; run `meshctl agent onboard " + a.Name + "`"})
+	}
+	if IsPool(poolRoot) {
+		if miss := MissingAdditionalDirs(a.Dir(), PeerWorkdirs(poolRoot, a.Dir())...); len(miss) > 0 {
+			out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
+				Message: "peer workdirs not in .claude/settings.local.json additionalDirectories (" + strings.Join(miss, ", ") +
+					") — delegated work (`ask --in-session --work`) will prompt or fail there; run `meshctl agent onboard " + a.Name + "`"})
+		}
 	}
 	return out
 }

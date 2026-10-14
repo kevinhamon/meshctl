@@ -112,13 +112,37 @@ Agent tool and its gate denies dispatch, file writes, git and KB writes, so it c
 or drift. Limits: the caller's session pays the peer's tokens; opencode callers use plain
 `ask`.
 
+**`meshctl ask … --in-session --work`** (delegated work, the hub-session mode — meshctl
+ADR-0063): for when the task is the peer's *work* — its KB, decisions, repo — not its
+advice. Same request file, guards and log (`mode=in-session-work`), but the delegation names
+`subagent_type: mesh-<peer>-work`, a write-capable definition rendered for every
+**work-delegable** peer (dispatchable, or declaring `mutates`). Inside it the peer:
+- works by its own KB and conventions: KB changes through `meshctl kb begin|finish --agent
+  <peer>`, path-limited commits in its own workspace, and its declared `workdirs:` (product
+  repos, which follow their branch/PR convention — never a push to a default branch);
+- edits in a **worktree** (`<pool>/.agentmesh/worktrees/<peer>-work-<id>`, branch
+  `mesh/work/<id>`) instead of its checkout when its own session is live, so the two never
+  share a working tree;
+- may not dispatch (no Agent, no `meshctl ask|send|pool|update|session`) and may not run
+  `meshctl work merge` — its gate denies writes outside its workspace, its worktrees and its
+  workdirs;
+- ends with a **receipt** (files per repo, commits/branches, KB candidates, open questions),
+  which the caller relays to the user.
+
+A delegation to a peer that declares `mutates` (tracker, deploys) is **asked**, not
+silently allowed: the caller's PreToolUse gate turns that Agent call into a human approval,
+once per delegation. Worktree branches are landed by the peer's **own** session with
+`meshctl work merge <id>` (rebase + ff-only, like `kb finish`; `--abort` discards); session
+start lists pending ones, `meshctl work list` shows them all. On stop, the peer's session is
+captured and distilled into **its** KB, consult or work alike.
+
 **Synchronous unblock flow** (`meshctl ask`): the target runs **headlessly in its own
 workspace** with a scoped allowlist (Read/Grep/Glob plus the `meshctl inbox respond|decline` and recall verbs — **no file edits**; on opencode the same policy is passed as an inline permission config) — the peer
 reads the request + code and writes its answer back into the request file, nothing else. When it
 returns, re-read the request file and continue.
 
 Rules:
-- **Advisory targets only** — the architect (guidance/review/decision) and domain experts, whose output is a file. Do **not** auto-dispatch state-mutating agents (pm → tracker, developer → code); those stay human-triggered.
+- **Advisory targets only** — the architect (guidance/review/decision) and domain experts, whose output is a file. Do **not** auto-dispatch state-mutating agents (pm → tracker, developer → code); those stay human-triggered. (`--in-session --work` is the one exception, and only with the human approving each such delegation — see above.)
 - **A dispatched agent never chains.** If answering would need *another* agent's input (or a genuinely new consequential decision not covered by an accepted decision record), the peer sets `status: needs-human`, names the agent/decision + the exact question, gives a recommendation, and **stops**. The human drives the next hop — cascades are never automatic.
 - The caller reads `needs-human` back and surfaces it to the user; it does not proceed on that point.
 
@@ -220,7 +244,7 @@ knowledge (the KB). This is the retrieval loop's **Learn** stage, made concrete.
   engine; you distill *from* it, you don't curate *in* it.
 - **All writes via `kb begin/finish`** — git-tracked, reviewable, recoverable.
 
-**Standing rules are gated, not prose (ADR-0062).** A standing instruction ("never do X",
+**Standing rules are gated, not prose (meshctl ADR-0062).** A standing instruction ("never do X",
 "do not repeat this", a recorded failure, a user directive) is written as a KB note whose
 frontmatter carries `rule:` + `triggers:`. `meshctl hook pre-tool-use` matches every
 Bash / Write|Edit / MCP tool call against those triggers; the first match per session is
@@ -249,7 +273,7 @@ triggers:
 draft candidates) only. Step 3 (promotion into truth) always stays human/agent-reviewed.
 
 **Capture cross-agent learning on dispatch return.** A dispatched peer (headless or
-in-session) may not commit, so anything the answering peer *learned* lives only in the answered
+in-session consult) may not commit, so anything the answering peer *learned* lives only in the answered
 `intake/` file and is lost if never distilled. Close the loop from the **caller** side:
 when a `meshctl ask` dispatch returns, judge the answer, and for any durable learning write
 a **candidate into the OWNING agent's KB** — not your own:
@@ -266,7 +290,9 @@ meshctl kb finish --agent <owner>     # run from a normal cwd, not inside the wo
 - It lands as a **candidate** (a proposal), so the review gate still holds — the owning
   agent promotes it on its next *interactive* session.
 - Interactive sessions still distill their *own* learning the normal way (steps 1–4); this
-  rule only covers the dispatched path (headless or in-session), where the peer itself can't commit.
+  rule only covers the dispatched path (headless or in-session consult), where the peer itself
+  can't commit. A peer doing **delegated work** (`--work`) commits its own learning through
+  `kb begin|finish --agent <peer>`; the caller only relays its receipt.
 - `kb --agent` uses the same worktree+merge conflict guard, so a concurrent write on the
   owner is handled (conflict → `needs-human`).
 

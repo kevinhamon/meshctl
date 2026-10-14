@@ -226,3 +226,83 @@ func TestGateWork_RootsIncludeOwnWorktreesOnly(t *testing.T) {
 		t.Fatalf("another agent's worktree (%s) must not be writable: %v", other.Name, roots)
 	}
 }
+
+func TestHygiene_WorkWorktrees(t *testing.T) {
+	dir, _, arch := inSessionPool(t)
+	gitInit(t, arch.Dir())
+	wt, err := WorkBegin(dir, arch, "r-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	find := func(now time.Time) []HygieneItem {
+		var out []HygieneItem
+		for _, it := range poolLevelHygiene(dir, now) {
+			if strings.Contains(it.Message, "architect-work-r-1") || strings.Contains(it.Message, "mesh/work/r-1") {
+				out = append(out, it)
+			}
+		}
+		return out
+	}
+	// A fresh branch has no commits, so it is trivially merged — but within
+	// the grace window it is in-progress work, not a leftover.
+	if got := find(time.Now()); len(got) != 0 {
+		t.Fatalf("fresh work worktree must be left alone: %+v", got)
+	}
+
+	// Commit on the branch: unmerged. Reported only past the state window,
+	// and never auto-fixed (it may hold real work).
+	if err := os.WriteFile(filepath.Join(wt, "w.md"), []byte("w\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCommitAll(t, wt, "work")
+	if got := find(time.Now().Add(2 * 24 * time.Hour)); len(got) != 0 {
+		t.Fatalf("unmerged work younger than 7 days must be left alone: %+v", got)
+	}
+	got := find(time.Now().Add(8 * 24 * time.Hour))
+	if len(got) != 1 || got[0].Fixable() || !strings.Contains(got[0].Message, "meshctl work merge r-1") {
+		t.Fatalf("stale unmerged work must be a manual item naming the merge: %+v", got)
+	}
+
+	// Landed by hand: merged + clean past the grace window ⇒ fixable.
+	if _, err := git(arch.Dir(), "merge", "--ff-only", "mesh/work/r-1"); err != nil {
+		t.Fatal(err)
+	}
+	got = find(time.Now().Add(2 * 24 * time.Hour))
+	if len(got) != 1 || !got[0].Fixable() {
+		t.Fatalf("merged work worktree must be fixable: %+v", got)
+	}
+	if _, errs := ApplyHygiene(got); len(errs) != 0 {
+		t.Fatal(errs)
+	}
+	if dirExists(wt) {
+		t.Fatal("worktree not removed")
+	}
+	if _, err := git(arch.Dir(), "rev-parse", "--verify", "--quiet", "refs/heads/mesh/work/r-1"); err == nil {
+		t.Fatal("branch not deleted")
+	}
+}
+
+func TestPeerWiring_MissingWorkdirsReported(t *testing.T) {
+	dir, caller, arch := inSessionPool(t)
+	repo := t.TempDir()
+	if _, err := addManifestWorkdirs(ManifestPath(dir, arch.Name), []string{repo}); err != nil {
+		t.Fatal(err)
+	}
+	has := func() bool {
+		for _, f := range peerWiringFindings(caller) {
+			if strings.Contains(f.Message, "peer workdirs") && strings.Contains(f.Message, repo) {
+				return true
+			}
+		}
+		return false
+	}
+	if !has() {
+		t.Fatal("declared peer workdir missing from additionalDirectories must be reported")
+	}
+	if _, err := ensurePoolAccess(dir, caller.Dir()); err != nil {
+		t.Fatal(err)
+	}
+	if has() {
+		t.Fatal("finding must clear once the workdir is granted")
+	}
+}

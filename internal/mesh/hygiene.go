@@ -137,7 +137,10 @@ func poolLevelHygiene(agentsDir string, now time.Time) []HygieneItem {
 			wt := filepath.Join(wtRoot, e.Name())
 			agent := AgentFromWorktreePath(agentsDir, wt)
 			if agent != "" && workWorktreeReq(agent, e.Name()) != "" {
-				continue // delegated-work worktree: lives until `meshctl work merge`
+				if it, ok := workWorktreeHygiene(agentsDir, agent, wt, workWorktreeReq(agent, e.Name()), now); ok {
+					items = append(items, it)
+				}
+				continue
 			}
 			session := strings.TrimPrefix(e.Name(), agent+"-")
 			if agent != "" && sessionAlive(AgentDir(agentsDir, agent), session, now) {
@@ -160,6 +163,45 @@ func poolLevelHygiene(agentsDir string, now time.Time) []HygieneItem {
 		}
 	}
 	return items
+}
+
+// hygieneWorkGrace is how long a delegated-work worktree is left alone. A
+// fresh branch has no commits yet, so it is trivially "merged"; only after
+// this does merged-and-clean mean "landed by hand, worktree left behind".
+const hygieneWorkGrace = 24 * time.Hour
+
+// workWorktreeHygiene classifies one delegated-work worktree (ADR-0063). It
+// normally lives until `meshctl work merge`; hygiene only steps in when the
+// branch was already landed some other way (fixable: remove worktree +
+// branch) or has sat unmerged past the state window (manual: a human decides
+// to merge or --abort, since it may hold real work).
+func workWorktreeHygiene(agentsDir, agent, wt, req string, now time.Time) (HygieneItem, bool) {
+	info, err := os.Stat(wt)
+	if err != nil {
+		return HygieneItem{}, false
+	}
+	age := now.Sub(info.ModTime())
+	dir := AgentDir(agentsDir, agent)
+	branch := workBranch(req)
+	name := filepath.Base(wt)
+	st, stErr := git(wt, "status", "--porcelain")
+	clean := stErr == nil && strings.TrimSpace(st) == ""
+	_, ancErr := git(dir, "merge-base", "--is-ancestor", branch, mainBranch(dir))
+	merged := ancErr == nil
+	switch {
+	case merged && clean && age > hygieneWorkGrace:
+		return HygieneItem{Agent: "pool", Message: "delegated-work worktree " + name + " (" + branch + " already merged into " + agent + "'s main)",
+			Fix: func() error {
+				_, _ = git(dir, "worktree", "remove", "--force", wt)
+				_, _ = git(dir, "branch", "-D", branch)
+				_, _ = git(dir, "worktree", "prune")
+				return removeFix(wt)()
+			}}, true
+	case !merged && age > hygieneStateMaxAge:
+		return HygieneItem{Agent: "pool", Message: fmt.Sprintf("delegated-work branch %s (%s) unmerged for %d days — review, then `meshctl work merge %s` or `--abort`",
+			branch, agent, int(age.Hours()/24), req)}, true
+	}
+	return HygieneItem{}, false
 }
 
 // --- agent level ---

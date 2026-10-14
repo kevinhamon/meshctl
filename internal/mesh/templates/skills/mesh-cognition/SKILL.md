@@ -8,7 +8,7 @@ description: How this agent maintains its own knowledge base and learns over tim
 Coordination (intake) is how agents *talk*. **Cognition** is how one agent
 organizes what it knows and recognizes what it has seen — on the same file
 substrate, no new store. This skill is the operative trigger; the **authoritative
-full spec is `.agentmesh/doctrine/agent-comms.md` §Knowledge & Memory (ADR-0014–0018)**.
+full spec is `.agentmesh/doctrine/agent-comms.md` §Knowledge & Memory (meshctl ADR-0014–0018)**.
 When this skill and that section disagree, that section wins — read it.
 
 Your KB is your own git-tracked `knowledge/` tree, in **two tiers**:
@@ -114,16 +114,16 @@ Guardrails: **review gate** (a human/the owning agent approves before a candidat
 becomes truth) · **KB is authoritative, claude-mem is never edited** (distill *from*
 it) · **all writes via `kb begin`/`kb finish`** (git-tracked, recoverable).
 
-**Standing rules → gated (ADR-0062).** A "never / do not repeat / user directive" note gets
+**Standing rules → gated (meshctl ADR-0062).** A "never / do not repeat / user directive" note gets
 `rule: "<one line>"` + `triggers: ['<case-insensitive Go regex on the action text>']`
 frontmatter, so `meshctl hook pre-tool-use` denies the first matching tool call with the
 rule. Match the command/path/MCP args, not the topic; allow flags between words
 (`git\b.*\bremote\b`). Verify by piping a sample payload into the hook (match → deny,
 unrelated → empty). Chat-only rules stay prose. Every new standing rule is written this way.
 
-## Cross-agent learning capture on dispatch return (ADR-0018)
+## Cross-agent learning capture on dispatch return (meshctl ADR-0018)
 
-A dispatched peer (headless `meshctl ask`, or `--in-session` as a subagent) may not
+A consulted peer (headless `meshctl ask`, or `--in-session` as a subagent) may not
 commit, so anything the answering peer learned lives only in the answered `intake/`
 file and is lost if never distilled. On returning from a dispatch, judge the answer and
 write durable learning as a candidate **into the OWNING agent's KB, not your own**:
@@ -139,7 +139,13 @@ Domain knowledge lands with its owner (a database gotcha → the database expert
 org-level pattern → `architect`). It lands as a candidate so the review gate holds;
 the owner promotes it on its next interactive session.
 
-## Closing an intake exchange (ADR-0043)
+**Delegated work is different** (`--in-session --work`, meshctl ADR-0063): the peer runs
+write-capable, so it commits its *own* learning through `kb begin|finish --agent <peer>`
+and lists it in its receipt. Don't re-file it — relay the receipt. When **you** are the
+delegated peer, do the same: KB writes via `--agent <you>`, commits in your workspace (or
+the worktree the brief names), a standalone receipt at the end.
+
+## Closing an intake exchange (meshctl ADR-0043)
 
 Intake is an **ephemeral, git-ignored discussion** — the record is the KB, not the
 inbox. To close a request: write the outcome back, let the requester read it, **distill
@@ -149,7 +155,7 @@ in, refine by amend/supersede); a reusable procedure → a playbook; a lesson �
 experience note; `fyi`/routine → often nothing — then `meshctl inbox archive <id>` (or
 `--answered`). The coordination audit lives in `dispatch.log`.
 
-## Session handoff — resume point (ADR-0017)
+## Session handoff — resume point (meshctl ADR-0017)
 
 Keep an authoritative, git-tracked `knowledge/handoff.md`: *where we are + the next
 concrete step*. Read at start (auto-injected). Write it at session end, or when the
@@ -181,7 +187,7 @@ Rules — that is all there is to decide:
   with a missing section, a leftover placeholder or over budget — fix and resend
   (`--force` writes it anyway).
 
-## Repo hygiene — knowledge is only safe once pushed (ADR-0039)
+## Repo hygiene — knowledge is only safe once pushed (meshctl ADR-0039)
 
 Your workspace must be its own git repo **with a remote**. `knowledge/` (KB + handoff)
 is durable only once committed **and pushed** — otherwise it dies with this machine.

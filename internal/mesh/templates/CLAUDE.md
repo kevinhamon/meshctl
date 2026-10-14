@@ -34,6 +34,7 @@ Bidirectional file-based handoff — canonical protocol: your pool's `../.agentm
 - **Outbound:** `meshctl send <target> <type> "…"` writes a request into a peer's inbox; `meshctl ask <target> <type> "…"` also dispatches an advisory peer headlessly and blocks for the answer. Route work to the agent that **owns** it (find owners via `meshctl agent list`); never mutate a peer's KB/board directly.
 - **Blocked on a decision mid-task?** `meshctl ask <advisor> <type> "…"` for a synchronous answer; if it returns `needs-human`, stop and surface to the user.
 - **Under Claude Code, prefer `meshctl ask <advisor> <type> "…" --in-session`:** it records the dispatch and prints an Agent-tool delegation (`subagent_type: mesh-<advisor>`) — make that call, then read the answer with `meshctl sent`. The peer runs inside this session; no second terminal.
+- **Hub session — work a peer owns:** when the task is a peer's *work* (its KB, ADRs, repo), not just its opinion, use `meshctl ask <peer> <type> "…" --in-session --work` → `subagent_type: mesh-<peer>-work`. The peer edits and commits in its own workspace (or a worktree, if its own session is live) and ends with a receipt — relay it. Consult (advice only) stays `--in-session`. Delegating to a peer that `mutates` external state asks the human first. Worktree branches land with `meshctl work merge <id>` from the peer's own session.
 
 ## Guardrail — internal references never leave the mesh
 

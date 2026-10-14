@@ -106,11 +106,12 @@ existing pool with `meshctl agent bootstrap`.
 ```
 meshctl pool    init [path] | upgrade [--force] | list | teardown [--purge --yes] [--dry-run]
 meshctl agent   new <name> | onboard <name|path> | bootstrap | list | identity | brief --agent <peer> [--request <id>]
-meshctl msg     ask <target> <type> "…" [--in-session | --detach] | send <target> <type> "…"
+meshctl msg     ask <target> <type> "…" [--in-session [--work] | --detach] | send <target> <type> "…"
 meshctl inbox   list | next [--claim] | claim <id> | release <id>
                 respond <id> --status <s> --response "…" | decline <id> --reason "…" [--redirect <agent>]
                 archive <id> | --answered | --closed [--force]
 meshctl sent    [--all] | ack <id>...      # responses to requests you sent
+meshctl work    list [--agent <a>] [--json] | merge <id> [--abort]   # delegated-work branches
 meshctl kb      begin | finish [--abort] | consolidate [--json]
 meshctl memory  recall "<q>" [--budget N] | sessions
 meshctl session start | end | list
@@ -197,6 +198,23 @@ writes, git and KB writes — so a consulted peer cannot chain or drift. The poo
 added to the caller's `.claude/settings.local.json` `additionalDirectories` (machine-local,
 git-ignored) so the peer can read its own workspace. Session start lists the installed
 peers. opencode callers keep the headless `ask`.
+
+**Delegated work — the hub session ([ADR-0063](docs/decisions/0063-hub-session-delegated-peer-work.md)).** Add `--work` and the peer does the work
+instead of advising: `meshctl ask <peer> <type> "…" --in-session --work` prints
+`subagent_type: mesh-<peer>-work`, a write-capable definition (Read/Grep/Glob/Bash/Edit/
+Write, no Agent) rendered for every work-delegable peer — dispatchable, or declaring
+`mutates`. One session can then drive the whole pool while each agent keeps its own KB,
+decisions and repo. The peer edits by its own conventions: KB writes through `kb
+begin|finish --agent <peer>`, path-limited commits in its workspace, and product repos it
+declares under `workdirs:` in `agent.yaml` (added to the caller's `additionalDirectories`).
+If the peer's own session is live, the request gets a worktree + branch
+(`.agentmesh/worktrees/<peer>-work-<id>`, `mesh/work/<id>`) so the two never share a
+checkout; the peer's own session lands it with `meshctl work merge <id>` (rebase + ff-only;
+`--abort` discards). The work-mode gate denies writes outside those roots, dispatch and
+`work merge`; delegating to a `mutates` peer asks the human once per delegation. The peer
+ends with a receipt for the caller to relay, and its stop is distilled into its own KB.
+`meshctl doctor` flags missing `-work` definitions and workdir grants; hygiene reaps
+work worktrees already merged by hand and reports branches unmerged for over a week.
 
 **opencode V1 vs V2.** Both lines are supported under the one `opencode` harness; their
 plugin APIs are incompatible (V2 skips a V1 plugin with only a log warning). meshctl
