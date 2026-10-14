@@ -57,11 +57,31 @@ func (d ADR) Active() bool {
 
 // adrFrontmatter is the YAML the tooling reads from a decision file.
 type adrFrontmatter struct {
-	Status       string `yaml:"status"`
-	SupersededBy any    `yaml:"superseded_by"`
-	Supersedes   any    `yaml:"supersedes"`
-	Updates      any    `yaml:"updates"`
-	Date         any    `yaml:"date"`
+	Status  string `yaml:"status"`
+	Updates any    `yaml:"updates"`
+	Date    any    `yaml:"date"`
+}
+
+// fmKeyRaw returns the raw text of a top-level frontmatter key: the scalar or
+// inline list on its line, plus any `- item` block lines under it. Used for
+// the ADR-number keys, where YAML's own typing (octal for 0050) is wrong.
+func fmKeyRaw(fm, key string) string {
+	lines := strings.Split(fm, "\n")
+	for i, ln := range lines {
+		if !strings.HasPrefix(ln, key+":") {
+			continue
+		}
+		parts := []string{strings.TrimSpace(strings.TrimPrefix(ln, key+":"))}
+		for _, nl := range lines[i+1:] {
+			t := strings.TrimSpace(nl)
+			if !strings.HasPrefix(t, "- ") {
+				break
+			}
+			parts = append(parts, strings.TrimPrefix(t, "- "))
+		}
+		return strings.Join(parts, " ")
+	}
+	return ""
 }
 
 var (
@@ -166,8 +186,10 @@ func ParseADR(path string) (ADR, error) {
 		if err := decodeYAML(fm, &y); err == nil && strings.TrimSpace(y.Status) != "" {
 			d.Frontmatter = true
 			d.Status = statusWord(y.Status)
-			d.SupersededBy = adrNums(yamlStrings(y.SupersededBy))
-			d.Supersedes = adrNums(yamlStrings(y.Supersedes))
+			// Numbers are read from the raw text, not the decoded YAML: an
+			// unquoted zero-padded number such as 0050 is octal to YAML (40).
+			d.SupersededBy = adrNums([]string{fmKeyRaw(fm, "superseded_by")})
+			d.Supersedes = adrNums([]string{fmKeyRaw(fm, "supersedes")})
 			for _, u := range yamlStrings(y.Updates) {
 				d.Updates = append(d.Updates, strings.TrimPrefix(strings.TrimSpace(u), KnowledgeDir+"/"))
 			}
@@ -266,11 +288,12 @@ func adrFrontmatterBlock(d ADR) string {
 	if d.Date != "" {
 		b.WriteString("date: " + d.Date + "\n")
 	}
+	// Quoted: an unquoted zero-padded number is octal to a YAML reader.
 	if len(d.SupersededBy) > 0 {
-		b.WriteString("superseded_by: [" + strings.Join(d.SupersededBy, ", ") + "]\n")
+		b.WriteString("superseded_by: [\"" + strings.Join(d.SupersededBy, "\", \"") + "\"]\n")
 	}
 	if len(d.Supersedes) > 0 {
-		b.WriteString("supersedes: [" + strings.Join(d.Supersedes, ", ") + "]\n")
+		b.WriteString("supersedes: [\"" + strings.Join(d.Supersedes, "\", \"") + "\"]\n")
 	}
 	b.WriteString("---\n")
 	return b.String()

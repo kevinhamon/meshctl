@@ -49,6 +49,12 @@ func TestParseADR_FrontmatterAndBulletForms(t *testing.T) {
 	}
 	// Frontmatter wins over the bullet; updates/supersedes lists parse; date as YAML date.
 	fm := write("0050-audit-transactional.md", "---\nstatus: accepted\ndate: 2026-08-10\nsupersedes: [45]\nupdates:\n  - architecture/backend-apis.md\n  - knowledge/state.md\n---\n# 0050. Audit durability is transactional\n\n- **Status:** proposed\n")
+	// Zero-padded, unquoted numbers must not be read as octal (0050 ≠ 40);
+	// block lists and ADR- prefixes parse too.
+	oct := write("0051-octal.md", "---\nstatus: superseded\nsuperseded_by: [0050]\nsupersedes:\n  - ADR-0045\n  - 0012\n---\n# 0051. Octal trap\n")
+	if d, _ := ParseADR(oct); strings.Join(d.SupersededBy, ",") != "0050" || strings.Join(d.Supersedes, ",") != "0045,0012" {
+		t.Fatalf("zero-padded numbers: by=%v supersedes=%v", d.SupersededBy, d.Supersedes)
+	}
 	d, _ = ParseADR(fm)
 	if !d.Frontmatter || d.Status != ADRAccepted || d.Date != "2026-08-10" {
 		t.Fatalf("frontmatter parse: %+v", d)
@@ -80,7 +86,7 @@ func TestADRFrontmatterMigration_AdditiveAndIdempotent(t *testing.T) {
 	}
 	b, _ := os.ReadFile(p)
 	got := string(b)
-	if !strings.HasPrefix(got, "---\nstatus: superseded\ndate: 2026-07-28\nsuperseded_by: [0050]\n---\n") {
+	if !strings.HasPrefix(got, "---\nstatus: superseded\ndate: 2026-07-28\nsuperseded_by: [\"0050\"]\n---\n") {
 		t.Fatalf("frontmatter block:\n%s", got)
 	}
 	if !strings.HasSuffix(got, orig) {
