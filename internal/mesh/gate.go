@@ -13,7 +13,7 @@ import (
 // This one can REFUSE a tool call. It exists because doctrine delivered as
 // injected prose is optional, and the only way to make "route memory through the
 // mesh" non-optional is to deny the competing paths so the mesh is the one road
-// left (ADR-0044).
+// left (introduced in v1.2.0; the KB-rule gate, ADR-0062, extends it).
 //
 // Scope of "fail-closed": it denies the patterns it recognises, reliably —
 // including by tool NAME alone, so a malformed tool_input cannot smuggle a write

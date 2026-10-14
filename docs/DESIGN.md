@@ -48,8 +48,11 @@ approve.
 
 Some code comments and docs cite `ADR-NNNN` — Architecture Decision Records, the standard
 [Nygard](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)
-convention for capturing the *why* behind a decision. Those specific records are part of
-the author's private design history and are **not shipped in this repo**; the citations
-are pointers, not links. `meshctl doctor` also recognizes `ADR-NNNN` tokens when checking
+convention for capturing the *why* behind a decision. Those records now live in
+[`docs/decisions/`](decisions/), under their **original numbers**, so a citation such as
+`ADR-0031` maps directly to `docs/decisions/0031-*.md`. The numbering has gaps because the
+records were first kept in a larger decision log; see
+[`docs/decisions/README.md`](decisions/README.md) for the index and how to add new ones.
+`meshctl doctor` also recognizes `ADR-NNNN` tokens when checking
 consistency of an *end user's own* `knowledge/decisions/` KB — that is a supported feature
 for anyone who keeps ADRs, not a dependency on any external record.
