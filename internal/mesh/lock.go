@@ -157,6 +157,7 @@ func acquireDispatchLock(ctx context.Context, agentsDir, caller, target string, 
 	_ = os.MkdirAll(filepath.Dir(lockPath), 0o755) // ensure .agentmesh/ exists (ADR-0038)
 
 	mk := func() error { return os.Mkdir(lockPath, 0o755) }
+	reclaim := lockPath + ".reclaim"
 
 	deadline := now.Add(time.Duration(lockWaitSec()) * time.Second)
 	waited := 0
@@ -176,14 +177,19 @@ func acquireDispatchLock(ctx context.Context, agentsDir, caller, target string, 
 		// platform can tell), or it is past the stale window. A live holder past
 		// the window is left alone — the BUSY message names it for the operator.
 		if lockReclaimable(lockPath, time.Now()) {
-			// Rename-then-mkdir: of several waiters that all judged the lock
-			// stale, exactly one wins the rename; the rest see it vanish and loop
-			// back to mkdir, where only one of THEM can succeed. The old
-			// remove-then-mkdir let a second waiter remove the winner's fresh lock.
-			tomb := fmt.Sprintf("%s.stale-%d", lockPath, time.Now().UnixNano())
-			if err := os.Rename(lockPath, tomb); err == nil {
-				_ = os.RemoveAll(tomb)
-				if err := mk(); err == nil {
+			// Reclaim under a mutex, re-checking staleness once inside it. A
+			// waiter that judged the old lock stale can otherwise lose the race,
+			// then rename away the fresh lock the winner just made — two holders.
+			if reclaimLocked(reclaim) {
+				if lockReclaimable(lockPath, time.Now()) {
+					tomb := fmt.Sprintf("%s.stale-%d", lockPath, time.Now().UnixNano())
+					if err := os.Rename(lockPath, tomb); err == nil {
+						_ = os.RemoveAll(tomb)
+					}
+				}
+				err := mk()
+				_ = os.Remove(reclaim)
+				if err == nil {
 					break
 				}
 			}
@@ -246,6 +252,19 @@ func lockReclaimable(lockPath string, now time.Time) bool {
 		}
 	}
 	return lockAge(lockPath, now) > staleSec()
+}
+
+// reclaimLocked takes the stale-reclaim mutex. The mutex is held for a rename
+// and a mkdir only, so one older than the stale window was left by a crashed
+// reclaimer and is cleared for the next attempt.
+func reclaimLocked(reclaim string) bool {
+	if os.Mkdir(reclaim, 0o755) == nil {
+		return true
+	}
+	if lockAge(reclaim, time.Now()) > staleSec() {
+		_ = os.Remove(reclaim)
+	}
+	return false
 }
 
 // lockHolderPID parses `pid=N` out of $LOCK/info; 0 if absent.
