@@ -129,12 +129,12 @@ func TestKB_ResolveSessionAmbiguousAndEmpty(t *testing.T) {
 func TestAgentFromWorktreePath(t *testing.T) {
 	dir := meshRoot(t)
 	newTestAgent(t, dir, "architect", true, nil)
-	newTestAgent(t, dir, "beyond-mfe-architect", true, nil) // name contains '-'
+	newTestAgent(t, dir, "web-ui-architect", true, nil) // name contains '-'
 
 	cases := []struct{ cwd, want string }{
 		{filepath.Join(dir, WorktreesDir, "architect-s-123-456"), "architect"},
 		{filepath.Join(dir, WorktreesDir, "architect-s-123-456", "knowledge"), "architect"},
-		{filepath.Join(dir, WorktreesDir, "beyond-mfe-architect-s-9-9"), "beyond-mfe-architect"},
+		{filepath.Join(dir, WorktreesDir, "web-ui-architect-s-9-9"), "web-ui-architect"},
 		{filepath.Join(dir, "architect"), ""},        // not under .worktrees
 		{filepath.Join(dir, WorktreesDir, "ghost-s-1"), ""}, // unknown agent
 	}

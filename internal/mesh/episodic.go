@@ -70,7 +70,7 @@ func CaptureSession(agent *Agent, transcriptPath, id, started string, now time.T
 
 	// Extractive summary: opening ask, trimmed. Cheap, no generation.
 	rec.Summary = extractiveSummary(rec)
-	// refs: scan the opening ask + commit subjects for CD-1234 / R-12 / ADR-0033.
+	// refs: scan the opening ask + commit subjects for PROJ-1234 / R-12 / ADR-0033.
 	rec.Refs = extractRefs(rec)
 
 	if err := writeSessionRecord(agent.Dir(), rec); err != nil {

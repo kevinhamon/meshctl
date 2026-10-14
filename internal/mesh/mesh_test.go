@@ -271,8 +271,8 @@ func TestMemory_RebuildRecallRecovery(t *testing.T) {
 	if err := os.MkdirAll(dec, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "---\ntags: [telemetry, drain]\n---\n# Telemetry batch drain\nbody text\n"
-	if err := os.WriteFile(filepath.Join(dec, "0009-telemetry-drain.md"), []byte(body), 0o644); err != nil {
+	body := "---\ntags: [upload, retry]\n---\n# Upload batch retry\nbody text\n"
+	if err := os.WriteFile(filepath.Join(dec, "0009-upload-retry.md"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -284,12 +284,12 @@ func TestMemory_RebuildRecallRecovery(t *testing.T) {
 		t.Fatal("expected topics, got none")
 	}
 
-	hits, err := MemoryRecall(a, "telemetry")
+	hits, err := MemoryRecall(a, "upload")
 	if err != nil {
 		t.Fatalf("recall: %v", err)
 	}
 	if len(hits) == 0 {
-		t.Fatal("recall 'telemetry' returned no hits")
+		t.Fatal("recall 'upload' returned no hits")
 	}
 
 	// recovery: rm .memory + rebuild reconstructs identical topic count
