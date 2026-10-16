@@ -96,6 +96,14 @@ _Avoid_: integration, tool, target system
 Items held by a peer that wait for a human action in that peer's own interactive session: knowledge awaiting confirmation, open conflicts, inbox requests, answers awaiting read-back, delegated work awaiting merge.
 _Avoid_: backlog (implies a prioritised list), nag (the rendering, not the thing), queue
 
+**Intake triage pass**:
+The on-demand walk over a peer's open inbox requests that judges whether each still stands, was superseded, was done elsewhere, or was withdrawn, and closes only what the human confirms item by item.
+_Avoid_: inbox cleanup, sweep, backlog grooming
+
+**Triage report**:
+An agent's per-request verdicts on one peer's open inbox, each with quoted grounding, which the human reads in a confirmation round; it is a hypothesis itself and closes nothing by itself.
+_Avoid_: triage list, stale report, findings
+
 **Skill pack**:
 An optional, externally maintained set of skills that a pool may adopt and assign to peers; meshctl works with any pack or none.
 _Avoid_: plugin (the distribution mechanism, not the concept), toolkit

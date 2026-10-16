@@ -64,3 +64,7 @@ Verified facts:
 - Negative: a peer with a large unconfirmed count sees the health line every session until the reconciliation pass runs. Accepted: that is the pressure ADR-0070 relies on.
 - Negative: the standing order is prose, so a session can ignore the block. The block's persistence is the mitigation; a missed item is there again next time.
 - Follow-ups: the block renderer, `meshctl pending`, the doctor age change and the template wording are implementation work. Deciding when a pending request is superseded or already done is the intake triage pass.
+
+## Amendment (2026-10-16): one triage-signal clause on the intake line
+
+ADR-0072 defines the intake triage pass and its signals. The "raw facts only" rule stands for judgment, with one addition to the rendering: when any of the peer's open requests has an exact, cheap triage signal (its id named in a `mesh/work/*` branch on any peer, or a `redirected_to` target that has closed), the intake line gains the clause `N have triage signals, run meshctl inbox triage`. No per-item tags, no "possibly superseded" wording; the worksheet and the agent's judgment stay in the pass.
