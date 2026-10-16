@@ -92,6 +92,10 @@ _Avoid_: external write, push, side effect
 One system outside the pool that the pool names so writes to it can be recognised and confirmed before they happen.
 _Avoid_: integration, tool, target system
 
+**Pending work**:
+Items held by a peer that wait for a human action in that peer's own interactive session: knowledge awaiting confirmation, open conflicts, inbox requests, answers awaiting read-back, delegated work awaiting merge.
+_Avoid_: backlog (implies a prioritised list), nag (the rendering, not the thing), queue
+
 **Skill pack**:
 An optional, externally maintained set of skills that a pool may adopt and assign to peers; meshctl works with any pack or none.
 _Avoid_: plugin (the distribution mechanism, not the concept), toolkit
