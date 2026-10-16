@@ -64,9 +64,25 @@ _Avoid_: copy, cross-link, mirror
 The state in which the human has seen and agreed to a peer's intent, the grounding of its claims, and the precedent for its proposed pattern, before the peer acts.
 _Avoid_: alignment, sign-off, approval
 
+**Confirmation round**:
+The read-out, in chat and before a promotion or outbound write, of what each entry will say from now on and what it no longer says, with its grounding and precedent, one item per entry, which the human confirms or disputes item by item; the record is the summary file and the permission prompt is only the signature.
+_Avoid_: the ask (that is the prompt), diff review, approval prompt
+
 **Precedent**:
 Where a proposed pattern already exists in the ecosystem, in confirmed knowledge, or in pool doctrine; a pattern with none is new and must say so.
 _Avoid_: prior art, example
+
+**Reconciliation pass**:
+The on-demand walk over a pool's existing knowledge that finds contradictions within a peer, across canonical peers and against doctrine, and brings reviewed entries to confirmed knowledge.
+_Avoid_: sweep (the mechanism, not the concept), audit, cleanup
+
+**Reconcile report**:
+An agent's per-entry verdicts on one peer's knowledge, each with quoted grounding, which the human reads in a confirmation round; it is a hypothesis itself and is never promoted.
+_Avoid_: scan results, diff, findings
+
+**Ungrounded claim**:
+A factual statement in a knowledge base that cites nothing resolvable; it stays a hypothesis until the human grounds or accepts it.
+_Avoid_: unverified (a cited claim can be unverified yet grounded), assumption (that is the author's label, not the verdict)
 
 **Outbound write**:
 A change to a surface outside the pool that other people treat as true, such as a tracker item, a wiki page, or a product repository's remote.

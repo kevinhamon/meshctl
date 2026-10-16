@@ -70,3 +70,14 @@ Verified facts:
 - Negative: delegated work that reaches a promotion stops short and waits for the peer's own session. The hub cannot complete it.
 - Negative: one more file to write before every promotion. The summary requirement is what makes the ask readable, so this is the cost ADR-0064 already accepted.
 - Follow-ups: ticket 12 (outbound gate) reuses `--summary-file` and the wiring guard; ticket 14 prototypes the full path; ticket 16 adds pending branches and the unconfirmed count to the session-start list.
+
+## Amendment (2026-10-16): the ask text is a signature; the reading is a confirmation round in chat
+
+One real run of the full path (a hand-wired prototype in a live peer; the human denied the same promotion three times before accepting a fourth presentation) replaces the "Ask text" item of the Decision:
+
+- **The permission prompt is not where the human reads.** It truncates, and a file list or a diff does not say what becomes true. The human reads a **confirmation round** (GLOSSARY) in chat before the finish is run: one item per promoted entry, in the grilling format, stating in plain words what the entry says from now on, what it no longer says, its grounding and its precedent, each ending in a recommended *confirm*. "Yes" confirms the round; disputing one item sends that entry back to candidates before the finish.
+- **The summary file is the record and the machine input.** It gains a required `## Changes` section: one `### <path>` block per promoted file with `+ added` / `- removed` bullets in plain words. The gate renders the Intent line and those bullets per file at the prompt, with `+n -m` counts, as the signature. A promoted file with no bullets is flagged at the prompt. Bullet grammar is specified in the template and normalised generously.
+- **One summary, two gates** (ticket 08) still holds for the file; the round is given once per promotion or outbound batch.
+- **Granularity is open.** The run put four entries in one round and the human wants smaller chunks. Options noted for after more use: a cap per promotion, per-entry rounds, or per-entry finishes. Until decided, agents keep rounds small.
+- **Atomicity.** The prototype merged and then failed before writing the ledger, leaving main merged and unconfirmed. meshctl writes the ledger and the `Confirm:` commit in the same step as the fast-forward, or refuses to merge.
+- Measured on Claude Code: prompts of about 600 and 1200 characters rendered whole; about 5500 truncated.
