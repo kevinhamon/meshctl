@@ -44,6 +44,14 @@ _Avoid_: shared knowledge, global knowledge
 Knowledge a peer holds as its own viewpoint (a character's beliefs, a role's opinion of the world), free to contradict other peers and never checked against them.
 _Avoid_: private knowledge, opinion
 
+**Fact conflict**:
+Two canonical entries asserting incompatible states of the same referent, which the ecosystem or the record can settle; the only kind of disagreement the pool flags.
+_Avoid_: contradiction (too broad), inconsistency
+
+**Judgment difference**:
+Two peers evaluating, ranking, or recommending differently; nothing settles it, so it is never flagged.
+_Avoid_: opinion conflict, disagreement
+
 **Fact owner**:
 The one peer whose knowledge base holds a given canonical fact; other peers reference its entry instead of keeping a copy.
 _Avoid_: source of truth (too vague), master

@@ -11,7 +11,7 @@ were extracted here with their original numbers so existing cross-references sta
 valid. Missing numbers are not lost meshctl decisions. Older records also use the
 CLI's earlier name, `agentmesh` (renamed `meshctl` in [0034](0034-rename-meshctl-noun-verb-cli.md)).
 
-**New ADRs continue from 0068.** Copy [template.md](template.md) to
+**New ADRs continue from 0069.** Copy [template.md](template.md) to
 `NNNN-short-slug.md`, fill it in, and add a row to the index below.
 
 ## Index
@@ -50,3 +50,4 @@ CLI's earlier name, `agentmesh` (renamed `meshctl` in [0034](0034-rename-meshctl
 | [0066](0066-pool-knowledge-lives-in-a-pool-repo.md) | Pool knowledge lives in a visible `pool/` git repo; meshctl commits, humans push | accepted |
 | [0067](0067-confirmed-knowledge-is-a-content-hash-ledger.md) | Confirmed knowledge is a content-hash ledger written at promotion; the gate asks on `kb finish` and `state set` | accepted |
 | [0068](0068-outbound-writes-are-gate-asked-per-batch.md) | Outbound writes are gate-asked once per summary; surfaces are pool config keyed by `mutates` | accepted |
+| [0069](0069-knowledge-kind-per-peer-and-cross-peer-recall.md) | Knowledge kind is declared per peer; canonical peers recall each other and classify conflicts at promotion | accepted |
