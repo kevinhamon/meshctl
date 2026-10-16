@@ -11,7 +11,7 @@ were extracted here with their original numbers so existing cross-references sta
 valid. Missing numbers are not lost meshctl decisions. Older records also use the
 CLI's earlier name, `agentmesh` (renamed `meshctl` in [0034](0034-rename-meshctl-noun-verb-cli.md)).
 
-**New ADRs continue from 0064.** Copy [template.md](template.md) to
+**New ADRs continue from 0068.** Copy [template.md](template.md) to
 `NNNN-short-slug.md`, fill it in, and add a row to the index below.
 
 ## Index
@@ -45,3 +45,7 @@ CLI's earlier name, `agentmesh` (renamed `meshctl` in [0034](0034-rename-meshctl
 | [0043](0043-intake-lifecycle.md) | Intake is an ephemeral discussion: git-ignored, distilled to the KB, then archived | accepted |
 | [0062](0062-kb-rule-gate.md) | Standing rules are enforced by a KB-rule gate, not by prose | accepted |
 | [0063](0063-hub-session-delegated-peer-work.md) | Hub session: peers do delegated work in-session, in their own repos | accepted |
+| [0064](0064-agents-propose-humans-confirm.md) | Agents propose, humans confirm: KB truth needs human confirmation, enforced at `kb finish` | accepted |
+| [0065](0065-one-fact-owner-with-references.md) | One fact owner per canonical fact; other peers hold references, and recall follows them one hop | accepted |
+| [0066](0066-pool-knowledge-lives-in-a-pool-repo.md) | Pool knowledge lives in a visible `pool/` git repo; meshctl commits, humans push | accepted |
+| [0067](0067-confirmed-knowledge-is-a-content-hash-ledger.md) | Confirmed knowledge is a content-hash ledger written at promotion; the gate asks on `kb finish` and `state set` | accepted |
