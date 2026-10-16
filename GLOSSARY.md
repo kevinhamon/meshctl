@@ -60,6 +60,14 @@ _Avoid_: alignment, sign-off, approval
 Where a proposed pattern already exists in the ecosystem, in confirmed knowledge, or in pool doctrine; a pattern with none is new and must say so.
 _Avoid_: prior art, example
 
+**Outbound write**:
+A change to a surface outside the pool that other people treat as true, such as a tracker item, a wiki page, or a product repository's remote.
+_Avoid_: external write, push, side effect
+
+**Outbound surface**:
+One system outside the pool that the pool names so writes to it can be recognised and confirmed before they happen.
+_Avoid_: integration, tool, target system
+
 **Skill pack**:
 An optional, externally maintained set of skills that a pool may adopt and assign to peers; meshctl works with any pack or none.
 _Avoid_: plugin (the distribution mechanism, not the concept), toolkit

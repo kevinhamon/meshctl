@@ -49,3 +49,4 @@ CLI's earlier name, `agentmesh` (renamed `meshctl` in [0034](0034-rename-meshctl
 | [0065](0065-one-fact-owner-with-references.md) | One fact owner per canonical fact; other peers hold references, and recall follows them one hop | accepted |
 | [0066](0066-pool-knowledge-lives-in-a-pool-repo.md) | Pool knowledge lives in a visible `pool/` git repo; meshctl commits, humans push | accepted |
 | [0067](0067-confirmed-knowledge-is-a-content-hash-ledger.md) | Confirmed knowledge is a content-hash ledger written at promotion; the gate asks on `kb finish` and `state set` | accepted |
+| [0068](0068-outbound-writes-are-gate-asked-per-batch.md) | Outbound writes are gate-asked once per summary; surfaces are pool config keyed by `mutates` | accepted |
