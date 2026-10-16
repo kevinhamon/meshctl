@@ -81,3 +81,7 @@ One real run of the full path (a hand-wired prototype in a live peer; the human 
 - **Granularity is open.** The run put four entries in one round and the human wants smaller chunks. Options noted for after more use: a cap per promotion, per-entry rounds, or per-entry finishes. Until decided, agents keep rounds small.
 - **Atomicity.** The prototype merged and then failed before writing the ledger, leaving main merged and unconfirmed. meshctl writes the ledger and the `Confirm:` commit in the same step as the fast-forward, or refuses to merge.
 - Measured on Claude Code: prompts of about 600 and 1200 characters rendered whole; about 5500 truncated.
+
+## Amendment (2026-10-16): deleting a section drops its ledger line
+
+A `kb finish` that deletes a section of a sectioned file (or a whole file) drops that entry's ledger line in the same `Confirm:` commit. The ledger never lists an absent section, and doctor flags a ledger line with no matching section or file as stale. Raised by the glossary migration (ADR-0066 amendment), where whole sections leave a peer file; the rule applies to any deletion.
