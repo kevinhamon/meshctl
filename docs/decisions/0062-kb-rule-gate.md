@@ -31,3 +31,7 @@ Option 4. A KB note with `rule:` + `triggers:` frontmatter is a standing rule. `
 - Implementation (done 2026-10-01): meshctl wiring v2; all 15 agents re-onboarded; token note converted with triggers; CLAUDE.md restatement removed as redundant.
 - Update 2026-10-01 (steward rollout): the gate first matched only string values of tool_input, so no rule could target an MCP tool by name. Fixed in meshctl 36c1ee3: the tool name is prepended to the matched text. Still outside the matcher: the Artifact tool. Rollout converted rules across 11 agents; the original pool's doctrine (`.agentmesh/doctrine/agent-comms.md`) got the gated-rules section by hand-merge, because `pool upgrade` would replace it with the generic template.
 - Follow-ups: convert other "standing instruction / do not repeat" notes to rules with triggers; every new standing rule is written with `rule:` + `triggers:`.
+
+## Amendment (2026-10-16): the hook matcher never matched MCP tools
+
+The matcher quoted in Option 4 (`…|Bash|mcp__`) is applied by Claude Code as a full regex match on the tool name, so the bare `mcp__` alternative never matched an `mcp__<server>__<tool>` name: rules were only ever checked on file-edit and shell calls. Found by the outbound-gate prototype (ADR-0068 amendment, same date). The matcher becomes `mcp__.*`; a doctor check flags the bare form; a test full-matches a sample MCP tool name.
