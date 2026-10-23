@@ -51,3 +51,4 @@ CLI's earlier name, `agentmesh` (renamed `meshctl` in [0034](0034-rename-meshctl
 | [0067](0067-confirmed-knowledge-is-a-content-hash-ledger.md) | Confirmed knowledge is a content-hash ledger written at promotion; the gate asks on `kb finish` and `state set` | accepted |
 | [0068](0068-outbound-writes-are-gate-asked-per-batch.md) | Outbound writes are gate-asked once per summary; surfaces are pool config keyed by `mutates` | accepted |
 | [0069](0069-knowledge-kind-per-peer-and-cross-peer-recall.md) | Knowledge kind is declared per peer; canonical peers recall each other and classify conflicts at promotion | accepted |
+| [0073](0073-intake-order-and-decision-rounds.md) | "check intake" shows the queue and waits for the human's order; decisions are asked as decision rounds | accepted |

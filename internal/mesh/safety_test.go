@@ -158,7 +158,7 @@ func TestAcquireLock_ConcurrentStaleReclaimYieldsOneHolder(t *testing.T) {
 	t.Setenv("AGENT_DISPATCH_LOCK_WAIT_SEC", "5")
 	t.Setenv("AGENT_DISPATCH_STALE_SEC", "1")
 	dir := t.TempDir()
-	lockPath := filepath.Join(dir, DispatchLock)
+	lockPath := DispatchLockPath(dir)
 	if err := os.MkdirAll(lockPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestAcquireLock_LiveHolderPidIsNotReclaimed(t *testing.T) {
 	t.Setenv("AGENT_DISPATCH_LOCK_WAIT_SEC", "1")
 	t.Setenv("AGENT_DISPATCH_STALE_SEC", "1")
 	dir := t.TempDir()
-	lockPath := filepath.Join(dir, DispatchLock)
+	lockPath := DispatchLockPath(dir)
 	_ = os.MkdirAll(lockPath, 0o755)
 	// Record OUR pid as the holder: alive, so even a stale mtime must not reclaim.
 	_ = os.WriteFile(filepath.Join(lockPath, "info"), []byte("pid="+strconv.Itoa(os.Getpid())+" caller=x target=y\n"), 0o644)
@@ -228,7 +228,7 @@ func TestAsk_CapChargedBeforeLockAndRefundedOnBusy(t *testing.T) {
 	dir := meshRoot(t)
 	target := newTestAgent(t, dir, "architect", true, nil)
 	// Someone else holds the lock for the whole wait.
-	lockPath := filepath.Join(dir, DispatchLock)
+	lockPath := DispatchLockPath(dir)
 	_ = os.MkdirAll(lockPath, 0o755)
 	defer os.RemoveAll(lockPath)
 
@@ -261,7 +261,7 @@ func TestAsk_InterruptReleasesLockAndClaim(t *testing.T) {
 	if rc != 130 {
 		t.Fatalf("want 130, got %d", rc)
 	}
-	if _, err := os.Stat(filepath.Join(dir, DispatchLock)); err == nil {
+	if _, err := os.Stat(DispatchLockPath(dir)); err == nil {
 		t.Fatal("dispatch lock leaked after interrupt")
 	}
 	if _, err := os.Stat(claimPath(req.Path())); err == nil {

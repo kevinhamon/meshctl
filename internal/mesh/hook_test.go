@@ -162,3 +162,31 @@ func TestHook_DistillNudge_StatePersisted(t *testing.T) {
 		t.Fatalf("expected distill state file at %s: %v", sp, err)
 	}
 }
+
+// TestHook_PostToolUse_IsASilentSeam: `meshctl hook post-tool-use` is wired on
+// every gated call; a call that writes nothing under pool/ (here an MCP call,
+// the outbound-ack case's shape) leaves the workspace untouched. The pool
+// commit is covered in pool_commit_test.go.
+func TestHook_PostToolUse_IsASilentSeam(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	before := dirListing(t, a.Dir())
+	p := HookPayload{Cwd: a.Dir(), SessionID: "sessP", ToolName: "mcp__tracker__createTicket",
+		ToolInput: json.RawMessage(`{"summary":"x"}`), ToolResponse: json.RawMessage(`{"key":"T-1"}`)}
+	HookPostToolUse(dir, p, time.Now())
+	if after := dirListing(t, a.Dir()); after != before {
+		t.Fatalf("post-tool-use seam must leave the workspace untouched\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func dirListing(t *testing.T, root string) string {
+	t.Helper()
+	var out []string
+	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err == nil {
+			out = append(out, strings.TrimPrefix(p, root))
+		}
+		return nil
+	})
+	return strings.Join(out, "\n")
+}

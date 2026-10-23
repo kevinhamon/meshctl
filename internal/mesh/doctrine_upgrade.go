@@ -50,7 +50,8 @@ type DoctrineUpgrade struct {
 //     `<file>.bak-<timestamp>` and overwrites it.
 func UpgradeDoctrine(poolRoot string, force bool, now time.Time) (DoctrineUpgrade, error) {
 	var res DoctrineUpgrade
-	dest := filepath.Join(poolRoot, DoctrineDir)
+	var written []string
+	dest := DoctrinePath(poolRoot)
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return res, err
 	}
@@ -69,7 +70,7 @@ func UpgradeDoctrine(poolRoot string, force bool, now time.Time) (DoctrineUpgrad
 			return res, err
 		}
 		out := filepath.Join(dest, name)
-		rel := filepath.Join(DoctrineDir, name)
+		rel := poolRel(poolRoot, DoctrineDirName, name)
 		upstream := out + upstreamSuffix
 		have, err := os.ReadFile(out)
 		switch {
@@ -92,7 +93,7 @@ func UpgradeDoctrine(poolRoot string, force bool, now time.Time) (DoctrineUpgrad
 			if err := os.WriteFile(bak, have, 0o644); err != nil {
 				return res, err
 			}
-			res.Did = append(res.Did, "backed up local edits: "+filepath.Join(DoctrineDir, filepath.Base(bak)))
+			res.Did = append(res.Did, "backed up local edits: "+poolRel(poolRoot, DoctrineDirName, filepath.Base(bak)))
 		}
 		if err := os.WriteFile(out, want, 0o644); err != nil {
 			return res, err
@@ -100,8 +101,13 @@ func UpgradeDoctrine(poolRoot string, force bool, now time.Time) (DoctrineUpgrad
 		stamps[name] = sha(want)
 		_ = os.Remove(upstream)
 		res.Did = append(res.Did, "doctrine: "+rel)
+		written = append(written, name)
 	}
-	return res, writeDoctrineStamps(dest, stamps)
+	if err := writeDoctrineStamps(dest, stamps); err != nil {
+		return res, err
+	}
+	// The rewrite is a reviewable commit in the pool repo (spec decision 67).
+	return res, commitDoctrineUpgrade(poolRoot, written)
 }
 
 // stampEmitted records the hash of freshly emitted doctrine files (init path).

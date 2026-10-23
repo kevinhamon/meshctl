@@ -18,7 +18,7 @@ import (
 // session start beside the handoff. The handoff says where the last session
 // stopped; the state digest says what the world looks like. `kb consolidate`
 // lists the decisions the digest has not absorbed yet; the agent rewrites it
-// with `meshctl state set`.
+// with `meshctl state set --summary-file <summary>` (a promotion).
 const StateFile = "state.md"
 
 // StatePath is knowledge/state.md for an agent.
@@ -83,7 +83,7 @@ func StateSet(agent *Agent, body string, now time.Time) error {
 	if err := os.MkdirAll(kb, 0o755); err != nil {
 		return err
 	}
-	header := fmt.Sprintf("<!-- meshctl state — %s updated %s. Current-state digest; read at session start, rewritten by `meshctl state set` after consolidation. -->\n\n",
+	header := fmt.Sprintf("<!-- meshctl state — %s updated %s. Current-state digest; read at session start, rewritten by `meshctl state set --summary-file <summary>` after consolidation. -->\n\n",
 		agent.Name, now.UTC().Format(time.RFC3339))
 	content := header + strings.TrimRight(stripStateHeader(body), "\n") + "\n"
 	return os.WriteFile(StatePath(agent), []byte(content), 0o644)

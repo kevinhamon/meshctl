@@ -120,7 +120,7 @@ func ensureDistillerAgent(dest string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	body := strings.ReplaceAll(string(tpl), "__NAME__", filepath.Base(dest))
+	body := renderPoolTokens(filepath.Dir(dest), strings.ReplaceAll(string(tpl), "__NAME__", filepath.Base(dest)))
 	out := filepath.Join(dest, ".claude", "agents", "distiller.md")
 	if b, err := os.ReadFile(out); err == nil {
 		cur := string(b)

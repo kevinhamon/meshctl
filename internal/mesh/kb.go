@@ -19,15 +19,77 @@ var ErrKBConflict = errors.New("kb merge conflict — needs human")
 
 func worktreePath(agentsDir, agent, session string) string {
 	safe := strings.ReplaceAll(session, "/", "-")
-	return filepath.Join(agentsDir, WorktreesDir, agent+"-"+safe)
+	return filepath.Join(WorktreesPath(agentsDir), agent+"-"+safe)
 }
 
-func kbBranch(session string) string { return "session/" + session }
+// KBBranchPrefix namespaces KB session branches in the agent's repo, beside
+// WorkBranchPrefix (spec: shared understanding, decision 17; ADR-0067).
+// LegacyKBBranchPrefix is the form earlier meshctl versions created; finish,
+// --abort and the listing still accept it, and hygiene renames it once no
+// worktree references it.
+const (
+	KBBranchPrefix       = "mesh/kb/"
+	LegacyKBBranchPrefix = "session/"
+)
+
+// KBBranch is the branch name of a KB session.
+func KBBranch(session string) string { return KBBranchPrefix + session }
+
+func legacyKBBranch(session string) string { return LegacyKBBranchPrefix + session }
+
+// kbBranchFor resolves the branch a session's worktree is on: the mesh/kb/
+// form when it exists, else the legacy session/ form when that is what the
+// repo holds, else the mesh/kb/ form for a branch yet to be created.
+func kbBranchFor(agentDir, session string) string {
+	if gitRefExists(agentDir, KBBranch(session)) {
+		return KBBranch(session)
+	}
+	if gitRefExists(agentDir, legacyKBBranch(session)) {
+		return legacyKBBranch(session)
+	}
+	return KBBranch(session)
+}
+
+// legacyKBBranches lists the session ids of the repo's session/<id> branches
+// (sorted); nil when the directory is not a git repo.
+func legacyKBBranches(agentDir string) []string {
+	out, err := git(agentDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/"+LegacyKBBranchPrefix)
+	if err != nil {
+		return nil
+	}
+	var ids []string
+	for _, ln := range strings.Split(out, "\n") {
+		if ln = strings.TrimSpace(ln); strings.HasPrefix(ln, LegacyKBBranchPrefix) {
+			ids = append(ids, strings.TrimPrefix(ln, LegacyKBBranchPrefix))
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func gitRefExists(dir, branch string) bool {
+	_, err := git(dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	return err == nil
+}
+
+// KBHolder returns the live session holding the KB worktree of a session id
+// (one worktree, one session: spec decision 6), or nil when no worktree exists
+// or no live session is registered under that id.
+func KBHolder(agentsDir string, agent *Agent, session string, now time.Time) *Session {
+	if !dirExists(worktreePath(agentsDir, agent.Name, session)) {
+		return nil
+	}
+	s, err := readSession(sessionPath(agent.Dir(), session))
+	if err != nil || int(now.Unix()-s.LastBeat) > staleSec() {
+		return nil
+	}
+	return s
+}
 
 // ListKBSessions returns the session ids that currently own a KB worktree for
 // the agent, recovered from the worktree directory names (<agent>-<session>).
 func ListKBSessions(agentsDir string, agent *Agent) []string {
-	entries, err := os.ReadDir(filepath.Join(agentsDir, WorktreesDir))
+	entries, err := os.ReadDir(WorktreesPath(agentsDir))
 	if err != nil {
 		return nil
 	}
@@ -94,19 +156,36 @@ func mainBranch(dir string) string {
 	return strings.TrimSpace(out)
 }
 
-// KBBegin creates an isolated worktree+branch for a KB write and points the
-// session at it. Returns the worktree path.
+// KBBegin creates an isolated worktree+branch (mesh/kb/<session>) for a KB
+// write and points the session at it. Returns the worktree path. Re-running it
+// from the session that holds the worktree is idempotent; when another live
+// session holds it, begin refuses and creates nothing, so a confirmation
+// signed in one session never covers edits from another (spec decision 6).
+// The caller's identity is the harness session id, resolved as claims resolve
+// it (ResolveAgentSessionID).
 func KBBegin(agentsDir string, agent *Agent, session string, now time.Time) (string, error) {
 	wt := worktreePath(agentsDir, agent.Name, session)
 	if dirExists(wt) {
+		if h := KBHolder(agentsDir, agent, session, now); h != nil && h.ID != ResolveAgentSessionID(agent, os.Getpid(), now) {
+			return "", fmt.Errorf("KB session %s is held by live session %s (pid %d) in %s — one worktree, one session: "+
+				"run `meshctl kb begin` without --session for your own worktree, or let that session `meshctl kb finish` first",
+				session, h.ID, h.PID, agent.Name)
+		}
 		return wt, nil // idempotent — already begun
 	}
-	if err := os.MkdirAll(filepath.Join(agentsDir, WorktreesDir), 0o755); err != nil {
+	if err := os.MkdirAll(WorktreesPath(agentsDir), 0o755); err != nil {
 		return "", err
 	}
-	branch := kbBranch(session)
+	branch := KBBranch(session)
+	// A legacy session/<id> branch with no worktree (left by an older meshctl)
+	// is renamed, so a begun session is always on the mesh/kb/ form.
+	if !gitRefExists(agent.Dir(), branch) && gitRefExists(agent.Dir(), legacyKBBranch(session)) {
+		if _, err := git(agent.Dir(), "branch", "-m", legacyKBBranch(session), branch); err != nil {
+			return "", err
+		}
+	}
 	// If the branch already exists (re-begin after abort left it), reuse it.
-	if _, err := git(agent.Dir(), "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
+	if gitRefExists(agent.Dir(), branch) {
 		if _, err := git(agent.Dir(), "worktree", "add", wt, branch); err != nil {
 			return "", err
 		}
@@ -122,60 +201,4 @@ func KBBegin(agentsDir string, agent *Agent, session string, now time.Time) (str
 		_ = writeSession(s)
 	}
 	return wt, nil
-}
-
-// KBFinish rebases the session branch onto main, merges (ff-only), and removes
-// the worktree. abort discards the branch + worktree instead. headless controls
-// conflict behavior: headless never auto-resolves (returns ErrKBConflict);
-// interactive leaves the rebase in progress for the human to resolve.
-func KBFinish(agentsDir string, agent *Agent, session string, abort, headless bool) error {
-	wt := worktreePath(agentsDir, agent.Name, session)
-	branch := kbBranch(session)
-
-	clearSessionBranch := func() {
-		if s, err := readSession(sessionPath(agent.Dir(), session)); err == nil {
-			s.KBBranch = ""
-			_ = writeSession(s)
-		}
-	}
-
-	if abort {
-		_, _ = git(agent.Dir(), "worktree", "remove", "--force", wt)
-		_, _ = git(agent.Dir(), "branch", "-D", branch)
-		clearSessionBranch()
-		return nil
-	}
-
-	if !dirExists(wt) {
-		return fmt.Errorf("no KB worktree for session %s (run `meshctl kb begin` first)", session)
-	}
-
-	// Require the worktree to be committed — we merge commits, not a dirty tree.
-	if status, _ := git(wt, "status", "--porcelain"); strings.TrimSpace(status) != "" {
-		return fmt.Errorf("worktree %s has uncommitted changes — commit your KB edits first", wt)
-	}
-
-	base := mainBranch(agent.Dir())
-
-	// Rebase the session branch onto the base, inside the worktree.
-	if _, err := git(wt, "rebase", base); err != nil {
-		if headless {
-			_, _ = git(wt, "rebase", "--abort")
-			return ErrKBConflict
-		}
-		return fmt.Errorf("%w: resolve conflicts in %s, `git rebase --continue`, then re-run `meshctl kb finish`", ErrKBConflict, wt)
-	}
-
-	// Fast-forward the base to the rebased branch.
-	if _, err := git(agent.Dir(), "merge", "--ff-only", branch); err != nil {
-		return fmt.Errorf("ff-only merge of %s into %s failed: %w", branch, base, err)
-	}
-
-	// Clean up.
-	if _, err := git(agent.Dir(), "worktree", "remove", "--force", wt); err != nil {
-		return err
-	}
-	_, _ = git(agent.Dir(), "branch", "-D", branch)
-	clearSessionBranch()
-	return nil
 }

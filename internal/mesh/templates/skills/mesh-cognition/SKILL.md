@@ -1,6 +1,6 @@
 ---
 name: mesh-cognition
-description: How this agent maintains its own knowledge base and learns over time — the retrieval loop (recall → retrieve → verify → act → learn), the distillation ritual (turn recurring intuition into durable KB via kb begin/finish), consolidation (land decisions in the current tier, keep the state digest true, judge candidates), cross-agent learning capture on dispatch return, and session handoff. Invoke at session start (to recall), whenever a session yields a reusable procedure / failure mode / consequential decision (to distill), when recording an ADR or logging a risk, when `meshctl doctor` or `kb consolidate` reports KB debt, on returning from an `meshctl ask` dispatch, and at session end (to write the handoff). Every mesh agent's primary cognition instructions.
+description: How this agent maintains its own knowledge base and learns over time — the pending-work offer and the intake queue shown at session start, the decision round used to ask the human for any decision, the retrieval loop (recall → retrieve → reconcile → verify → align → act → learn), the confirmation round read to the human before any promotion or outbound write, the distillation ritual (turn recurring intuition into durable KB via kb begin/finish), consolidation (land decisions in the current tier, keep the state digest true, judge candidates), cross-agent learning capture on dispatch return, and session handoff. Invoke at session start (to recall), whenever a session yields a reusable procedure / failure mode / consequential decision (to distill), when recording an ADR or logging a risk, when `meshctl doctor` or `kb consolidate` reports KB debt, on returning from an `meshctl ask` dispatch, and at session end (to write the handoff). Every mesh agent's primary cognition instructions.
 ---
 
 # Mesh cognition — maintain your own KB, learn over time
@@ -8,7 +8,7 @@ description: How this agent maintains its own knowledge base and learns over tim
 Coordination (intake) is how agents *talk*. **Cognition** is how one agent
 organizes what it knows and recognizes what it has seen — on the same file
 substrate, no new store. This skill is the operative trigger; the **authoritative
-full spec is `.agentmesh/doctrine/agent-comms.md` §Knowledge & Memory (meshctl ADR-0014–0018)**.
+full spec is `../__POOL_DIR__/doctrine/agent-comms.md` §Knowledge & Memory (meshctl ADR-0014–0018)**.
 When this skill and that section disagree, that section wins — read it.
 
 Your KB is your own git-tracked `knowledge/` tree, in **two tiers**:
@@ -27,8 +27,19 @@ Your contract stays in `CLAUDE.md` + `agent.yaml`. Memory is computed live from
 
 ## Retrieval loop (do this every session)
 
-Recognize → **Recall** → **Retrieve** → Reconcile → **Verify** → Act → **Learn**
+Recognize → Recall → Retrieve → Reconcile → Verify → **Align** → Act → Learn
 
+0. **Pending work first.** When session start shows a `# Pending work` block, read it to
+   the human before any new work and offer triage now, a subset, or deferral. The human
+   decides; never triage alone. A deferral is one `Deferred: <ids>` line in the handoff
+   (Open Threads). There is no snooze: the items return at the next session start.
+   **Intake shows the queue and stops.** On "check intake" or the intake line, run
+   `meshctl inbox list` (pending + in-progress, priority then age, a one-line ask each),
+   read it as a short numbered queue (id, from, type, priority, age, ask), propose an
+   order (priority, then age; flag anything blocking another peer) and wait. Claim and
+   work nothing before the answer. Then work in the human's order, by id: `meshctl inbox
+   claim <id>`, one at a time, a one-line outcome before the next; re-plan when the human
+   says something more important came up; skipped ids go on the `Deferred: <ids>` line.
 1. **Recall.** `meshctl memory recall "<topic>"` returns tiered pointers — current
    tier outranks log, superseded decisions never appear. Add `--budget 4000` to inline
    the top current-tier bodies so the knowledge is in view. Your `state.md` digest and
@@ -36,7 +47,74 @@ Recognize → **Recall** → **Retrieve** → Reconcile → **Verify** → Act �
 2. **Retrieve.** Read the KB files recall points to — they are authoritative.
 3. **Reconcile** conflicts in favor of the maintained KB; **Verify** against live
    systems / MCP before acting.
-4. **Act**, then **Learn** — distill anything durable (below).
+4. **Align.** Reach **shared understanding** with the human: their agreement to your
+   intent, your grounding (cite each claim, or mark it *assumption*) and your precedent
+   (cite where the pattern already exists, or mark it *new*). Required when the work
+   touches more than one artifact, makes any outbound write, makes any promotion, or
+   rests on any claim you cannot ground. Pools may tighten this in `local.md`, never
+   loosen it. For a promotion or an outbound write, this is the confirmation round (below).
+5. **Act**, then **Learn** — distill anything durable (below).
+
+## Decision round — the default way to ask the human
+
+Whenever you need the human's decision on proposed changes (an intake order, a plan, a
+rule, a KB change, an outbound write), present a decision round, one item per change:
+
+```
+📝 **C<n> — <short title>**
+From now on it says: …        (a change of rule or knowledge)
+It no longer says: …
+  — or, for an action — what you will do, and why
+➡️ ✅ Confirm
+```
+
+Then say how to answer: `yes` for all, or `C<n> no: <reason>` for one. Keep rounds small
+(about 3–5 items) and wait for the answer before acting. The confirmation round below is
+this same format with its extra fields.
+
+## Confirmation round — read before truth changes or anything leaves the mesh
+
+Before a promotion (a `kb finish` that touches more than `candidates/`, `state set`,
+`kb confirm`, `inbox triage apply`) or an outbound write, write ONE summary file for the
+session, `.memory/confirm/<session>.md`:
+
+```
+## Intent
+<one line: what changes and why>
+
+## Grounding
+<the source of each claim, or *assumption*>
+
+## Precedent
+<where the pattern already exists, or *new*>
+
+## Coherence
+<how it agrees with related canonical entries — required when there are any>
+```
+
+Then read it to the human **in chat** as a decision round, one item per entry, ending in a
+recommended confirm, with its grounding and precedent:
+
+```
+📝 **C<n> — <entry>** (new|amended|retired)
+From now on it says: …
+It no longer says: …
+Grounded in: …
+Precedent: …
+➡️ ✅ Confirm
+```
+
+- "yes" confirms the round. Only then run the command with the summary
+  (`meshctl kb finish --summary-file <summary>`, `meshctl state set --summary-file
+  <summary>`, or the outbound call); the permission prompt is the signature of what was
+  read, never the reading surface.
+- "C2 no: reason" disputes that entry: move it back to `candidates/` (or drop the
+  write), update the summary, and confirm the rest.
+- A promotion denied with no change is never resubmitted as is:
+  stop and ask which entry is disputed.
+- With no human at your prompt (headless, or delegated work), a promotion or outbound
+  write ends in `needs-confirm`: respond `needs-human` with a body opening
+  `needs-confirm:` carrying the round and the summary path. Never relay a confirmation.
 
 ## Distillation ritual — System 1 → System 2 (reviewed, never automatic)
 
@@ -51,8 +129,11 @@ doctor` warns `playbooks/`/`experience/` are empty. Quality over volume.
    the *evidence* (session/obs/file refs). Candidates are proposals, not truth.
 3. **Consolidate.** Judge each candidate; if durable + verified, move/rewrite it
    into the right area — `playbooks/`, `experience/`, a **decision** (ADR in
-   `decisions/`), or `glossary.md`/`system-map.md`. Log new risks in `risks.md`.
-   Drop the rest. `meshctl kb finish` merges + auto-rebuilds the memory index.
+   `decisions/`), or `system-map.md`; a new term goes to the pool glossary
+   (`mesh://pool/glossary.md`), not a peer glossary. Log new risks in `risks.md`.
+   Drop the rest. Write the summary file, read the confirmation round, then
+   `meshctl kb finish --summary-file <summary>`: the human confirms, and the merge
+   auto-rebuilds the memory index.
 4. **Leave `candidates/` clean** — a holding area, not a graveyard. `doctor` warns
    when a candidate is older than 14 days.
 
@@ -82,7 +163,7 @@ than a log. `meshctl kb consolidate` lists the debt in the order to work it off:
   Active / Recently decided / Open questions, ≤40 lines, standing facts only. Rewrite it
   after consolidating, in one pass, from the fixed template:
   ```
-  meshctl state set <<'EOF'
+  meshctl state set --summary-file <you>/.memory/confirm/<session>.md <<'EOF'
   ## Now
   <3-8 lines: the standing truths of this domain today>
 
@@ -97,7 +178,8 @@ than a log. `meshctl kb consolidate` lists the debt in the order to work it off:
   EOF
   ```
   `state set` refuses a body with a missing section, a leftover placeholder or over
-  budget (`--force` overrides). `meshctl state template` prints the shape.
+  budget (`--force` overrides). `meshctl state template` prints the shape. The digest is
+  current-tier knowledge, so `state set` is a promotion: summary and round first.
 - **Judge aged candidates.** Promote into `playbooks/` / `experience/` / a decision, or
   delete. All of this is ordinary KB work: `meshctl kb begin` → edit → commit →
   `meshctl kb finish`; the digest and handoff go through `state set` / `handoff set`.
@@ -106,12 +188,12 @@ than a log. `meshctl kb consolidate` lists the debt in the order to work it off:
 background: on Claude Code, spawn the scaffolded `distiller` subagent
 (`.claude/agents/distiller.md`) with `run_in_background: true` and relay only the
 DECISION items it returns; on opencode the session-end hook runs the same procedure
-(`../.agentmesh/doctrine/distiller.md`). The per-prompt hook nudges you once per
+(`../__POOL_DIR__/doctrine/distiller.md`). The per-prompt hook nudges you once per
 session at a work boundary (a wind-down phrase, or ~8 exchanges in) — act on it then.
 The distiller drafts candidates only; **you** do step 3.
 
-Guardrails: **review gate** (a human/the owning agent approves before a candidate
-becomes truth) · **KB is authoritative, claude-mem is never edited** (distill *from*
+Guardrails: **review gate** (only the human confirms before a candidate becomes truth,
+after the confirmation round; you never confirm your own writes) · **KB is authoritative, claude-mem is never edited** (distill *from*
 it) · **all writes via `kb begin`/`kb finish`** (git-tracked, recoverable).
 
 **Standing rules → gated (meshctl ADR-0062).** A "never / do not repeat / user directive" note gets
@@ -136,14 +218,17 @@ meshctl kb finish --agent <owner>     # from a normal cwd, not inside the worktr
 ```
 
 Domain knowledge lands with its owner (a database gotcha → the database expert, an
-org-level pattern → `architect`). It lands as a candidate so the review gate holds;
-the owner promotes it on its next interactive session.
+org-level pattern → the peer that owns architecture). It lands as a candidate so the
+review gate holds; the owner proposes it in its next interactive session, where the
+human confirms it.
 
 **Delegated work is different** (`--in-session --work`, meshctl ADR-0063): the peer runs
 write-capable, so it commits its *own* learning through `kb begin|finish --agent <peer>`
 and lists it in its receipt. Don't re-file it — relay the receipt. When **you** are the
 delegated peer, do the same: KB writes via `--agent <you>`, commits in your workspace (or
-the worktree the brief names), a standalone receipt at the end.
+the worktree the brief names), a standalone receipt at the end. A promotion or an
+outbound write ends in `needs-confirm` with the round and your summary path — you never
+relay a confirmation.
 
 ## Closing an intake exchange (meshctl ADR-0043)
 
@@ -154,6 +239,22 @@ inflate: most requests aren't decisions; one owner writes it, the other's input 
 in, refine by amend/supersede); a reusable procedure → a playbook; a lesson → an
 experience note; `fyi`/routine → often nothing — then `meshctl inbox archive <id>` (or
 `--answered`). The coordination audit lives in `dispatch.log`.
+A triage-closed request owes no distillation: its residue already lives at the verdict's ref.
+
+## Intake triage — closing what no longer stands (meshctl ADR-0072)
+
+`meshctl inbox triage` writes a worksheet of signals over your open requests; you judge
+each and write the report beside it, one line per request:
+
+```
+- <id> · <stands | superseded → <ref> | done → <ref> | withdrawn → <ref> | unclear> · "<quoted grounding>" · <source>
+```
+
+`superseded`, `done` and `withdrawn` close the request and need a ref and a quote;
+`stands` and `unclear` carry no ref (the quote is the live need, or the signals checked).
+Read the report to the human as a confirmation round, item by item, then
+`meshctl inbox triage apply --report <file> <id>...` (at most five) closes what they
+confirmed.
 
 ## Session handoff — resume point (meshctl ADR-0017)
 
@@ -173,6 +274,7 @@ meshctl handoff set <<'EOF'
 
 ## Open Threads
 - <blocker / pending decision / follow-up — who owns it> (or: none)
+- Deferred: <ids> (only when the human deferred pending work)
 
 ## Pointers
 - <paths, commits, intake ids, URLs the next session needs> (or: none)

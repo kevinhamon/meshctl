@@ -31,15 +31,15 @@ func TestInitPool_EmitsFromEmbedNoClone(t *testing.T) {
 	}
 	// Doctrine emitted to agent-mesh/ (the path CLAUDE.md references), no .git.
 	for _, f := range []string{CommsFile, "distiller.md"} {
-		if !fileExists(filepath.Join(root, DoctrineDir, f)) {
+		if !fileExists(filepath.Join(DoctrinePath(root), f)) {
 			t.Fatalf("doctrine %s not emitted", f)
 		}
 	}
-	if dirExists(filepath.Join(root, DoctrineDir, ".git")) {
+	if dirExists(filepath.Join(DoctrinePath(root), ".git")) {
 		t.Fatal("pool should not contain a git clone")
 	}
 	// Runtime dir.
-	if !dirExists(filepath.Join(root, WorktreesDir)) {
+	if !dirExists(WorktreesPath(root)) {
 		t.Fatal("worktrees runtime dir not created")
 	}
 	// Second init aborts (already a pool).
@@ -104,7 +104,7 @@ func TestUpgradeDoctrine_ReplacesPristine(t *testing.T) {
 	if _, err := InitPool(root, "pool", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	dest := filepath.Join(root, DoctrineDir)
+	dest := DoctrinePath(root)
 	comms := filepath.Join(dest, CommsFile)
 	// Simulate an older binary's emit: stale content, stamped as meshctl-written.
 	if err := os.WriteFile(comms, []byte("OLD RELEASE"), 0o644); err != nil {
@@ -130,7 +130,7 @@ func TestUpgradeDoctrine_ProtectsLocalEdits(t *testing.T) {
 	if _, err := InitPool(root, "pool", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	comms := filepath.Join(root, DoctrineDir, CommsFile)
+	comms := filepath.Join(DoctrinePath(root), CommsFile)
 	if err := os.WriteFile(comms, []byte("LOCAL RULE 10"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestUpgradeDoctrine_UnstampedDifferentIsConflict(t *testing.T) {
 	if _, err := InitPool(root, "pool", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	dest := filepath.Join(root, DoctrineDir)
+	dest := DoctrinePath(root)
 	_ = os.Remove(filepath.Join(dest, doctrineStampFile))
 	_ = os.WriteFile(filepath.Join(dest, CommsFile), []byte("custom"), 0o644)
 	if res, _ := UpgradeDoctrine(root, false, time.Now()); len(res.Conflicts) != 1 {

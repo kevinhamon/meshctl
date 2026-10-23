@@ -161,7 +161,7 @@ func rootCmd() *cobra.Command {
 		msgCmd(),   // ask | send
 		inboxCmd(), // list | next | claim | release | respond | decline | archive
 		sentCmd(),  // requester side: responses awaiting read-back
-		kbCmd(), workCmd(), memoryCmd(), sessionCmd(), handoffCmd(), stateCmd(), intuitionCmd(), hookCmd(),
+		kbCmd(), workCmd(), pendingCmd(), memoryCmd(), sessionCmd(), handoffCmd(), stateCmd(), intuitionCmd(), hookCmd(),
 		doctorCmd(),
 		// Top-level aliases for high-frequency verbs (muscle memory + one preapproval).
 		askCmd(), sendCmd(),
@@ -180,7 +180,7 @@ func poolCmd() *cobra.Command {
 func poolMigrateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "migrate",
-		Short: "Reconcile a legacy pool layout to the consolidated .agentmesh/ (ADR-0038)",
+		Short: "Reconcile a legacy pool layout to the consolidated pool directory (ADR-0038)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {
@@ -203,7 +203,7 @@ func poolTeardownCmd() *cobra.Command {
 	var purge, yes, dryRun bool
 	c := &cobra.Command{
 		Use:   "teardown",
-		Short: "Remove the pool's mesh infra (.agentmesh/) + deregister; agent repos are kept unless --purge",
+		Short: "Remove the pool's mesh infra (the pool directory) + deregister; agent repos are kept unless --purge",
 		Long: `Remove the pool marker, runtime state and registry entry. Agent workspaces are
 kept unless --purge, which DELETES them (and any knowledge not pushed to a remote).
 
@@ -216,7 +216,7 @@ directory name at the prompt. --dry-run lists what would be removed and exits.`,
 			}
 			if dryRun {
 				fmt.Printf("would tear down pool: %s\n", dir)
-				fmt.Printf("  remove %s/\n", mesh.PoolMarkerDir)
+				fmt.Printf("  remove %s/\n", mesh.PoolDirName(dir))
 				if purge {
 					agents, _, _ := mesh.ScanAgents(dir)
 					for _, a := range agents {
@@ -516,15 +516,18 @@ func poolUpgradeCmd() *cobra.Command {
 	var force, check, doctrineOnly bool
 	c := &cobra.Command{
 		Use:   "upgrade",
-		Short: "Upgrade the pool to this binary + the installed harnesses: doctrine and every agent's wiring",
-		Long: "Brings the whole pool up to this meshctl and the harness versions installed here, in two steps:\n" +
+		Short: "Upgrade the pool to this binary + the installed harnesses: pool directory, doctrine and every agent's wiring",
+		Long: "Brings the whole pool up to this meshctl and the harness versions installed here, in three steps:\n" +
+			"  0. pool directory — moves a legacy hidden pool directory to pool/, makes it a git repo on main with an\n" +
+			"     ignore file for runtime state, writes pool/config.yaml (human-owned settings) and moves any `tools`\n" +
+			"     still in pool/pool.yaml into it, and commits with your git identity (ADR-0066).\n" +
 			"  1. doctrine — replaces doctrine files unchanged since meshctl wrote them. A file edited locally is\n" +
 			"     left alone: the new version is written beside it as <file>.upstream for a manual merge, and the\n" +
 			"     command exits non-zero. --force overwrites edited files after backing each up to <file>.bak-<timestamp>.\n" +
 			"  2. agents — re-runs `agent onboard` for every agent: re-wires hooks/plugins for the installed harness\n" +
 			"     (e.g. swaps an opencode V1 plugin for the V2 one), refreshes mesh-owned skills, adds missing\n" +
 			"     CLAUDE.md stanzas. Never touches agent.yaml or an agent's role doctrine.\n" +
-			"--check previews both steps (plus warnings: live sessions, uncommitted changes, global harness config)\n" +
+			"--check previews every step (plus warnings: live sessions, uncommitted changes, global harness config)\n" +
 			"without writing anything; it exits 1 when an upgrade is pending.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
@@ -542,11 +545,19 @@ func poolUpgradeCmd() *cobra.Command {
 				}
 				return nil
 			}
+			fmt.Printf("pool: %s\n", dir)
+			// Pool directory first: doctrine and agents are written into its result.
+			moved, err := mesh.UpgradePoolDir(dir, time.Now())
+			for _, d := range moved {
+				fmt.Println("  " + d)
+			}
+			if err != nil {
+				return err
+			}
 			res, err := mesh.UpgradeDoctrine(dir, force, time.Now())
 			if err != nil {
 				return err
 			}
-			fmt.Printf("pool: %s\n", dir)
 			if len(res.Did) == 0 && len(res.Conflicts) == 0 {
 				fmt.Println("  doctrine already current")
 			}
@@ -612,6 +623,13 @@ func printUpgradePlan(plan mesh.PoolUpgradePlan, doctrineOnly bool) {
 	if plan.OpencodeMajor > 0 {
 		fmt.Printf("opencode installed: V%d\n", plan.OpencodeMajor)
 	}
+	fmt.Println("pool directory:")
+	if len(plan.Pool) == 0 {
+		fmt.Println("  current")
+	}
+	for _, s := range plan.Pool {
+		fmt.Println("  · " + s)
+	}
 	fmt.Println("doctrine:")
 	if len(plan.Doctrine) == 0 && len(plan.Conflicts) == 0 {
 		fmt.Println("  current")
@@ -621,6 +639,11 @@ func printUpgradePlan(plan mesh.PoolUpgradePlan, doctrineOnly bool) {
 	}
 	for _, c := range plan.Conflicts {
 		fmt.Println("  ✗ " + c + " — differs from this binary's copy: left alone, a .upstream copy is written for a manual merge")
+	}
+	if plan.DoctrineDiff != "" {
+		// The doctrine change is read here, before `pool upgrade` commits it.
+		fmt.Println("doctrine diff (committed as `doctrine: upgrade to <version>` on apply):")
+		fmt.Print(plan.DoctrineDiff)
 	}
 	if !doctrineOnly {
 		fmt.Println("agents:")
@@ -641,6 +664,11 @@ func printUpgradePlan(plan mesh.PoolUpgradePlan, doctrineOnly bool) {
 	for _, w := range plan.Warnings {
 		fmt.Println("⚠ " + w)
 	}
+	// Pool repo nag (ADR-0066): last, so it is the line the human sees. The
+	// apply path reports it through hygiene's manual items, in the same spot.
+	if nag := mesh.PoolRepoNag(plan.PoolRoot); nag != "" {
+		fmt.Println("⚠ " + nag)
+	}
 }
 
 func poolListCmd() *cobra.Command {
@@ -658,7 +686,7 @@ func poolListCmd() *cobra.Command {
 				if b, err := os.ReadFile(mesh.PoolMarkerPath(dir)); err == nil {
 					fmt.Print(string(b))
 				} else {
-					fmt.Println("(no .agentmesh/pool.yaml marker — run `meshctl pool init`)")
+					fmt.Printf("(no %s marker — run `meshctl pool init`)\n", mesh.PoolMarkerPath(dir))
 				}
 				return nil
 			}
@@ -700,7 +728,7 @@ func poolRegisterCmd() *cobra.Command {
 				return err
 			}
 			if !mesh.IsPool(abs) {
-				return fmt.Errorf("%s is not a pool (no .agentmesh/ marker) — `meshctl pool init` first", abs)
+				return fmt.Errorf("%s is not a pool (no %s/ marker) — `meshctl pool init` first", abs, mesh.PoolDirName(abs))
 			}
 			if _, err := mesh.RegisterPool(abs, name, time.Now()); err != nil {
 				return err
@@ -913,14 +941,14 @@ func directoryCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "warning: %s: %v\n", name, e)
 			}
 			if asJSON {
-				out, err := mesh.DirectoryJSON(agents)
+				out, err := mesh.DirectoryJSON(agents, mesh.LoadPoolConfig(dir))
 				if err != nil {
 					return err
 				}
 				fmt.Println(out)
 				return nil
 			}
-			md := mesh.DirectoryMarkdown(agents)
+			md := mesh.DirectoryMarkdown(agents, mesh.LoadPoolConfig(dir))
 			if write != "" {
 				content := mesh.GeneratedBegin + "\n\n" + md + "\n" + mesh.GeneratedEnd + "\n"
 				if err := os.WriteFile(write, []byte(content), 0o644); err != nil {
@@ -1064,6 +1092,9 @@ need a human (text you wrote, doctrine you edited) are always reported, never ch
 				return err
 			}
 			findings, ok := mesh.Doctor(dir)
+			for _, l := range mesh.OutboundWiringLines(dir) {
+				fmt.Println("ℹ " + l)
+			}
 			if n := selfupdate.Notice(resolveVersion(), time.Now()); n != "" {
 				fmt.Println("ℹ " + n)
 			}
@@ -1079,6 +1110,9 @@ need a human (text you wrote, doctrine you edited) are always reported, never ch
 				hyg = mesh.ManualItems(hyg)
 			}
 			for _, h := range hyg {
+				if findingSeen(findings, h.Agent, h.Message) {
+					continue // reported by Doctor already (the pool repo nag lives in both)
+				}
 				msg := h.Message
 				if h.Fixable() {
 					msg += "  (fixable: meshctl doctor --fix)"
@@ -1107,6 +1141,17 @@ need a human (text you wrote, doctrine you edited) are always reported, never ch
 	}
 	c.Flags().BoolVar(&fix, "fix", false, "apply the automatic hygiene repairs (stale state, retired files, legacy statuses)")
 	return c
+}
+
+// findingSeen reports whether Doctor already produced this exact finding, so a
+// hygiene item that mirrors one (the pool repo nag) prints once.
+func findingSeen(findings []mesh.DoctorFinding, agent, msg string) bool {
+	for _, f := range findings {
+		if f.Agent == agent && f.Message == msg {
+			return true
+		}
+	}
+	return false
 }
 
 // --- session ---
@@ -1169,8 +1214,9 @@ func sessionCmd() *cobra.Command {
 
 func inboxCmd() *cobra.Command {
 	var agent string
-	parent := &cobra.Command{Use: "inbox", Short: "Inbox: list pending, claim the next, or claim/release a request"}
+	parent := &cobra.Command{Use: "inbox", Short: "Inbox: list the open queue, claim a request by id, or release one"}
 
+	var listAll bool
 	inboxList := func(cmd *cobra.Command, args []string) error {
 		dir, err := agentsDir()
 		if err != nil {
@@ -1180,21 +1226,20 @@ func inboxCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		reqs, err := mesh.ListRequests(a.InboxPath())
+		q, err := mesh.InboxQueue(a, listAll)
 		if err != nil {
 			return err
 		}
-		if len(reqs) == 0 {
+		if len(q) == 0 && listAll {
 			fmt.Println("(inbox empty)")
 			return nil
 		}
-		for _, r := range reqs {
-			fmt.Printf("%s\tfrom=%s\ttype=%s\tstatus=%s\tpri=%s\n", r.ID, r.From, r.Type, r.Status, r.Priority)
-		}
+		fmt.Print(mesh.InboxQueueMarkdown(q, time.Now()))
 		return nil
 	}
 
-	list := &cobra.Command{Use: "list", Short: "List pending requests", RunE: inboxList}
+	list := &cobra.Command{Use: "list", Short: "List the open queue (pending + in-progress), priority then age; --all for every status", RunE: inboxList}
+	list.Flags().BoolVar(&listAll, "all", false, "show every status, not just pending + in-progress")
 
 	var claim bool
 	next := &cobra.Command{
@@ -1287,7 +1332,7 @@ func inboxCmd() *cobra.Command {
 	// Bare `inbox` lists.
 	parent.RunE = inboxList
 	parent.PersistentFlags().StringVar(&agent, "agent", "", "agent workspace (default: $AGENT_NAME or cwd)")
-	parent.AddCommand(list, next, claimCmd(), releaseCmd(), respondCmd(), declineCmd(), archive)
+	parent.AddCommand(list, next, claimCmd(), releaseCmd(), respondCmd(), declineCmd(), archive, triageCmd(&agent))
 	return parent
 }
 
@@ -1406,6 +1451,7 @@ func memoryCmd() *cobra.Command {
 	rebuild.Flags().StringVar(&agent, "agent", "", "agent name (default: cwd/$AGENT_NAME)")
 
 	var limit, budget int
+	var scope string
 	recall := &cobra.Command{
 		Use:   "recall <query>",
 		Short: "Live unified recall over KB + session-records + git spine (tiered pointers; --budget inlines current-tier bodies)",
@@ -1415,7 +1461,13 @@ risks.md, state.md — what is true now) outranks "log" (decisions/, experience/
 history) which outranks "inbox" (candidates/ — proposals). Decisions whose status is
 superseded, deprecated or rejected are never returned. With --budget N the top
 current-tier hits have their text inlined (≈N tokens in total) so the knowledge is
-in view, not behind a pointer; log and inbox hits stay pointers.`,
+in view, not behind a pointer; log and inbox hits stay pointers.
+
+--scope canonical also searches every canonical peer's current and log tiers
+(read-only; never candidates, session records or git history; never perspective
+peers), tagging hits "via <peer>", at most 5 of them, unconfirmed ones last. Peer
+bodies inline only with --budget, after your own; an inlined body's mesh://
+references are followed one hop to canonical targets, marked via the owner.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
@@ -1426,7 +1478,7 @@ in view, not behind a pointer; log and inbox hits stay pointers.`,
 			if err != nil {
 				return err
 			}
-			hits, err := mesh.RecallWithBodies(a, strings.Join(args, " "), limit, budget)
+			hits, err := mesh.RecallScoped(a, strings.Join(args, " "), scope, limit, budget)
 			if err != nil {
 				return err
 			}
@@ -1450,6 +1502,7 @@ in view, not behind a pointer; log and inbox hits stay pointers.`,
 	recall.Flags().BoolVar(&asJSON, "json", false, "machine-readable JSON for routing")
 	recall.Flags().IntVar(&limit, "limit", 10, "max pointers")
 	recall.Flags().IntVar(&budget, "budget", 0, "inline current-tier KB bodies up to about this many tokens (0 = pointers only)")
+	recall.Flags().StringVar(&scope, "scope", mesh.RecallScopeOwn, "own (default) or canonical (also canonical peers' current and log tiers, via <peer>)")
 
 	var sessLimit int
 	sessions := &cobra.Command{
@@ -1487,6 +1540,9 @@ in view, not behind a pointer; log and inbox hits stay pointers.`,
 					meta += "  refs=" + strings.Join(r.Refs, ",")
 				}
 				fmt.Println(meta)
+				for _, c := range r.Confirms {
+					fmt.Println("  confirmed: " + c)
+				}
 			}
 			return nil
 		},
@@ -1647,7 +1703,7 @@ func handoffCmd() *cobra.Command {
 // sibling: the handoff says where the last session stopped, the digest says
 // what the world looks like. Same fixed shape, same one-command write.
 func stateCmd() *cobra.Command {
-	var agent string
+	var agent, summaryFile string
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "state show|template|set",
@@ -1685,12 +1741,12 @@ func stateCmd() *cobra.Command {
 	}
 	set := &cobra.Command{
 		Use:   "set",
-		Short: "Write the digest from stdin (stamps a timestamp; overwrites; refuses a body that fails lint)",
+		Short: "Write the digest from stdin as a promotion (--summary-file required; ledger + Confirm: commit)",
 		Long: "Replaces knowledge/state.md with the body on stdin. Fill in `meshctl state template` — four fixed\n" +
 			"sections, at most " + fmt.Sprint(mesh.StateMaxLines) + " lines, standing facts only — and rewrite the whole thing after each\n" +
 			"consolidation (`meshctl kb consolidate` lists the decisions it has not absorbed). Pass it with a quoted\n" +
 			"heredoc:\n\n" +
-			"  meshctl state set <<'EOF'\n" +
+			"  meshctl state set --summary-file <you>/.memory/confirm/<session>.md <<'EOF'\n" +
 			"  ## Now\n" +
 			"  All new services are Go on the platform; the legacy stack is maintained, not extended.\n\n" +
 			"  ## Active\n" +
@@ -1700,7 +1756,11 @@ func stateCmd() *cobra.Command {
 			"  ## Open questions\n" +
 			"  - none\n" +
 			"  EOF\n\n" +
-			"A body with a missing section, a leftover placeholder or over budget is refused (--force overrides).",
+			"A body with a missing section, a leftover placeholder or over budget is refused (--force overrides).\n\n" +
+			"The digest is current-tier knowledge, so `state set` is a promotion (ADR-0067): the gate asks the human\n" +
+			"with your confirmation summary, and the command writes one ledger hash per digest section and commits\n" +
+			"state.md with the ledger as `Confirm: <Intent line>`. No --summary-file, or no human at the prompt\n" +
+			"(dispatch depth, a distil run), is refused.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {
@@ -1723,16 +1783,23 @@ func stateCmd() *cobra.Command {
 				}
 				return &mesh.CodedError{Code: 1, Msg: "state set: body fails lint (fix it, or --force to write anyway)"}
 			}
-			if err := mesh.StateSet(a, string(b), time.Now()); err != nil {
-				return err
+			now := time.Now()
+			res, err := mesh.StateSetConfirmed(a, string(b), mesh.StateSetOptions{
+				SummaryFile: summaryFile,
+				Session:     mesh.ResolveAgentSessionID(a, os.Getpid(), now),
+				Now:         now,
+			})
+			if err != nil {
+				return &mesh.CodedError{Code: 1, Msg: err.Error()}
 			}
-			fmt.Printf("wrote %s\n", mesh.StatePath(a))
+			fmt.Printf("wrote %s; confirmed %d section(s) as %s Confirm: %s\n", res.Path, len(res.Ledgered), res.Confirm, res.Intent)
 			return nil
 		},
 	}
 	show.Flags().StringVar(&agent, "agent", "", "agent (default: cwd/$AGENT_NAME)")
 	set.Flags().StringVar(&agent, "agent", "", "agent (default: cwd/$AGENT_NAME)")
 	set.Flags().BoolVar(&force, "force", false, "write even when the body fails lint")
+	set.Flags().StringVar(&summaryFile, "summary-file", "", "your confirmation summary, <you>/.memory/confirm/<session>.md (required)")
 	cmd.AddCommand(show, template, set)
 	return cmd
 }
@@ -1746,7 +1813,7 @@ func hookCmd() *cobra.Command {
 	var harness, peer string
 	var inSession, work bool
 	cmd := &cobra.Command{
-		Use:   "hook session-start|user-prompt|session-end|pre-tool-use",
+		Use:   "hook session-start|user-prompt|session-beat|session-end|pre-tool-use|post-tool-use",
 		Short: "Harness hook handlers (self-contained; wired per-agent by agent new/onboard)",
 	}
 	cmd.PersistentFlags().StringVar(&harness, "harness", "", "output envelope: claude|opencode (default: agent's harness)")
@@ -1758,6 +1825,7 @@ func hookCmd() *cobra.Command {
 		p.PeerAgent = peer
 		p.InSession = inSession
 		p.Work = inSession && work
+		p.Harness = harness
 		return p
 	}
 
@@ -1851,7 +1919,24 @@ func hookCmd() *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(sessionStart, userPrompt, sessionBeat, sessionEnd, preToolUse)
+	// PostToolUse runs after a gated call on the same matcher. No output ever:
+	// it is the seam where pool commits (ADR-0066) and outbound acks (ADR-0068)
+	// record what the gate let through. Fail-open, like the advisory hooks.
+	postToolUse := &cobra.Command{
+		Use:   "post-tool-use",
+		Short: "PostToolUse: after a gated call, record what it did (pool commit, outbound ack); no output",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			b, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return nil
+			}
+			dir, _ := agentsDir()
+			mesh.HookPostToolUse(dir, stamp(mesh.ParseHookPayload(b)), time.Now())
+			return nil
+		},
+	}
+
+	cmd.AddCommand(sessionStart, userPrompt, sessionBeat, sessionEnd, preToolUse, postToolUse)
 	return cmd
 }
 
@@ -1860,18 +1945,30 @@ func kbCmd() *cobra.Command {
 	var abort bool
 	var headless bool
 	var session string
+	var summaryFile string
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "kb begin|finish|consolidate",
-		Short: "Worktree+branch for a KB write, merge back to main and clean up; consolidate lists the KB's debt",
+		Use:   "kb",
+		Short: "Worktree+branch for a KB write, merge back to main and clean up; consolidate lists the KB's debt; reconcile walks existing knowledge",
 		Long: `begin / finish: an isolated worktree + branch for a KB write, merged back ff-only.
 consolidate: the KB's debt list — decisions without machine-readable status, accepted
 decisions not landed in the docs they update or in the state digest, a missing or
 over-budget state.md, candidates older than 14 days, handoff problems — in the order to
 work it off. Nothing is changed; the agent does the consolidation in a kb begin/finish
-worktree and rewrites the digest with "meshctl state set".`,
-		Args: cobra.ExactArgs(1),
+worktree and rewrites the digest with "meshctl state set --summary-file <summary>".
+reconcile: the reconciliation pass (ADR-0070) — the walk order, or one peer's worksheet.
+confirm: bulk confirmation of reviewed entries from a reconcile report, five at a time.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			return fmt.Errorf("kb: want begin|finish|consolidate|reconcile|confirm, got %q", args[0])
+		},
+	}
+	// One RunE for begin/finish/consolidate, switched on the subcommand name;
+	// the inner block keeps the single-verb body as it was.
+	run := func(cmd *cobra.Command, args []string) error {
+		{
 			dir, err := agentsDir()
 			if err != nil {
 				return err
@@ -1886,7 +1983,7 @@ worktree and rewrites the digest with "meshctl state set".`,
 			if os.Getenv("AGENT_DISPATCH_DEPTH") != "" && os.Getenv("AGENT_DISPATCH_DEPTH") != "0" {
 				headless = true
 			}
-			switch args[0] {
+			switch cmd.Name() {
 			case "consolidate":
 				r := mesh.KBConsolidate(a, now)
 				if asJSON {
@@ -1908,36 +2005,57 @@ worktree and rewrites the digest with "meshctl state set".`,
 				if err != nil {
 					return err
 				}
-				fmt.Printf("KB worktree ready: %s (branch session/%s)\n", wt, sid)
+				fmt.Printf("KB worktree ready: %s (branch %s)\n", wt, mesh.KBBranch(sid))
 				fmt.Println("edit + commit there, then `meshctl kb finish`")
 			case "finish":
 				sid, err := mesh.ResolveKBSession(dir, a, id, session)
 				if err != nil {
 					return err
 				}
-				err = mesh.KBFinish(dir, a, sid, abort, headless)
+				res, err := mesh.KBFinish(dir, a, sid, mesh.KBFinishOptions{Abort: abort, Headless: headless, SummaryFile: summaryFile, Now: now})
 				if errors.Is(err, mesh.ErrKBConflict) {
 					fmt.Fprintln(os.Stderr, err.Error())
 					return &mesh.CodedError{Code: 1, Msg: "kb finish: conflict — needs human"}
+				}
+				var nc *mesh.KBNeedsConfirmError
+				if errors.As(err, &nc) {
+					// Parked for the peer's own session: the receipt lines, then the
+					// intake response body (status needs-human) for a delegated run.
+					fmt.Print("Receipt:\n" + nc.Receipt() + "\nResponse body (`meshctl inbox respond <id> --agent " + a.Name +
+						" --status needs-human --response-file -`):\n\n" + nc.ResponseBody())
+					return &mesh.CodedError{Code: 1, Msg: err.Error()}
 				}
 				if err != nil {
 					return err
 				}
 				if abort {
 					fmt.Println("KB branch + worktree discarded")
+				} else if res.Confirm != "" {
+					fmt.Printf("KB changes merged to main and confirmed: %s Confirm: %s (%d ledger line(s) written, %d dropped); worktree removed\n",
+						res.Confirm, res.Intent, len(res.Ledgered), len(res.Dropped))
 				} else {
 					fmt.Println("KB changes merged to main; worktree removed")
 				}
-			default:
-				return fmt.Errorf("kb: want begin|finish|consolidate, got %q", args[0])
 			}
 			return nil
-		},
+		}
 	}
-	cmd.Flags().StringVar(&agent, "agent", "", "agent workspace (default: $AGENT_NAME or cwd)")
-	cmd.Flags().BoolVar(&abort, "abort", false, "discard the branch + worktree (finish)")
-	cmd.Flags().BoolVar(&headless, "headless", false, "never auto-resolve conflicts; leave needs-human (finish)")
-	cmd.Flags().StringVar(&session, "session", "", "explicit KB session id (finish auto-detects the sole worktree if unset)")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "machine-readable report (consolidate)")
+	for _, sub := range []struct{ use, short string }{
+		{"begin", "Open an isolated worktree + branch for a KB write"},
+		{"finish", "Merge the KB branch back to main ff-only and remove the worktree (--abort discards)"},
+		{"consolidate", "List the KB's debt in the order to work it off; changes nothing"},
+	} {
+		cmd.AddCommand(&cobra.Command{Use: sub.use, Short: sub.short, Args: cobra.NoArgs, RunE: run})
+	}
+	cmd.AddCommand(kbReconcileCmd(&asJSON))
+	cmd.AddCommand(kbConfirmCmd(&agent, &session))
+	// Shared by every kb subcommand (unchanged from the single-verb form).
+	cmd.PersistentFlags().StringVar(&agent, "agent", "", "agent workspace (default: $AGENT_NAME or cwd)")
+	cmd.PersistentFlags().BoolVar(&abort, "abort", false, "discard the branch + worktree (finish)")
+	cmd.PersistentFlags().BoolVar(&headless, "headless", false, "no human at the prompt: never auto-resolve conflicts; a promotion parks as needs-confirm (finish)")
+	cmd.PersistentFlags().StringVar(&session, "session", "", "explicit KB session id (finish auto-detects the sole worktree if unset)")
+	// Read by the gate (the promotion ask) and by finish itself (the Confirm: commit, ADR-0067); candidates-only finishes ignore it.
+	cmd.PersistentFlags().StringVar(&summaryFile, "summary-file", "", "your confirmation summary, <you>/.memory/confirm/<session>.md (finish; required when it promotes)")
+	cmd.PersistentFlags().BoolVar(&asJSON, "json", false, "machine-readable report (consolidate)")
 	return cmd
 }

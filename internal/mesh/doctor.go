@@ -226,6 +226,33 @@ type DoctorFinding struct {
 	Message string
 }
 
+// reservedOwnerFindings errors on a workspace at the pool root whose name is
+// the reserved owner `pool` (any case) and which carries an agent manifest: a
+// peer with that name would make `mesh://pool/...` ambiguous (ADR-0066, spec
+// decision 14). ScanAgents may or may not load it (the pool directory itself
+// has no manifest; a stray one would), so this reads the directory, not the
+// roster.
+// Workspaces in validated (loaded agents' directories) are skipped: their
+// manifest validation already reports the reserved name.
+func reservedOwnerFindings(agentsDir string, validated map[string]bool) []DoctorFinding {
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil {
+		return nil
+	}
+	var out []DoctorFinding
+	for _, e := range entries {
+		if !e.IsDir() || !strings.EqualFold(e.Name(), ReservedOwner) || validated[e.Name()] {
+			continue
+		}
+		if !fileExists(filepath.Join(agentsDir, e.Name(), ManifestName)) {
+			continue
+		}
+		out = append(out, DoctorFinding{Agent: ReservedOwner, Level: "error",
+			Message: "peer " + e.Name() + "/ carries the reserved owner name — `" + ReservedOwner + "` is the pool itself (mesh://" + ReservedOwner + "/...); rename the peer and remove " + e.Name() + "/" + ManifestName})
+	}
+	return out
+}
+
 // Doctor validates every manifest and reports drift. ok is false if any error
 // (not warning) was found — callers exit non-zero on !ok.
 func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
@@ -238,7 +265,12 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 		findings = append(findings, DoctorFinding{Agent: name, Level: "error", Message: "unparseable agent.yaml: " + e.Error()})
 	}
 
-	poolCfg := LoadPoolConfig(agentsDir) // mesh-wide tool refs (ADR-0042)
+	poolCfg := LoadPoolConfig(agentsDir) // identity + human-owned settings (ADR-0066), mesh-wide tool refs (ADR-0042)
+
+	// Pool-level: config file health and the tools-in-identity-file transition.
+	findings = append(findings, poolConfigFindings(agentsDir, poolCfg)...)
+	// Pool-level: outbound gate config vs the peers' `mutates` tags (ADR-0068).
+	findings = append(findings, outboundFindings(agentsDir, poolCfg, agents)...)
 
 	// Pool-level: doctrine that instructs agents to run invalid commands.
 	findings = append(findings, doctrineFlagFindings(agentsDir)...)
@@ -247,6 +279,26 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 	if IsPool(agentsDir) && IsLegacyLayout(agentsDir) {
 		findings = append(findings, DoctorFinding{Agent: "pool", Level: "warn", Message: "legacy layout detected (top-level agent-mesh/ or .worktrees/.dispatch.*) — run `meshctl pool migrate`"})
 	}
+	if IsPool(agentsDir) && PoolDirIsLegacy(agentsDir) {
+		findings = append(findings, DoctorFinding{Agent: "pool", Level: "warn", Message: "pool directory is the legacy hidden " + LegacyPoolDir + "/ — run `meshctl pool upgrade` to move it to " + CurrentPoolDir + "/ (a git repo, ADR-0066)"})
+	}
+	// Pool-level: pool repo nag (ADR-0066) — not a repo, no remote, dirty, or
+	// ahead of its remote. Warn, never error: durability is the human's call.
+	if nag := PoolRepoNag(agentsDir); nag != "" {
+		findings = append(findings, DoctorFinding{Agent: "pool", Level: "warn", Message: nag})
+	}
+
+	// Pool-level: a peer carrying the reserved owner name (ADR-0066).
+	validated := map[string]bool{}
+	for _, a := range agents {
+		if a.Dir() != "" && strings.EqualFold(a.Name, ReservedOwner) {
+			validated[filepath.Base(a.Dir())] = true
+		}
+	}
+	findings = append(findings, reservedOwnerFindings(agentsDir, validated)...)
+
+	// Pool glossary terms, read once for the per-peer glossary checks.
+	poolTerms, poolGlossary := poolGlossaryTermSlugs(agentsDir)
 
 	// Badge label + color collisions.
 	byLabel := map[string][]string{}
@@ -270,6 +322,9 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no CLAUDE.md"})
 		}
 
+		// Peer glossaries retire (ADR-0066): leftover file, `owns` coupling.
+		findings = append(findings, glossaryFindings(a, poolTerms, poolGlossary)...)
+
 		// Inbox exists?
 		if !dirExists(a.InboxPath()) {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: "inbox " + a.InboxPath() + " does not exist"})
@@ -277,6 +332,10 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 
 		// Intake statuses outside the canonical vocabulary (warn).
 		for _, msg := range InboxStatusFindings(a) {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
+		}
+		// Intake triage age (ADR-0072): reports, never closes.
+		if msg := TriageDoctorFinding(a, time.Now()); msg != "" {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
 		}
 
@@ -325,10 +384,10 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 			}
 			if dirExists(filepath.Join(kbRoot, "decisions")) || dirExists(filepath.Join(kbRoot, "architecture")) {
 				if st, _ := os.ReadFile(filepath.Join(kbRoot, StateFile)); strings.TrimSpace(string(st)) == "" {
-					findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no knowledge/" + StateFile + " digest — sessions start without a current-state view; write one (`meshctl state template`, `meshctl state set`)"})
+					findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no knowledge/" + StateFile + " digest — sessions start without a current-state view; write one (`meshctl state template`, then `meshctl state set --summary-file <summary>`)"})
 				} else {
 					if w := StateLint(string(st)); len(w) > 0 {
-						findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + StateFile + ": " + strings.Join(w, "; ") + " — rewrite with `meshctl state set`"})
+						findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + StateFile + ": " + strings.Join(w, "; ") + " — rewrite with `meshctl state set --summary-file <summary>`"})
 					}
 					if debt := stateDigestDebt(a.Dir()); len(debt) > 0 {
 						nums := make([]string, 0, len(debt))
@@ -340,6 +399,10 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 					}
 				}
 			}
+			// ADR-0067: confirmation ledger drift and unconfirmed knowledge.
+			findings = append(findings, ledgerFindings(a)...)
+			// ADR-0070: the latest reconcile report's age and open conflicts.
+			findings = append(findings, reconcileFindings(a, time.Now())...)
 			if aged := agedCandidates(a.Dir(), time.Now()); len(aged) > 0 {
 				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: fmt.Sprintf(
 					"%d candidate(s) older than 14 days, unconsolidated: %s — judge them (`meshctl kb consolidate`)", len(aged), groupList(aged, 4))})
@@ -394,6 +457,11 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 			}
 		}
 	}
+
+	// `owns` uniqueness across canonical peers (ADR-0065, ADR-0069).
+	findings = append(findings, canonicalOwnsFindings(poolCfg, agents)...)
+	// Knowledge references: dangling links, canonical→perspective (ADR-0065).
+	findings = append(findings, meshRefFindings(agentsDir, poolCfg, agents)...)
 
 	for label, names := range byLabel {
 		if len(names) > 1 {

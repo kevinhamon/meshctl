@@ -41,8 +41,10 @@ func meshRoot(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(dir, "agent-mesh", CommsFile), []byte("protocol"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Current-layout pool marker (ADR-0031/0038) so IsPool + .agentmesh/ parent exist.
-	if err := os.MkdirAll(filepath.Join(dir, PoolMarkerDir), 0o755); err != nil {
+	// Legacy-layout pool dir (ADR-0031/0038): the hidden directory, no marker, no
+	// git — the shape of every pool before ADR-0066. Tests that need the
+	// migrated pool/ repo use migratedRoot (pool_dir_test.go).
+	if err := os.MkdirAll(filepath.Join(dir, LegacyPoolDir), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -104,7 +106,7 @@ func TestAsk_HourlyCap(t *testing.T) {
 	for i := 0; i < hourlyMax(); i++ {
 		lines += itoa(now.Unix()-int64(i)) + "\n"
 	}
-	os.WriteFile(filepath.Join(dir, DispatchCount), []byte(lines), 0o644)
+	os.WriteFile(DispatchCountPath(dir), []byte(lines), 0o644)
 	_, rc, _ := Ask(dir, adv, AskOptions{Type: "guidance", Prompt: "x", From: "tester", Runner: okRunner, Now: now, Stdout: io.Discard, Stderr: io.Discard})
 	if rc != ExitHourlyCap {
 		t.Fatalf("hourly cap: want rc=%d got %d", ExitHourlyCap, rc)
@@ -119,7 +121,7 @@ func TestAsk_LockHeld(t *testing.T) {
 	dir := meshRoot(t)
 	adv := newTestAgent(t, dir, "architect", true, nil)
 	// Pre-create a fresh (non-stale) lock.
-	if err := os.Mkdir(filepath.Join(dir, DispatchLock), 0o755); err != nil {
+	if err := os.Mkdir(DispatchLockPath(dir), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	_, rc, err := Ask(dir, adv, AskOptions{Type: "guidance", Prompt: "x", From: "tester", Runner: okRunner, Now: time.Now(), Stdout: io.Discard, Stderr: io.Discard})
@@ -147,7 +149,7 @@ func TestAsk_HappyPathReleasesLock(t *testing.T) {
 	if !fileExists(req.path) {
 		t.Fatal("intake file not written")
 	}
-	if dirExists(filepath.Join(dir, DispatchLock)) {
+	if dirExists(DispatchLockPath(dir)) {
 		t.Fatal("lock not released after dispatch")
 	}
 }

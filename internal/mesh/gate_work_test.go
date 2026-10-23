@@ -27,7 +27,7 @@ func workPool(t *testing.T) (dir string, caller, arch *Agent, repo string) {
 	if _, err := addManifestWorkdirs(ManifestPath(dir, "architect"), []string{repo}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, WorktreesDir, "architect-work-req1"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(WorktreesPath(dir), "architect-work-req1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	arch, _ = FindAgent(dir, "architect")
@@ -66,7 +66,7 @@ func TestGate_InSessionPeerWorkContract(t *testing.T) {
 		"echo hi > ../architect/knowledge/candidates/x.md",
 		"cd " + repo + " && git switch -c fix/x && git commit -am x",
 		"git -C " + repo + " push -u origin fix/x",
-		"cd " + filepath.Join(dir, WorktreesDir, "architect-work-req1") + " && git commit -am x",
+		"cd " + filepath.Join(WorktreesPath(dir), "architect-work-req1") + " && git commit -am x",
 		"git -C ../architect log --oneline -5",
 		"grep -rn split ../developer/ | head",
 		"cd ../architect && cp knowledge/a.md /tmp/a.md",
@@ -82,10 +82,11 @@ func TestGate_InSessionPeerWorkContract(t *testing.T) {
 		}
 	}
 	for _, p := range []string{
-		filepath.Join(arch.Dir(), "knowledge", "playbooks", "x.md"),
+		filepath.Join(arch.Dir(), "knowledge", "candidates", "x.md"),
 		filepath.Join(repo, "src", "main.go"),
-		filepath.Join(dir, WorktreesDir, "architect-work-req1", "state.md"),
-		"../architect/knowledge/decisions/0001-x.md",
+		filepath.Join(WorktreesPath(dir), "architect-work-req1", "state.md"),
+		filepath.Join(WorktreesPath(dir), "architect-work-req1", "knowledge", "playbooks", "x.md"),
+		"../architect/knowledge/candidates/0001-x.md",
 	} {
 		if d := GatePreToolUse(dir, edit(p)); d.Deny {
 			t.Errorf("work peer should edit %s (%s)", p, d.Reason)
@@ -96,6 +97,9 @@ func TestGate_InSessionPeerWorkContract(t *testing.T) {
 		"notes.md", // relative to the caller's cwd
 		filepath.Join(dir, "grid-expert", "knowledge", "x.md"),
 		filepath.Join(arch.Dir(), IntakeDir, "x.md"), // still meshctl-owned
+		// Confirmed knowledge on the main checkout changes only via kb finish (ticket 33).
+		filepath.Join(arch.Dir(), "knowledge", "playbooks", "x.md"),
+		"../architect/knowledge/decisions/0001-x.md",
 	} {
 		if d := GatePreToolUse(dir, edit(p)); !d.Deny {
 			t.Errorf("work peer must not edit %s", p)

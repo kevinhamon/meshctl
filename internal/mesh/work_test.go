@@ -40,7 +40,7 @@ func TestAskInSessionWork_LogsFrontmatterAndPrintsWorkDefinition(t *testing.T) {
 	if r.Mode != "work" || r.Worktree != "" || r.Status != StatusInProgress {
 		t.Fatalf("frontmatter: mode=%q worktree=%q status=%q", r.Mode, r.Worktree, r.Status)
 	}
-	logb, _ := os.ReadFile(filepath.Join(dir, DispatchLog))
+	logb, _ := os.ReadFile(DispatchLogPath(dir))
 	if !strings.Contains(string(logb), "DISPATCH mode=in-session-work id="+req.ID) {
 		t.Fatalf("log: %s", logb)
 	}
@@ -213,12 +213,12 @@ func TestGateWork_RootsIncludeOwnWorktreesOnly(t *testing.T) {
 	dir, _, arch := inSessionPool(t)
 	other := newTestAgent(t, dir, "architect-ops", true, nil)
 	for _, n := range []string{"architect-work-r1", "architect-s-123", "architect-ops-work-r2"} {
-		if err := os.MkdirAll(filepath.Join(dir, WorktreesDir, n), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(WorktreesPath(dir), n), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	roots := peerWorkRoots(dir, arch)
-	has := func(n string) bool { return underAny(filepath.Join(dir, WorktreesDir, n, "x"), roots) }
+	has := func(n string) bool { return underAny(filepath.Join(WorktreesPath(dir), n, "x"), roots) }
 	if !has("architect-work-r1") || !has("architect-s-123") {
 		t.Fatalf("own work + KB worktrees must be writable: %v", roots)
 	}
@@ -255,10 +255,11 @@ func TestHygiene_WorkWorktrees(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitCommitAll(t, wt, "work")
-	if got := find(time.Now().Add(2 * 24 * time.Hour)); len(got) != 0 {
-		t.Fatalf("unmerged work younger than 7 days must be left alone: %+v", got)
+	// Spec decision 54: the branch-age warning is 14 days, not 7.
+	if got := find(time.Now().Add(8 * 24 * time.Hour)); len(got) != 0 {
+		t.Fatalf("unmerged work younger than 14 days must be left alone: %+v", got)
 	}
-	got := find(time.Now().Add(8 * 24 * time.Hour))
+	got := find(time.Now().Add(15 * 24 * time.Hour))
 	if len(got) != 1 || got[0].Fixable() || !strings.Contains(got[0].Message, "meshctl work merge r-1") {
 		t.Fatalf("stale unmerged work must be a manual item naming the merge: %+v", got)
 	}

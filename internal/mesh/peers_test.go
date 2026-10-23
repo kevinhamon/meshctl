@@ -328,3 +328,70 @@ func TestPeers_WorkdirsWiredIntoCallerAdditionalDirs(t *testing.T) {
 		t.Fatal("an agent is not its own peer")
 	}
 }
+
+// TestPeers_GateMatcherAndPostToolUse: both rendered definitions carry the
+// matcher Claude Code actually matches MCP tool names with, and a PostToolUse
+// hook on the same matcher invoking `meshctl hook post-tool-use` with the same
+// peer flags as the gate.
+func TestPeers_GateMatcherAndPostToolUse(t *testing.T) {
+	dir, caller := peerPool(t)
+	arch, _ := FindAgent(dir, "architect")
+	for _, c := range []struct {
+		name   string
+		render func(string, *Agent) (string, error)
+		flags  string
+	}{
+		{"consult", RenderPeerAgent, "--agent architect --in-session"},
+		{"work", RenderPeerWorkAgent, "--agent architect --in-session --work"},
+	} {
+		body, err := c.render(caller.Name, arch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parts := strings.SplitN(body, "---\n", 3)
+		var fm struct {
+			Hooks map[string][]struct {
+				Matcher string           `yaml:"matcher"`
+				Hooks   []map[string]any `yaml:"hooks"`
+			} `yaml:"hooks"`
+		}
+		if err := yaml.Unmarshal([]byte(parts[1]), &fm); err != nil {
+			t.Fatalf("%s: frontmatter is not YAML: %v", c.name, err)
+		}
+		for _, ev := range []string{"PreToolUse", "PostToolUse"} {
+			es := fm.Hooks[ev]
+			if len(es) != 1 || es[0].Matcher != GateHookMatcher {
+				t.Fatalf("%s: %s matcher = %+v, want %q", c.name, ev, es, GateHookMatcher)
+			}
+		}
+		if cmd, _ := fm.Hooks["PostToolUse"][0].Hooks[0]["command"].(string); cmd != "meshctl hook post-tool-use "+c.flags {
+			t.Fatalf("%s: PostToolUse command = %q", c.name, cmd)
+		}
+	}
+}
+
+// TestPeers_StaleMatcherRefreshesOnUpgrade: a definition rendered with the
+// bare `mcp__` matcher is planned as a refresh and rewritten by pool upgrade.
+func TestPeers_StaleMatcherRefreshesOnUpgrade(t *testing.T) {
+	dir, caller := peerPool(t)
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	f := PeerAgentFile(caller.Dir(), "architect")
+	b, _ := os.ReadFile(f)
+	old := strings.Replace(string(b), GateHookMatcher, "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__", -1)
+	if old == string(b) {
+		t.Fatalf("rendered definition does not carry the gate matcher:\n%s", b)
+	}
+	_ = os.WriteFile(f, []byte(old), 0o644)
+	if plan := PlanPeerAgents(dir, caller.Dir()); strings.Join(plan.Update, ",") != "architect" {
+		t.Fatalf("stale matcher must plan a refresh, got %+v", plan)
+	}
+	if _, err := UpgradeAgents(dir); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(f)
+	if !strings.Contains(string(b), GateHookMatcher) || !strings.Contains(string(b), "meshctl hook post-tool-use") {
+		t.Fatalf("upgrade did not re-render the definition:\n%s", b)
+	}
+}

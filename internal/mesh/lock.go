@@ -39,7 +39,7 @@ func envInt(key string, def int) int {
 func dispatchLog(agentsDir, caller, target string, depth int, now time.Time, format string, args ...any) {
 	logPath := os.Getenv("AGENT_DISPATCH_LOG")
 	if logPath == "" {
-		logPath = filepath.Join(agentsDir, DispatchLog)
+		logPath = DispatchLogPath(agentsDir)
 	}
 	_ = os.MkdirAll(filepath.Dir(logPath), 0o755)
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
@@ -56,7 +56,7 @@ func dispatchLog(agentsDir, caller, target string, depth int, now time.Time, for
 // hourlyCount trims .dispatch.count to the last rolling hour and returns the
 // count within the window (awk-trim behavior).
 func hourlyCount(agentsDir string, now time.Time) (int, error) {
-	countPath := filepath.Join(agentsDir, DispatchCount)
+	countPath := DispatchCountPath(agentsDir)
 	cutoff := now.Unix() - 3600
 	b, err := os.ReadFile(countPath)
 	if err != nil {
@@ -91,7 +91,7 @@ func hourlyCount(agentsDir string, now time.Time) (int, error) {
 }
 
 func recordDispatch(agentsDir string, now time.Time) error {
-	countPath := filepath.Join(agentsDir, DispatchCount)
+	countPath := DispatchCountPath(agentsDir)
 	_ = os.MkdirAll(filepath.Dir(countPath), 0o755)
 	f, err := os.OpenFile(countPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -106,7 +106,7 @@ func recordDispatch(agentsDir string, now time.Time) error {
 // cap is charged BEFORE the lock wait (so concurrent callers cannot all pass
 // at max-1), and refunded when the dispatch never ran (BUSY, interrupted).
 func unrecordDispatch(agentsDir string, now time.Time) {
-	countPath := filepath.Join(agentsDir, DispatchCount)
+	countPath := DispatchCountPath(agentsDir)
 	b, err := os.ReadFile(countPath)
 	if err != nil {
 		return
@@ -152,9 +152,9 @@ type singleFlightLock struct {
 // the peer could not be reached. Queuing removes the judgement call entirely
 // for the common case, which is a dispatch that ends within seconds.
 func acquireDispatchLock(ctx context.Context, agentsDir, caller, target string, pid int, now time.Time) (*singleFlightLock, error) {
-	lockPath := filepath.Join(agentsDir, DispatchLock)
+	lockPath := DispatchLockPath(agentsDir)
 	l := &singleFlightLock{path: lockPath}
-	_ = os.MkdirAll(filepath.Dir(lockPath), 0o755) // ensure .agentmesh/ exists (ADR-0038)
+	_ = os.MkdirAll(filepath.Dir(lockPath), 0o755) // ensure the pool dir exists (ADR-0038)
 
 	mk := func() error { return os.Mkdir(lockPath, 0o755) }
 	reclaim := lockPath + ".reclaim"

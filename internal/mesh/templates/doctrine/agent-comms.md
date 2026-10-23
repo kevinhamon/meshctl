@@ -1,6 +1,6 @@
 # Agent Communication Protocol
 
-Canonical reference for how an agent mesh coordinates. Agent workspaces in a pool (sibling directories of the pool root, which holds `.agentmesh/`) are independent — there is no direct call between them. Coordination is **file-based handoff on the shared filesystem**, and the **human triggers each agent**.
+Canonical reference for how an agent mesh coordinates. Agent workspaces in a pool (sibling directories of the pool root, which holds `pool/`) are independent — there is no direct call between them. Coordination is **file-based handoff on the shared filesystem**, and the **human triggers each agent**.
 
 > The roster used in the examples below (architect, pm, developer, qa) is **illustrative** — a mesh defines whatever agents its work needs. The protocol is what's normative; the specific agents are not.
 >
@@ -24,7 +24,7 @@ Canonical reference for how an agent mesh coordinates. Agent workspaces in a poo
    owner, decline with no redirect and say why — the requester re-routes.
 5. **Don't cross ownership boundaries directly:** an agent doesn't mutate what another agent owns (e.g. the architect doesn't file tracker issues the PM owns; the PM doesn't author decision records the architect owns). Route through intake.
 6. Every request should trace to a reason (a decision record, a risk, a tracker key, or an explicit user ask).
-7. **Internal references never leave the mesh (default-deny).** Mesh-internal references must not appear in **any** artifact outside the mesh's own repos — including but not limited to issue-tracker items/comments, wiki/roadmap pages, **git commits & PRs in product repos**, shipped code comments, emails, chat/IM — **unless the user explicitly asks**. Banned when crossing out: decision-record ids, risk ids, `knowledge/…` paths, `candidates/`/`playbooks/` slugs, memory slugs, intake filenames/ids, `[[wikilinks]]`, mesh workspace paths. State the *decision* product-plain ("the new ETL is Go on the batch scheduler with a date-range trigger"), never the internal record id. **Boundary:** the mesh's own repos (KB, decision records, intake files, their git history) are internal — citing internal ids there is correct (rule 6); the rule governs content **crossing out**. Product-technical detail (repo names, languages, services, endpoints, tables) is fine — only mesh-internal *governance* artifacts are the leak.
+7. **Internal references never leave the mesh (default-deny).** Mesh-internal references must not appear in **any** artifact outside the mesh's own repos — including but not limited to issue-tracker items/comments, wiki/roadmap pages, **git commits & PRs in product repos**, shipped code comments, emails, chat/IM — **unless the user explicitly asks**. Banned when crossing out: decision-record ids, risk ids, `knowledge/…` paths, `candidates/`/`playbooks/` slugs, memory slugs, intake filenames/ids, `[[wikilinks]]`, mesh workspace paths. State the *decision* product-plain ("the new ETL is Go on the batch scheduler with a date-range trigger"), never the internal record id. **Boundary:** the mesh's own repos (KB, decision records, intake files, their git history) are internal — citing internal ids there is correct (rule 6); the rule governs content **crossing out**. Product-technical detail (repo names, languages, services, endpoints, tables) is fine — only mesh-internal *governance* artifacts are the leak. **Writes to outbound surfaces are gate-asked:** a tool call to a surface the pool declares outbound (`outbound:` in `pool/config.yaml`) is asked once per summary (`.memory/confirm/<session>.md`, the ask text, written and read out as a confirmation round first); a call with no summary, or with no human at the prompt, is denied.
 8. **Tact on external, human-facing surfaces (default).** When you author content a **human** will read on an external/product surface — tracker items/comments, PRs, code review, email, chat — **especially when speaking as the user**, communicate with tact. Critique the *work*, not the person or their competence; don't flatly say a solution is "wrong" — frame it as an observation, a trade-off, a risk, or a recommendation, and lead with what's sound before what to change. Be direct about substance, diplomatic about tone. (This is the *tone* companion to rule 7's *content* rule — both govern what crosses out of the mesh.) Where this rule 8 does **not** apply: internal mesh artifacts (your KB, decision records, intake) — there, be blunt and precise; and the chat with the user, unless the user says otherwise.
 9. **Mesh doctrine is a set of defaults; an agent's own role guidance overrides it where they conflict.** These rules (including rule 8's tone) are baseline assumptions for a general-purpose mesh. An agent whose **role defines a different communication style or standard** — e.g. an academic tutor, a brand-voice writer, a deliberately-blunt reviewer, a customer-support persona — follows *its* guidance; mesh defaults must not override an agent whose primary purpose *is* a communication style. State such overrides explicitly in that agent's `CLAUDE.md`. (Layering: mesh = shared defaults + coordination protocol; the agent's `CLAUDE.md` is authoritative for its own domain and voice.)
 
@@ -64,6 +64,17 @@ Statuses (enforced by `meshctl inbox respond`; `meshctl doctor` warns on anythin
 Legacy spellings are read as their canonical form: `rejected`→`declined`, `done`/`resolved`→`answered`.
 `meshctl inbox archive --closed` sweeps closed requests the requester has read back (`--force` for the rest).
 
+**Intake order — the human orders the queue.** On "check intake" or the session-start
+intake line, the inbox owner runs `meshctl inbox list` (pending + in-progress only,
+priority then age, a one-line ask each), reads it to the human as a short numbered queue,
+proposes an order (priority, then age; flags anything blocking another peer) and waits:
+nothing is claimed or worked before the answer. It then works in the human's order, by
+id (`meshctl inbox claim <id>`), one at a time, reporting each outcome briefly before the
+next, and re-plans when the human says something more important came up. Skipped ids go
+on the handoff's `Deferred: <ids>` line. A consulted or delegated peer has no human to
+ask: it works only the one request it was given. (`meshctl inbox list --all` shows every
+status.)
+
 **Intake lifecycle — an ephemeral discussion, not a ledger.** A request is
 transient coordination; it is **git-ignored** (`intake/*.md`), and its *durable residue*
 lives in the KB, not in the inbox. To **close** an exchange: (1) write the outcome back
@@ -75,7 +86,9 @@ other party's input folds in; refine by amending while `proposed` or superseding
 note; `fyi`/routine → often nothing; (4) `meshctl inbox archive <id>` (or `--answered`)
 moves the spent request into the git-ignored `.intake-archive/`. **Don't inflate decision records** —
 most requests are not decisions. The KB artifact, not the intake file, is the record;
-the coordination audit ("who asked whom, when") is `dispatch.log`.
+the coordination audit ("who asked whom, when") is `dispatch.log`. A request closed by
+the triage pass (`meshctl inbox triage apply`) owes no distillation: its residue already
+lives at the verdict's ref, or there is none.
 
 ## Architect ↔ PM (two example flows)
 
@@ -120,14 +133,19 @@ advice. Same request file, guards and log (`mode=in-session-work`), but the dele
 - works by its own KB and conventions: KB changes through `meshctl kb begin|finish --agent
   <peer>`, path-limited commits in its own workspace, and its declared `workdirs:` (product
   repos, which follow their branch/PR convention — never a push to a default branch);
-- edits in a **worktree** (`<pool>/.agentmesh/worktrees/<peer>-work-<id>`, branch
+- edits in a **worktree** (`<pool root>/pool/worktrees/<peer>-work-<id>`, branch
   `mesh/work/<id>`) instead of its checkout when its own session is live, so the two never
   share a working tree;
 - may not dispatch (no Agent, no `meshctl ask|send|pool|update|session`) and may not run
   `meshctl work merge` — its gate denies writes outside its workspace, its worktrees and its
   workdirs;
 - ends with a **receipt** (files per repo, commits/branches, KB candidates, open questions),
-  which the caller relays to the user.
+  which the caller relays to the user;
+- stops at an **outbound write or a promotion**: no human is at its prompt, so either one
+  ends in `needs-confirm`. The peer responds `needs-human` with a body opening
+  `needs-confirm:` that carries the confirmation round and the summary path, lists it in
+  the receipt, and never relays a confirmation; the human confirms from the peer's own
+  session.
 
 A delegation to a peer that declares `mutates` (tracker, deploys) is **asked**, not
 silently allowed: the caller's PreToolUse gate turns that Agent call into a human approval,
@@ -149,10 +167,10 @@ Rules:
 Anti-cascade guards (budget protection) — layered, cheapest→strongest, so a runaway/expensive chain can't happen even if a model ignores the prompt:
 1. **Prompt** — the dispatched agent is told it may not dispatch (soft).
 2. **Depth guard** — `AGENT_DISPATCH_DEPTH>=1` refused (env-based).
-3. **Single-flight lock** — a `mkdir` lock at `<pool>/.agentmesh/dispatch.lock` means **one dispatch at a time per pool**; hard, independent of the model and of env propagation. A caller queues behind an in-flight dispatch (up to `AGENT_DISPATCH_LOCK_WAIT_SEC`, default 120s) and then reports BUSY — a queue, not an unreachable peer. A lock whose holder process is dead is reclaimed at once; one past the stale window (`AGENT_DISPATCH_STALE_SEC`, 900s) with an unknown holder is reclaimed; a live holder is never reclaimed. Ctrl-C releases the lock and the request claim.
-4. **Hourly cap** — max dispatches per rolling hour (default 12, from `<pool>/.agentmesh/dispatch.count`), charged before the lock wait and refunded if the dispatch never runs; a circuit-breaker against fan-out across many experts.
+3. **Single-flight lock** — a `mkdir` lock at `<pool root>/pool/dispatch.lock` means **one dispatch at a time per pool**; hard, independent of the model and of env propagation. A caller queues behind an in-flight dispatch (up to `AGENT_DISPATCH_LOCK_WAIT_SEC`, default 120s) and then reports BUSY — a queue, not an unreachable peer. A lock whose holder process is dead is reclaimed at once; one past the stale window (`AGENT_DISPATCH_STALE_SEC`, 900s) with an unknown holder is reclaimed; a live holder is never reclaimed. Ctrl-C releases the lock and the request claim.
+4. **Hourly cap** — max dispatches per rolling hour (default 12, from `<pool root>/pool/dispatch.count`), charged before the lock wait and refunded if the dispatch never runs; a circuit-breaker against fan-out across many experts.
 
-Tunables (env): `AGENT_DISPATCH_HOURLY_MAX`, `AGENT_DISPATCH_STALE_SEC`, `AGENT_DISPATCH_TIMEOUT_SEC` (per-dispatch, default 420s), `AGENT_DISPATCH_MODEL` (pin a cheaper model for dispatched runs). All dispatches, queues, blocks and aborts are logged to `<pool>/.agentmesh/dispatch.log`. Exit codes: 2 unknown target · 3 depth · 4 hourly cap · 6 lock held (BUSY) · 124 timed out · 130 interrupted.
+Tunables (env): `AGENT_DISPATCH_HOURLY_MAX`, `AGENT_DISPATCH_STALE_SEC`, `AGENT_DISPATCH_TIMEOUT_SEC` (per-dispatch, default 420s), `AGENT_DISPATCH_MODEL` (pin a cheaper model for dispatched runs). All dispatches, queues, blocks and aborts are logged to `<pool root>/pool/dispatch.log`. Exit codes: 2 unknown target · 3 depth · 4 hourly cap · 6 lock held (BUSY) · 124 timed out · 130 interrupted.
 
 In-session dispatch keeps guards 1, 2 and 4 (the prompt, the depth guard, the hourly cap — logged as `mode=in-session`) and replaces the process-level ones: the peer subagent has no Agent tool (it cannot spawn), and its PreToolUse gate denies `meshctl ask|send`, so chaining is impossible rather than discouraged. No lock is needed — there is no second process to serialize.
 
@@ -194,8 +212,9 @@ decision's `updates:` is older than the decision, warns when `state.md` predates
 accepted decision, warns when a candidate is older than 14 days, and warns on a
 handoff or digest that fails lint. `meshctl kb consolidate` lists that debt in the
 order to work it off; the agent does the work in a `kb begin`/`kb finish` worktree and
-rewrites the digest with `meshctl state set` (fixed template, refuses a body that
-fails lint).
+rewrites the digest with `meshctl state set --summary-file <summary>` (fixed template,
+refuses a body that fails lint; the digest is current-tier knowledge, so the human
+confirms it like a promotion).
 
 **Memory** — computed live from `knowledge/` + `agent.yaml` on every call; nothing is
 persisted. Advisory; the KB is authoritative. `meshctl memory recall "<topic>"` returns
@@ -206,9 +225,28 @@ pointers.
 
 **Retrieval loop (agent behavior, not code)** — Recognize → **Recall**
 (`memory recall`) → **Retrieve** (read the KB files it points to — authoritative)
-→ Reconcile → **Verify** (live systems / MCP) → Act → **Learn** (`kb begin` a
+→ Reconcile → **Verify** (live systems / MCP) → **Align** (reach shared understanding
+with the human: intent, grounding, precedent) → Act → **Learn** (`kb begin` a
 note into `candidates/`, consolidate later via `kb finish`). Memory routes; the KB
-answers; live systems confirm.
+answers; live systems confirm; the human agrees.
+
+**Shared understanding before truth.** Before a promotion (a `kb finish` that touches more
+than `candidates/`, `state set`, `kb confirm`) or an outbound write, the agent writes one
+summary file per session, `.memory/confirm/<session>.md` (Intent, Grounding, Precedent,
+Coherence when related entries exist), and reads it to the human in chat as a
+**confirmation round**: one item per entry, what it says from now on and no longer says,
+its grounding and precedent, ending in a recommended confirm. The format is in the
+`mesh-cognition` skill.
+
+**Decision rounds are the default way to ask the human.** Any time an agent needs the
+human's decision on proposed changes (an intake order, a plan, a rule, a KB change, an
+outbound write), it presents a decision round: one item per change,
+`📝 **C<n> — <short title>**`, then `From now on it says: …` / `It no longer says: …` (a
+change of rule or knowledge) or what it will do and why (an action), ending
+`➡️ ✅ Confirm`; then how to answer: `yes` for all, `C<n> no: <reason>` for one. Small
+batches (about 3–5 items); it waits for the answer before acting. The confirmation round
+is this format with its extra fields (Grounded in, Precedent). The permission prompt that follows is the signature of that
+round, never the reading surface.
 
 ### Distillation ritual — System 1 → System 2
 
@@ -230,8 +268,9 @@ knowledge (the KB). This is the retrieval loop's **Learn** stage, made concrete.
 3. **Review + consolidate.** Judge each candidate. If durable and verified, move/rewrite
    it into the right area — `playbooks/` (repeatable procedure), `experience/` (retro /
    failure mode), a **decision record**, or `glossary.md`/`system-map.md` (facts). Drop the
-   rest. `meshctl kb finish` merges the change and auto-rebuilds the memory
-   index, so `memory recall` now routes to it.
+   rest. Write the summary file, read the confirmation round, then `meshctl kb finish
+   --summary-file <summary>`: the human confirms at the prompt, and the merge
+   auto-rebuilds the memory index, so `memory recall` now routes to it.
 4. **Leave candidates/ clean.** It is a holding area, not a graveyard — consolidate or
    delete; `doctor` warns on any candidate older than 14 days.
 5. **Consolidate.** Distilling only adds. After a decision is accepted, rewrite the
@@ -239,7 +278,9 @@ knowledge (the KB). This is the retrieval loop's **Learn** stage, made concrete.
    says what is outstanding.
 
 **Guardrails:**
-- **Review gate** — a human or the owning agent approves before a candidate becomes truth.
+- **Review gate** — only the human confirms before a candidate becomes truth: the
+  confirmation round in chat, then the signature at `kb finish`. An agent never confirms
+  its own writes.
 - **KB is authoritative; the episodic engine is never edited** — it is the disposable episodic
   engine; you distill *from* it, you don't curate *in* it.
 - **All writes via `kb begin/finish`** — git-tracked, reviewable, recoverable.
@@ -270,7 +311,7 @@ triggers:
 - `candidates/` and edits under `knowledge/` are exempt from the gate.
 
 **Optional automation:** a future `meshctl memory distill` may do steps 1–2 (mine +
-draft candidates) only. Step 3 (promotion into truth) always stays human/agent-reviewed.
+draft candidates) only. Step 3 (promotion into truth) always stays human-confirmed.
 
 **Capture cross-agent learning on dispatch return.** A dispatched peer (headless or
 in-session consult) may not commit, so anything the answering peer *learned* lives only in the answered
@@ -288,7 +329,8 @@ meshctl kb finish --agent <owner>     # run from a normal cwd, not inside the wo
 - Domain knowledge lands with its owner (a database gotcha → the database expert, an
   org-level pattern → the architect) — never scatter it into the requester's KB.
 - It lands as a **candidate** (a proposal), so the review gate still holds — the owning
-  agent promotes it on its next *interactive* session.
+  agent proposes it for promotion in its next *interactive* session, and the human
+  confirms it there.
 - Interactive sessions still distill their *own* learning the normal way (steps 1–4); this
   rule only covers the dispatched path (headless or in-session consult), where the peer itself
   can't commit. A peer doing **delegated work** (`--work`) commits its own learning through
@@ -317,7 +359,7 @@ Distinct from skills (procedures) and the KB (knowledge): a **tool reference** d
 which CLI tools to use and the mesh's house rules (e.g. "prefer `tea` over `gh`"), as
 **pointers** — you self-serve detail with `<cmd> --help`; meshctl never embeds the help.
 
-- Declared mesh-wide in `.agentmesh/pool.yaml` (`tools:`) and/or per-agent in `agent.yaml`
+- Declared mesh-wide in `pool/config.yaml` (`tools:`) and/or per-agent in `agent.yaml`
   (`tools:`); the agent's entries override the pool's by `cmd`.
 - Schema: `{ cmd, use, avoid, help }` — `use` = one-line purpose; `avoid` = "don't use
   this here (why)"; `help` defaults to `<cmd> --help`.

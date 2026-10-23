@@ -48,7 +48,7 @@ func TestAskInSession_WritesClaimsLogsAndPrintsDelegation(t *testing.T) {
 	if n, _ := hourlyCount(dir, now); n != 1 {
 		t.Fatalf("in-session dispatch must count against the cap, got %d", n)
 	}
-	logb, _ := os.ReadFile(filepath.Join(dir, DispatchLog))
+	logb, _ := os.ReadFile(DispatchLogPath(dir))
 	if !strings.Contains(string(logb), "DISPATCH mode=in-session id="+req.ID) {
 		t.Fatalf("log: %s", logb)
 	}
@@ -260,7 +260,7 @@ func TestHookSessionEnd_InSessionCapturesPeerRecordAndClosesLog(t *testing.T) {
 	if ListSessionRecords(caller) != nil {
 		t.Fatal("the caller must not get the peer's record")
 	}
-	logb, _ := os.ReadFile(filepath.Join(dir, DispatchLog))
+	logb, _ := os.ReadFile(DispatchLogPath(dir))
 	if !strings.Contains(string(logb), "caller=developer target=architect depth=0 DONE mode=in-session agent_id=agent-abc") {
 		t.Fatalf("log: %s", logb)
 	}

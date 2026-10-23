@@ -26,11 +26,6 @@ import (
 // PeerAgentPrefix is the subagent-name prefix for in-session peers.
 const PeerAgentPrefix = "mesh-"
 
-// peerGateMatcher mirrors the settings.json gate matcher: file edits, shell and
-// every MCP tool pass through the peer's own gate (its KB rules + the in-session
-// deny set).
-const peerGateMatcher = "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__"
-
 // peerFrontmatter is the subagent frontmatter, marshalled with yaml.v3 so a role
 // text containing ':' or '#' can never break the header.
 type peerFrontmatter struct {
@@ -116,9 +111,15 @@ func renderPeer(caller string, peer *Agent, work bool) (string, error) {
 		Tools:       tools,
 		Model:       model,
 		OmitClaude:  true,
+		// The same gate matcher as settings.json (GateHookMatcher): file edits,
+		// shell, every MCP tool and delegations pass through the peer's own
+		// gate (its KB rules + the in-session deny set), and PostToolUse on the
+		// same matcher is the peer-flagged seam for pool commits and outbound
+		// acks.
 		Hooks: map[string]any{
-			"PreToolUse": []any{map[string]any{"matcher": peerGateMatcher, "hooks": []any{hook("pre-tool-use")}}},
-			"Stop":       []any{map[string]any{"hooks": []any{hook("session-end")}}},
+			"PreToolUse":  []any{map[string]any{"matcher": GateHookMatcher, "hooks": []any{hook("pre-tool-use")}}},
+			"PostToolUse": []any{map[string]any{"matcher": GateHookMatcher, "hooks": []any{hook("post-tool-use")}}},
+			"Stop":        []any{map[string]any{"hooks": []any{hook("session-end")}}},
 		},
 	}
 	head, err := yaml.Marshal(fm)

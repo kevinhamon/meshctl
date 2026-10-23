@@ -14,11 +14,12 @@ const (
 )
 
 // DirectoryMarkdown renders the roster as the table format used in
-// agent-comms.md, computed live from manifests.
-func DirectoryMarkdown(agents []*Agent) string {
+// agent-comms.md, computed live from manifests. cfg supplies the pool default
+// for each peer's knowledge kind (ADR-0069).
+func DirectoryMarkdown(agents []*Agent, cfg PoolConfig) string {
 	var b strings.Builder
-	fmt.Fprintln(&b, "| Agent | Inbox | Owns | Accepts | Dispatch |")
-	fmt.Fprintln(&b, "|-------|-------|------|---------|----------|")
+	fmt.Fprintln(&b, "| Agent | Knowledge | Inbox | Owns | Accepts | Dispatch |")
+	fmt.Fprintln(&b, "|-------|-----------|-------|------|---------|----------|")
 	for _, a := range agents {
 		var types []string
 		for _, x := range a.Accepts {
@@ -31,8 +32,9 @@ func DirectoryMarkdown(agents []*Agent) string {
 		if len(a.Mutates) > 0 {
 			dispatch = fmt.Sprintf("send-only (mutates: %s)", strings.Join(a.Mutates, ","))
 		}
-		fmt.Fprintf(&b, "| **%s** | `%s/` | %s | %s | %s |\n",
+		fmt.Fprintf(&b, "| **%s** | %s | `%s/` | %s | %s | %s |\n",
 			a.Name,
+			EffectiveKnowledge(cfg, a),
 			strings.TrimRight(firstNonEmpty(a.Inbox, IntakeDir), "/"),
 			strings.Join(a.Owns, ", "),
 			strings.Join(types, ", "),
@@ -46,6 +48,7 @@ func DirectoryMarkdown(agents []*Agent) string {
 type dirEntry struct {
 	Name         string   `json:"name"`
 	Title        string   `json:"title"`
+	Knowledge    string   `json:"knowledge"` // effective kind: canonical | perspective
 	Role         string   `json:"role,omitempty"`
 	Inbox        string   `json:"inbox"`
 	Owns         []string `json:"owns"`
@@ -58,12 +61,13 @@ type dirEntry struct {
 }
 
 // DirectoryJSON renders the roster as machine-readable JSON for routing.
-func DirectoryJSON(agents []*Agent) (string, error) {
+func DirectoryJSON(agents []*Agent, cfg PoolConfig) (string, error) {
 	out := make([]dirEntry, 0, len(agents))
 	for _, a := range agents {
 		out = append(out, dirEntry{
 			Name:         a.Name,
 			Title:        a.Title,
+			Knowledge:    EffectiveKnowledge(cfg, a),
 			Role:         strings.TrimSpace(a.Role),
 			Inbox:        firstNonEmpty(a.Inbox, IntakeDir),
 			Owns:         a.Owns,

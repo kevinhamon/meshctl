@@ -3,7 +3,6 @@ package mesh
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +24,7 @@ func TestAcquireLock_WaitsForAnInFlightDispatch(t *testing.T) {
 	t.Setenv("AGENT_DISPATCH_LOCK_WAIT_SEC", "10")
 
 	dir := t.TempDir()
-	lockPath := filepath.Join(dir, DispatchLock)
+	lockPath := DispatchLockPath(dir)
 	if err := os.MkdirAll(lockPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +50,7 @@ func TestAcquireLock_TimeoutSaysBusyNotUnavailable(t *testing.T) {
 	t.Setenv("AGENT_DISPATCH_LOCK_WAIT_SEC", "1")
 
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, DispatchLock), 0o755); err != nil {
+	if err := os.MkdirAll(DispatchLockPath(dir), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,7 +82,7 @@ func TestAcquireLock_ReclaimsStaleLockWithoutWaiting(t *testing.T) {
 	t.Setenv("AGENT_DISPATCH_STALE_SEC", "1")
 
 	dir := t.TempDir()
-	lockPath := filepath.Join(dir, DispatchLock)
+	lockPath := DispatchLockPath(dir)
 	if err := os.MkdirAll(lockPath, 0o755); err != nil {
 		t.Fatal(err)
 	}

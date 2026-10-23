@@ -3,9 +3,13 @@ package mesh
 import (
 	"encoding/json"
 	"io"
+	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // gate.go — the mesh's only fail-CLOSED hook. The lifecycle hooks (hook.go) are
@@ -34,6 +38,10 @@ type GateDecision struct {
 	// Ask hands the call to the human: Claude Code prompts for approval with
 	// Reason. Harnesses with no ask form treat it as a deny.
 	Ask bool
+	// Check names the rule that produced the decision (one of the GateCheck*
+	// constants, gate_log.go). GatePreToolUse always sets it: an allow no
+	// check touched carries GateCheckNone, and the decision log says so.
+	Check string
 }
 
 const claudeMemPrefix = "mcp__plugin_claude-mem__"
@@ -80,17 +88,29 @@ func isClaudeMemMutator(name string) bool {
 	return false
 }
 
-// GatePreToolUse evaluates a PreToolUse payload against mesh doctrine. agentsDir
-// is accepted for future workspace-scoped rules; today's rules are path-shaped
-// and machine-global, so the gate holds even when pool resolution fails.
+// GatePreToolUse evaluates a PreToolUse payload against mesh doctrine and
+// appends the attributed decision to the deciding agent's log (gate_log.go).
+// agentsDir is accepted for workspace-scoped rules (KB rules, peer contracts);
+// the path-shaped rules are machine-global, so the gate holds even when pool
+// resolution fails.
 func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
+	d := gateEvaluate(agentsDir, p)
+	if d.Check == "" {
+		d.Check = GateCheckNone
+	}
+	logGateDecision(agentsDir, p, d, time.Now())
+	return d
+}
+
+// gateEvaluate is the decision without the log. Every return names its check.
+func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 	name := p.ToolName
 
 	// 1. claude-mem write tools — competing memory store. Denied by name, so this
 	//    holds even if tool_input is missing or malformed. Reads fall through to
 	//    the KB-rule check.
 	if isClaudeMemMutator(name) {
-		return GateDecision{Deny: true, Reason: "mesh: memory is owned by the mesh — do not write the claude-mem store. " +
+		return GateDecision{Deny: true, Check: GateCheckMemoryStore, Reason: "mesh: memory is owned by the mesh — do not write the claude-mem store. " +
 			"Persist through `meshctl memory` / `meshctl kb` (knowledge), or `meshctl send` / `meshctl ask` (messages)."}
 	}
 
@@ -99,9 +119,19 @@ func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
 	//     time: ask. Nothing else about a delegation is the gate's business.
 	if p.ToolName == "Agent" || p.ToolName == "Task" {
 		if p.InSession {
-			return GateDecision{Deny: true, Reason: peerWorkDenyDispatch}
+			return GateDecision{Deny: true, Check: GateCheckDelegation, Reason: peerWorkDenyDispatch}
 		}
 		return gateDelegation(agentsDir, p)
+	}
+
+	// 1a'. Pool knowledge (ADR-0066), the deny half: git in pool/ is never an
+	//      agent's to run, and a pool write with no human at the prompt is
+	//      refused outright. Before the peer contract, so a delegated or
+	//      consulted peer reads the cause ("no human at the prompt") rather
+	//      than the contract's generic write rule. The ask half runs after the
+	//      KB rules (5.).
+	if d := gatePoolPathDeny(agentsDir, p); d.Deny {
+		return d
 	}
 
 	// 1b. In-session peer. Consult: the peer answers through `meshctl inbox
@@ -110,6 +140,10 @@ func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
 	//     no-commit contract is enforced here. Work: writes confined to the
 	//     peer's own workspace and workdirs, still no dispatch.
 	if p.InSession {
+		// A consult may not run the intake triage pass (ADR-0072; triage.go).
+		if d := gateTriage(p); d.Deny {
+			return d
+		}
 		reason := ""
 		if p.Work {
 			reason = deniedPeerWorkAction(agentsDir, p)
@@ -117,14 +151,14 @@ func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
 			reason = deniedPeerAction(p)
 		}
 		if reason != "" {
-			return GateDecision{Deny: true, Reason: reason}
+			return GateDecision{Deny: true, Check: GateCheckPeer, Reason: reason}
 		}
 	}
 
 	// 2/3. File writes: inspect the target path(s).
 	for _, path := range gateEditPaths(p) {
 		if reason := deniedWritePath(agentsDir, path); reason != "" {
-			return GateDecision{Deny: true, Reason: reason}
+			return GateDecision{Deny: true, Check: GateCheckPath, Reason: reason}
 		}
 	}
 
@@ -132,12 +166,262 @@ func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
 	//     only way to write a file; `echo > intake/x.md` or `sed -i` on one
 	//     must meet the same rule, or the gate is decorative.
 	if reason := deniedShellWrite(agentsDir, p); reason != "" {
-		return GateDecision{Deny: true, Reason: reason}
+		return GateDecision{Deny: true, Check: GateCheckShellWrite, Reason: reason}
+	}
+
+	// 2c. A KB session branch named by hand (ADR-0067 "bypass closed"): only
+	//     `meshctl kb` merges, rebases or deletes mesh/kb/<session>, so the
+	//     confirmation at finish covers exactly what was promoted.
+	if reason := deniedKBBranchCommand(p); reason != "" {
+		return GateDecision{Deny: true, Check: GateCheckKBBranch, Reason: reason}
+	}
+
+	// 2d. Confirmed knowledge on a peer's main checkout (ADR-0067 "bypass
+	//     closed"): outside candidates/ it changes only through `kb finish`.
+	if reason := deniedKBMainWrite(agentsDir, p); reason != "" {
+		return GateDecision{Deny: true, Check: GateCheckKBMainWrite, Reason: reason}
+	}
+
+	// The machine-global rules end here. A hub hook seeing a subagent's call
+	// (ADR-0068 amendment, gate_log.go) steps aside for everything below: the
+	// subagent's own frontmatter hook, run with the peer flag, owns it.
+	if p.StepAside() {
+		return GateDecision{}
 	}
 
 	// 4. Standing rules from the agent's own KB (kbrules.go): deny once per
-	//    session per matching rule, with the rule as the reason.
-	return gateKBRules(agentsDir, p)
+	//    session per matching rule, with the rule as the reason. This runs
+	//    BEFORE the outbound logic, so a rule deny-once on an outbound call
+	//    delays the outbound ask to the retry rather than skipping it.
+	if d := gateKBRules(agentsDir, p); d.Deny {
+		return d
+	}
+
+	// 5. Pool knowledge, the ask half (ADR-0066): a write under pool/ is asked
+	//    with the peer's summary as the text, or denied naming the summary
+	//    path. After the KB rules, so a rule deny-once delays the ask to the
+	//    retry rather than skipping it; never in step-aside mode, since the
+	//    summary is the subagent's, not the hub's.
+	if d := gatePoolPathAsk(agentsDir, p); d.Ask || d.Deny {
+		return d
+	}
+
+	// 5b. Promotion at `kb finish` (ADR-0067, gate_promotion.go): asked with
+	//     the peer's summary as the signature; candidates-only passes.
+	if d := gatePromotion(agentsDir, p); d.Ask || d.Deny {
+		return d
+	}
+
+	// 5c. Promotion at `state set` (ADR-0067, gate_state.go): the digest meets
+	//     the same ask; no summary or no human at the prompt is a deny.
+	if d := gateStateSet(agentsDir, p); d.Ask || d.Deny {
+		return d
+	}
+
+	// 5d. Bulk confirmation at `kb confirm` (ADR-0070, gate_kb_confirm.go):
+	//     asked with the reconcile report's lines for the named paths.
+	if d := gateKBConfirm(agentsDir, p); d.Ask || d.Deny {
+		return d
+	}
+
+	// 5e. Intake triage apply (ADR-0072, triage_apply.go): asked with the
+	//     report lines for the named ids; no report is a deny.
+	if d := gateTriageApply(agentsDir, p); d.Ask || d.Deny {
+		return d
+	}
+
+	// 6. Outbound gate (ADR-0068, outbound.go): after the KB rules and never in
+	//    step-aside mode. The one fail-closed exception: an unusable outbound
+	//    config denies every outbound candidate.
+	return gateOutbound(agentsDir, p)
+}
+
+// --- pool knowledge (ADR-0066; spec decisions 11, 12; cross-cutting 68) ---
+//
+// The pool glossary, the local doctrine and the pool config live in the pool
+// repo (`pool/`), owned by no single peer. There is no `kb begin`/`kb finish`
+// for them and no candidates detour: a peer in its own interactive session
+// edits the file, and the gate asks the human with the peer's confirmation
+// summary (summary.go) as the text. Everything else is a deny: no summary
+// (naming the path), no human at the prompt (dispatch depth, distilling,
+// consult or work mode), and shell git whose working directory or path is in
+// the pool repo — meshctl commits the pool repo after an allowed write, the
+// human pushes, agents never run git there.
+
+// HeadlessNow reports the headless environment signals of the spec's
+// cross-cutting decision 68: a dispatch depth set and non-zero, or a distil
+// run. Every "no human at the prompt" rule keys on this and the gate mode.
+func HeadlessNow() bool {
+	return envInt("AGENT_DISPATCH_DEPTH", 0) != 0 || DistillingNow()
+}
+
+// noHumanCause names why no human is at the prompt for this call, "" when
+// one is (an agent's own interactive session).
+func noHumanCause(p HookPayload) string {
+	switch {
+	case envInt("AGENT_DISPATCH_DEPTH", 0) != 0:
+		return "dispatch depth " + strconv.Itoa(envInt("AGENT_DISPATCH_DEPTH", 0))
+	case DistillingNow():
+		return "a distil run"
+	case p.InSession && p.Work:
+		return "delegated work in-session"
+	case p.InSession:
+		return "consult mode in-session"
+	}
+	return ""
+}
+
+// poolTargets is what one tool call does under the pool repo: the
+// pool-relative files it writes (file tools, patch tools, shell write
+// operations and redirections) and, for a shell command, the first git
+// invocation whose working directory or path argument is in the repo. The
+// pool's ignored runtime state — the worktrees (peer repos where git is the
+// peer's own), the dispatch files — is not pool knowledge and never matches.
+type poolTargets struct {
+	writes []string
+	git    string
+}
+
+func (t poolTargets) any() bool { return len(t.writes) > 0 || t.git != "" }
+
+// poolPathTargets resolves the call's targets under the pool repo. agentsDir
+// "" (outside any pool) ⇒ none: the rule is inert there.
+func poolPathTargets(agentsDir string, p HookPayload) poolTargets {
+	var t poolTargets
+	if agentsDir == "" {
+		return t
+	}
+	pool := PoolDir(agentsDir)
+	rel := func(path string) (string, bool) {
+		if !underDir(path, pool) {
+			return "", false
+		}
+		r, err := filepath.Rel(pool, filepath.Clean(path))
+		if err != nil {
+			return "", false
+		}
+		r = filepath.ToSlash(r)
+		first := r
+		if i := strings.Index(r, "/"); i >= 0 {
+			first = r[:i]
+		}
+		switch {
+		case first == WorktreesDirName, first == DispatchLogFile, first == DispatchCountFile,
+			strings.HasPrefix(first, DispatchLockFile):
+			return "", false
+		}
+		return filepath.ToSlash(filepath.Join(filepath.Base(pool), r)), true
+	}
+	for _, path := range gateEditPaths(p) {
+		if r, ok := rel(path); ok {
+			t.writes = append(t.writes, r)
+		}
+	}
+	if !shellTools[p.ToolName] || len(p.ToolInput) == 0 {
+		return t
+	}
+	var in struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(p.ToolInput, &in) != nil || in.Command == "" {
+		return t
+	}
+	pathLike := func(w string) bool {
+		return strings.Contains(w, "/") || w == "." || w == ".." || strings.HasPrefix(w, "~")
+	}
+	// The command's own simple commands (shellparse.go): heredoc prose and
+	// /dev/null or fd-dup redirections are already gone; relative paths
+	// resolve against the cwd the `cd`s left.
+	shellWalk(in.Command, p.Cwd, func(words []string, base string) {
+		if path.Base(words[0]) != "git" || t.git != "" {
+			return
+		}
+		resolve := func(w string) string { return resolveShellPath(w, base) }
+		dir := base
+		hit := false
+		for i := 1; i < len(words); i++ {
+			w := words[i]
+			switch {
+			case w == "-C" && i+1 < len(words):
+				dir = resolve(words[i+1])
+				i++
+			case strings.HasPrefix(w, "--work-tree="), strings.HasPrefix(w, "--git-dir="):
+				if _, ok := rel(resolve(w[strings.Index(w, "=")+1:])); ok {
+					hit = true
+				}
+			case !strings.HasPrefix(w, "-") && pathLike(w):
+				if _, ok := rel(resolve(w)); ok {
+					hit = true
+				}
+			}
+		}
+		if _, ok := rel(dir); ok || hit {
+			t.git = strings.Join(words, " ")
+		}
+	})
+	for _, w := range shellWriteTargets(in.Command, p.Cwd) {
+		if r, ok := rel(w); ok {
+			t.writes = append(t.writes, r)
+		}
+	}
+	return t
+}
+
+// gatePoolPathDeny is the deny half of the pool-knowledge rule: shell git in
+// the pool repo, and a pool write with no human at the prompt.
+func gatePoolPathDeny(agentsDir string, p HookPayload) GateDecision {
+	t := poolPathTargets(agentsDir, p)
+	if !t.any() {
+		return GateDecision{}
+	}
+	if t.git != "" {
+		return GateDecision{Deny: true, Check: GateCheckPoolPath, Reason: "mesh: `" + t.git + "` runs git in the pool repo (`" +
+			PoolDirName(agentsDir) + "/`) — agents never run git there. meshctl commits the pool repo after each gate-asked write " +
+			"and the human pushes it; edit the pool file itself and let meshctl commit."}
+	}
+	if cause := noHumanCause(p); cause != "" {
+		return GateDecision{Deny: true, Check: GateCheckPoolPath, Reason: "mesh: this writes pool knowledge (`" +
+			strings.Join(t.writes, "`, `") + "`) with no human at the prompt (" + cause + ") — pool knowledge changes only where " +
+			"a human is at the prompt. Stop, and return the change with your summary (`needs-confirm`) for the human to make " +
+			"from an interactive session."}
+	}
+	return GateDecision{}
+}
+
+// gatePoolPathAsk is the ask half: the peer's summary as the ask text, or a
+// deny naming the summary path the peer must write.
+func gatePoolPathAsk(agentsDir string, p HookPayload) GateDecision {
+	t := poolPathTargets(agentsDir, p)
+	if len(t.writes) == 0 {
+		return GateDecision{}
+	}
+	targets := "`" + strings.Join(t.writes, "`, `") + "`"
+	a := payloadAgent(agentsDir, p)
+	if a == nil {
+		return GateDecision{Deny: true, Check: GateCheckPoolPath, Reason: "mesh: this writes pool knowledge (" + targets +
+			") but the gate cannot tell which peer is writing — run it from your workspace (or with `--agent <you>`), " +
+			"so your confirmation summary can be shown to the human."}
+	}
+	session := p.SessionID
+	if session == "" {
+		session = ResolveAgentSessionID(a, os.Getpid(), time.Now())
+	}
+	summaryPath := SummaryPath(a.Dir(), session)
+	s, why := summaryProblem(summaryPath)
+	if why != "" {
+		return GateDecision{Deny: true, Check: GateCheckPoolPath, Reason: "mesh: this writes pool knowledge (" + targets +
+			") and needs your confirmation summary first — " + why + " at " + summaryPath + ". Write it with `## Intent` " +
+			"(one line, first), `## Grounding` and `## Precedent`, read the confirmation round out in chat, then re-issue " +
+			"this write: the gate asks the human with your summary as the text (ADR-0066)."}
+	}
+	text := RenderAsk(a.Dir(), AskText{
+		Check:  GateCheckPoolPath,
+		Header: "mesh: pool write — " + targets + " becomes pool knowledge for every peer (ADR-0066). `" + a.Name + "` says:",
+		Intent: s.Intent,
+		Body:   s.SectionLines(),
+		Footer: "You may deny if this was not read to you as a confirmation round, or if a claim is uncited and not marked *assumption*.",
+	})
+	return GateDecision{Ask: true, Check: GateCheckPoolPath, Reason: text}
 }
 
 // gateDelegation asks the human before work is delegated in-session to a
@@ -157,19 +441,38 @@ func gateDelegation(agentsDir string, p HookPayload) GateDecision {
 	if err != nil || len(peer.Mutates) == 0 {
 		return GateDecision{}
 	}
-	return GateDecision{Ask: true, Reason: "mesh: `" + peer.Name + "` is a state-mutating peer (mutates: " +
+	return GateDecision{Ask: true, Check: GateCheckDelegation, Reason: "mesh: `" + peer.Name + "` is a state-mutating peer (mutates: " +
 		strings.Join(peer.Mutates, ", ") + ") — approve this delegated work before it runs in this session."}
 }
 
 // shellTools name the tools whose input is a shell command line.
 var shellTools = map[string]bool{"Bash": true, "bash": true, "shell": true}
 
-// rePeerDeniedCmd matches, at the start of a (sub)command, what a consulted
-// peer may never do: dispatch (ask/send), write its KB or handoff, touch pool
-// state, or change git state. Flags between words are allowed.
-var rePeerDeniedCmd = regexp.MustCompile(`(?:^|[\s;&|(])(?:` +
-	`meshctl\s+(?:(?:msg\s+)?(?:ask|send)|kb|handoff\s+set|pool|update|session|sent\s+ack)\b` +
-	`|git\s+(?:-C\s+\S+\s+)?(?:commit|push|add|rm|mv|checkout|switch|merge|rebase|reset|stash|cherry-pick|am|apply|tag|worktree)\b` +
+// peerDeniedMeshctl are the meshctl subcommands a consulted peer may never
+// run: dispatch (ask/send), its KB or handoff, pool state. Matched by
+// ShellInvokes' matcher, so flags before the verb do not hide it.
+var peerDeniedMeshctl = []string{
+	"meshctl ask", "meshctl send", "meshctl msg ask", "meshctl msg send", "meshctl kb",
+	"meshctl handoff set", "meshctl pool", "meshctl update", "meshctl session", "meshctl sent ack",
+}
+
+// shellInvokesAny reports whether the line invokes any of subcommands
+// (ShellInvokes).
+func shellInvokesAny(command string, subcommands []string) bool {
+	for _, sub := range subcommands {
+		if ShellInvokes(command, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// rePeerDeniedCmd matches, at the start of a simple command (shellAnyCommand),
+// what else a consulted peer may never do (beyond peerDeniedMeshctl): change
+// git state or write files. A mention in an argument (`grep "git commit" …`)
+// is not a match.
+var rePeerDeniedCmd = regexp.MustCompile(`^(?:` +
+	`git\s+(?:-C\s+\S+\s+)?(?:commit|push|add|rm|mv|checkout|switch|merge|rebase|reset|stash|cherry-pick|am|apply|tag|worktree)\b` +
 	`|(?:tee|sed\s+-[a-zA-Z]*i|mv|cp|rm|touch|truncate|dd|install|ln|rsync|mkdir|chmod|chown)\b` +
 	`)`)
 
@@ -197,20 +500,18 @@ func deniedPeerAction(p HookPayload) string {
 	if json.Unmarshal(p.ToolInput, &in) != nil || in.Command == "" {
 		return ""
 	}
-	if rePeerDeniedCmd.MatchString(in.Command) {
+	// Judge the command's own arguments (shellparse.go): heredoc bodies and
+	// /dev/null or fd-dup redirections are not writes.
+	args := ShellOwnArguments(in.Command)
+	if shellInvokesAny(args, peerDeniedMeshctl) || shellAnyCommand(args, rePeerDeniedCmd) || shellRedirects(args) {
 		return peerDenyReason
-	}
-	for _, m := range rePeerRedirect.FindAllStringSubmatch(in.Command, -1) {
-		if m[1] != "/dev/null" {
-			return peerDenyReason
-		}
 	}
 	return ""
 }
 
-// reShellWriteOp matches a command that can create, modify or delete a file:
-// a redirection, or a mutating utility at the start of a (sub)command.
-var reShellWriteOp = regexp.MustCompile(`(>|(?:^|[\s;&|(])(?:tee|sed\s+-[a-zA-Z]*i|mv|cp|rm|touch|truncate|dd|install|ln|rsync)\b)`)
+// reShellWriteOp matches a mutating utility at the start of a simple command
+// (shellAnyCommand); a redirection is the other write path (shellRedirects).
+var reShellWriteOp = regexp.MustCompile(`^(?:tee|sed\s+-[a-zA-Z]*i|mv|cp|rm|touch|truncate|dd|install|ln|rsync)\b`)
 
 // reShellIntakePath matches a request or claim file path under an intake/
 // directory, or a competing memory store path, anywhere on the command line.
@@ -230,19 +531,53 @@ func deniedShellWrite(agentsDir string, p HookPayload) string {
 	if json.Unmarshal(p.ToolInput, &in) != nil || in.Command == "" {
 		return ""
 	}
-	if !reShellIntakePath.MatchString(in.Command) || !reShellWriteOp.MatchString(in.Command) {
+	// The command's own arguments only (shellparse.go): a path named in a
+	// heredoc body is prose, and `2>/dev/null` / `2>&1` are not writes, so a
+	// read-only `cat` of an intake file passes.
+	args := ShellOwnArguments(in.Command)
+	if !reShellIntakePath.MatchString(args) || !(shellRedirects(args) || shellAnyCommand(args, reShellWriteOp)) {
 		return ""
 	}
 	// Scope the intake rule to this pool when the pool is known: a command
 	// writing some unrelated repo's intake/ is not the mesh's business.
-	if agentsDir != "" && !strings.Contains(in.Command, "/.claude") && !strings.Contains(in.Command, "/.claude-mem") {
-		if abs := shellIntakePathAbs(in.Command, p.Cwd); abs != "" && !underDir(abs, agentsDir) {
+	if agentsDir != "" && !strings.Contains(args, "/.claude") && !strings.Contains(args, "/.claude-mem") {
+		if abs := shellIntakePathAbs(args, p.Cwd); abs != "" && !underDir(abs, agentsDir) {
 			return ""
 		}
 	}
 	return "mesh: this shell command writes a mesh-owned store (intake/ or a competing memory store). " +
 		"Intake is written only through `meshctl send`/`ask`/`inbox respond`/`inbox decline`; " +
 		"knowledge through `meshctl kb`/`meshctl memory`."
+}
+
+// deniedKBBranchCommand returns a reason when a shell command names a
+// mesh/kb/<session> branch in any simple command that is not a `meshctl kb`
+// invocation (spec decision 24). It reads the command's own arguments through
+// shellparse.go, so a heredoc body, a `cat` of a script that mentions the
+// branch, or `meshctl kb finish --session <id>` is not a hit; `git merge
+// mesh/kb/x`, `git branch -D mesh/kb/x` and a `bash -c "…"` carrying them are.
+func deniedKBBranchCommand(p HookPayload) string {
+	command := shellCommandInput(p)
+	if command == "" {
+		return ""
+	}
+	for _, words := range ShellSimpleCommands(command) {
+		if shellWordsMatch(words, []string{"meshctl", "kb"}) {
+			continue
+		}
+		for _, w := range words {
+			if i := strings.Index(w, KBBranchPrefix); i >= 0 {
+				branch := w[i:]
+				if j := strings.IndexAny(branch, " \t.:^~@"); j >= 0 {
+					branch = branch[:j]
+				}
+				return "mesh: `" + branch + "` is a KB session branch — it is merged, rebased or deleted only by " +
+					"`meshctl kb finish` (or `meshctl kb finish --abort`), never by hand, so the confirmation at finish " +
+					"covers exactly what was promoted. Commit in the KB worktree, then run `meshctl kb finish`."
+			}
+		}
+	}
+	return ""
 }
 
 // shellIntakePathAbs returns the first intake path on a command line, resolved
@@ -365,7 +700,7 @@ func deniedWritePath(agentsDir, path string) string {
 // merely broken payload that slipped through as "allow" would make every rule
 // above optional.
 func GateUnavailable(why string) GateDecision {
-	return GateDecision{Deny: true, Reason: "mesh gate could not evaluate this tool call (" + why + ") and refuses rather than fail open. " +
+	return GateDecision{Deny: true, Check: GateCheckUnavailable, Reason: "mesh gate could not evaluate this tool call (" + why + ") and refuses rather than fail open. " +
 		"Re-run the call; if this persists, run `meshctl doctor` in the agent workspace."}
 }
 

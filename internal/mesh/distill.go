@@ -66,10 +66,10 @@ func DistillPrompt(poolRoot string, a *Agent, sessionID string) string {
 
 	// Inline the doctrine rather than pointing at it. The run is headless with
 	// cwd set to the agent workspace, and the doctrine lives one level up under
-	// the pool's .agentmesh/ — which a headless harness auto-rejects as an
+	// the pool directory — which a headless harness auto-rejects as an
 	// out-of-tree read. Pointing at the path yields a distiller that cannot
 	// read its own procedure and exits looking like a clean no-op.
-	path := filepath.Join(poolRoot, DoctrineDir, "distiller.md")
+	path := filepath.Join(DoctrinePath(poolRoot), "distiller.md")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		// Fall back to the reference; better than no instruction at all, and

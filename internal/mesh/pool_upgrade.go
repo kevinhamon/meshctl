@@ -32,15 +32,17 @@ type AgentUpgradePlan struct {
 type PoolUpgradePlan struct {
 	PoolRoot      string
 	OpencodeMajor int      // installed opencode major (0 ⇒ none on $PATH)
+	Pool          []string // pool directory steps (ADR-0066): rename, repo, ignore file, first commit
 	Doctrine      []string // doctrine files that will be added or replaced
 	Conflicts     []string // locally-edited doctrine: left alone, .upstream written for a merge
+	DoctrineDiff  string   // unified diff of the Doctrine updates, for review before applying
 	Warnings      []string // pool-wide issues outside the pool (e.g. global harness config)
 	Agents        []AgentUpgradePlan
 }
 
 // Pending reports whether the upgrade would change anything.
 func (p PoolUpgradePlan) Pending() bool {
-	if len(p.Doctrine) > 0 || len(p.Conflicts) > 0 {
+	if len(p.Pool) > 0 || len(p.Doctrine) > 0 || len(p.Conflicts) > 0 {
 		return true
 	}
 	for _, a := range p.Agents {
@@ -54,9 +56,17 @@ func (p PoolUpgradePlan) Pending() bool {
 // PlanPoolUpgrade previews a pool upgrade without writing anything.
 func PlanPoolUpgrade(poolRoot string, now time.Time) (PoolUpgradePlan, error) {
 	plan := PoolUpgradePlan{PoolRoot: poolRoot}
+	var poolWarnings []string
+	plan.Pool, poolWarnings = PlanPoolDir(poolRoot)
+	plan.Warnings = append(plan.Warnings, poolWarnings...)
 	var err error
 	if plan.Doctrine, plan.Conflicts, err = planDoctrine(poolRoot); err != nil {
 		return plan, err
+	}
+	if len(plan.Doctrine) > 0 {
+		if plan.DoctrineDiff, err = doctrineDiff(poolRoot); err != nil {
+			return plan, err
+		}
 	}
 	agents, _, err := ScanAgents(poolRoot)
 	if err != nil {
@@ -79,7 +89,7 @@ func PlanPoolUpgrade(poolRoot string, now time.Time) (PoolUpgradePlan, error) {
 // planDoctrine classifies each embedded doctrine file the way UpgradeDoctrine
 // would act on it (without force), read-only.
 func planDoctrine(poolRoot string) (update, conflicts []string, err error) {
-	dest := filepath.Join(poolRoot, DoctrineDir)
+	dest := DoctrinePath(poolRoot)
 	stamps := readDoctrineStamps(dest)
 	entries, err := templatesFS.ReadDir("templates/doctrine")
 	if err != nil {
@@ -93,7 +103,7 @@ func planDoctrine(poolRoot string) (update, conflicts []string, err error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		rel := filepath.Join(DoctrineDir, e.Name())
+		rel := poolRel(poolRoot, DoctrineDirName, e.Name())
 		have, err := os.ReadFile(filepath.Join(dest, e.Name()))
 		switch {
 		case err != nil:
@@ -111,6 +121,63 @@ func planDoctrine(poolRoot string) (update, conflicts []string, err error) {
 		}
 	}
 	return update, conflicts, nil
+}
+
+// doctrineDiff renders, as one unified diff, what the upgrade would change in
+// each doctrine file it may replace (missing, or unchanged since meshctl wrote
+// it), so the human reviews the doctrine before `pool upgrade` commits it
+// (spec decision 67). Locally-edited files are conflicts, not updates, and are
+// left out. Nothing in the pool is written: both sides are copied to a
+// temporary directory and compared there.
+func doctrineDiff(poolRoot string) (string, error) {
+	dest := DoctrinePath(poolRoot)
+	stamps := readDoctrineStamps(dest)
+	entries, err := templatesFS.ReadDir("templates/doctrine")
+	if err != nil {
+		return "", err
+	}
+	tmp, err := os.MkdirTemp("", "meshctl-doctrine-diff-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp)
+	var b strings.Builder
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		want, err := templatesFS.ReadFile("templates/doctrine/" + e.Name())
+		if err != nil {
+			return "", err
+		}
+		have, err := os.ReadFile(filepath.Join(dest, e.Name()))
+		switch {
+		case err != nil && !os.IsNotExist(err):
+			return "", err
+		case err == nil && (sha(have) == sha(want) || stamps[e.Name()] != sha(have)):
+			continue // current, or a local edit (a conflict, never replaced)
+		}
+		rel := filepath.ToSlash(poolRel(poolRoot, DoctrineDirName, e.Name()))
+		for side, body := range map[string][]byte{"a": have, "b": want} {
+			p := filepath.Join(tmp, side, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				return "", err
+			}
+			if err := os.WriteFile(p, body, 0o644); err != nil {
+				return "", err
+			}
+		}
+		// --no-index exits 1 when the files differ; the output is the diff.
+		cmd := exec.Command("git", "diff", "--no-index", "--no-color", "--no-ext-diff", "--no-prefix", "--",
+			filepath.Join("a", filepath.FromSlash(rel)), filepath.Join("b", filepath.FromSlash(rel)))
+		cmd.Dir = tmp
+		out, err := cmd.Output()
+		if err != nil && len(out) == 0 {
+			return "", fmt.Errorf("diff %s: %v", rel, err)
+		}
+		b.Write(out)
+	}
+	return b.String(), nil
 }
 
 func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
@@ -163,12 +230,12 @@ func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
 		skills = append(skills, "mesh-steward")
 	}
 	for _, s := range skills {
-		want, err := templatesFS.ReadFile("templates/skills/" + s + "/SKILL.md")
+		want, err := renderedSkill(filepath.Dir(dir), s)
 		if err != nil {
 			continue
 		}
 		have, err := os.ReadFile(filepath.Join(dir, skillRoot, "skills", s, "SKILL.md"))
-		if err != nil || string(have) != string(want) {
+		if err != nil || string(have) != want {
 			p.Actions = append(p.Actions, "refresh skill "+s)
 		}
 	}
@@ -186,13 +253,18 @@ func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
 		}
 	}
 
-	// CLAUDE.md stanzas onboard injects (add-only).
+	// CLAUDE.md stanzas onboard injects (the Cognition stanza and the comms
+	// Inbound order are also refreshed).
 	if b, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md")); err == nil {
 		if !hasCommsSection(string(b)) {
 			p.Actions = append(p.Actions, "add Agent Communication section to CLAUDE.md")
+		} else if _, stale := refreshedCommsSection(string(b)); stale {
+			p.Actions = append(p.Actions, "refresh Agent Communication Inbound order in CLAUDE.md")
 		}
 		if !hasCognitionSection(string(b)) {
 			p.Actions = append(p.Actions, "add Cognition stanza to CLAUDE.md")
+		} else if _, stale := refreshedCognitionSection(string(b), filepath.Dir(dir)); stale {
+			p.Actions = append(p.Actions, "refresh Cognition stanza in CLAUDE.md")
 		}
 	}
 
@@ -212,20 +284,17 @@ func gitDirty(dir string) string {
 	if !isGitRepo(dir) {
 		return ""
 	}
-	out, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
-	if err != nil {
-		return ""
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) == 1 && lines[0] == "" {
+	lines := gitStatusLines(dir)
+	if len(lines) == 0 {
 		return ""
 	}
 	return fmt.Sprintf("%d path(s)", len(lines))
 }
 
 // UpgradeAgents re-runs onboard for every agent in the pool, which re-wires the
-// harness for the installed versions, refreshes mesh-owned skills and adds any
-// missing CLAUDE.md stanzas. Never touches agent.yaml or the role body. Returns
+// harness for the installed versions, refreshes mesh-owned skills, adds any
+// missing CLAUDE.md stanzas and refreshes the managed Cognition stanza and
+// Inbound order. Never touches agent.yaml or the role body. Returns
 // per-agent notes in roster order.
 func UpgradeAgents(poolRoot string) ([]AgentUpgradePlan, error) {
 	agents, _, err := ScanAgents(poolRoot)

@@ -2,7 +2,6 @@ package mesh
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -55,7 +54,7 @@ func TestToolsMarkdown(t *testing.T) {
 
 func TestLoadPoolConfig_Tools(t *testing.T) {
 	root := t.TempDir()
-	os.MkdirAll(filepath.Join(root, PoolMarkerDir), 0o755)
+	os.MkdirAll(PoolDir(root), 0o755)
 	os.WriteFile(PoolMarkerPath(root), []byte(`name: p
 created: 2026-07-25T00:00:00Z
 doctrine_version: comms-1b

@@ -32,7 +32,7 @@ func TestDistillPromptPinsOwnerExplicitly(t *testing.T) {
 	got := DistillPrompt("/pool", a, "sess-1")
 
 	for _, want := range []string{
-		filepath.Join("/pool", DoctrineDir, "distiller.md"),
+		filepath.Join(DoctrinePath("/pool"), "distiller.md"),
 		"AGENT_NAME is already set to engineer-agent",
 		"--agent engineer-agent",
 		"session sess-1",
@@ -52,12 +52,12 @@ func TestDistillPromptPinsOwnerExplicitly(t *testing.T) {
 
 func TestDistillPromptInlinesDoctrine(t *testing.T) {
 	// The run is headless with cwd inside the agent workspace, and the doctrine
-	// sits above it under the pool's .agentmesh/. A headless harness rejects
+	// sits above it under the pool directory. A headless harness rejects
 	// that out-of-tree read, so a prompt that merely cites the path produces a
 	// distiller unable to read its own procedure -- which exits looking exactly
 	// like a legitimate "nothing to distil".
 	pool := t.TempDir()
-	dir := filepath.Join(pool, DoctrineDir)
+	dir := DoctrinePath(pool)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

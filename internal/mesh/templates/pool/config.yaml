@@ -1,0 +1,23 @@
+# meshctl pool config (ADR-0066) — human-owned settings for this pool. meshctl reads
+# this file and never rewrites it; identity (name, created, doctrine version) stays in
+# the binary-managed pool.yaml beside it. Commit edits here like any other pool change.
+#
+# knowledge: canonical | perspective — the pool's default knowledge kind; a peer's
+#   manifest overrides it (absent at both levels means canonical).
+# outbound: surfaces outside the pool that peers may write to (ADR-0068). Each surface
+#   maps to the tool-name regexes and shell-command regexes that mutate it; the gate
+#   asks before the first such call in a batch. Core ships no surfaces — list yours.
+#
+# outbound:
+#   <surface>:            # must equal a `mutates` tag on the peers that write it
+#     tools: ['create.*', 'update.*', 'delete.*', 'transition.*']
+#     commands: ['curl .*api\.example\.test']
+knowledge: canonical
+# reconcile:
+#   order: [<peer>, <peer>]   # overrides the reconciliation walk order computed from pool facts
+#
+# Mesh-wide tool reference (ADR-0042) — pointers only; injected at session start,
+# checked by `meshctl doctor`; agents self-serve `<cmd> --help`.
+# tools:
+#   - { cmd: <cmd>, use: "<one-line purpose or house rule>", help: "<cmd> --help" }
+#   - { cmd: <cmd>, avoid: "<why not in this mesh>" }

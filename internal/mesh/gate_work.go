@@ -19,12 +19,17 @@ import (
 // only when the session's cwd is itself an allowed root. The deny list plus
 // fail-open on what the gate cannot read is the contract.
 
-// rePeerWorkDeniedCmd is the subset of rePeerDeniedCmd a delegated peer still
-// may not run: dispatch and pool-level state. KB, handoff and git are its own.
-var rePeerWorkDeniedCmd = regexp.MustCompile(`(?:^|[\s;&|(])meshctl\s+(?:(?:msg\s+)?(?:ask|send)|pool|update|session|work\s+merge)\b`)
+// peerWorkDeniedMeshctl is the subset of peerDeniedMeshctl a delegated peer
+// still may not run: dispatch and pool-level state (plus merging a work
+// branch). KB, handoff and git are its own. Matched by ShellInvokes' matcher.
+var peerWorkDeniedMeshctl = []string{
+	"meshctl ask", "meshctl send", "meshctl msg ask", "meshctl msg send",
+	"meshctl pool", "meshctl update", "meshctl session", "meshctl work merge",
+}
 
-// reWorkWriteOp matches a command that can change files or git state.
-var reWorkWriteOp = regexp.MustCompile(`(?:^|[\s;&|(])(?:` +
+// reWorkWriteOp matches a simple command that can change files or git state
+// (shellAnyCommand).
+var reWorkWriteOp = regexp.MustCompile(`^(?:` +
 	`git\s+(?:-C\s+\S+\s+)?(?:commit|push|add|rm|mv|checkout|switch|merge|rebase|reset|stash|cherry-pick|am|apply|tag|worktree|restore|clean|pull)\b` +
 	`|(?:tee|sed\s+-[a-zA-Z]*i|mv|cp|rm|touch|truncate|dd|install|ln|rsync|mkdir|chmod|chown|patch)\b` +
 	`)`)
@@ -46,7 +51,7 @@ const peerWorkDenyDispatch = "mesh: you are a peer doing delegated work in-sessi
 func peerWorkRoots(agentsDir string, peer *Agent) []string {
 	roots := []string{peer.Dir()}
 	if agentsDir != "" {
-		wt := filepath.Join(agentsDir, WorktreesDir)
+		wt := WorktreesPath(agentsDir)
 		if entries, err := os.ReadDir(wt); err == nil {
 			for _, e := range entries {
 				p := filepath.Join(wt, e.Name())
@@ -122,14 +127,17 @@ func deniedPeerWorkAction(agentsDir string, p HookPayload) string {
 	if json.Unmarshal(p.ToolInput, &in) != nil || in.Command == "" {
 		return ""
 	}
-	cmd := in.Command
-	if rePeerWorkDeniedCmd.MatchString(cmd) {
+	// The command's own arguments (shellparse.go): heredoc prose naming the
+	// caller's path is not a write to it, and /dev/null or fd-dup
+	// redirections are not writes at all.
+	cmd := ShellOwnArguments(in.Command)
+	if shellInvokesAny(cmd, peerWorkDeniedMeshctl) {
 		return peerWorkDenyDispatch
 	}
 	if reason := deniedDefaultBranchPush(peer, cmd, p.Cwd); reason != "" {
 		return reason
 	}
-	writes := reWorkWriteOp.MatchString(cmd)
+	writes := shellAnyCommand(cmd, reWorkWriteOp)
 	for _, m := range rePeerRedirect.FindAllStringSubmatch(cmd, -1) {
 		writes = writes || m[1] != "/dev/null"
 	}

@@ -12,7 +12,7 @@ thread so the owning session is never blocked and the user is never walked throu
 the slow steps.
 
 **Follow the harness-neutral procedure verbatim:** read
-`../.agentmesh/doctrine/distiller.md` (relative to this workspace) first, then
+`../__POOL_DIR__/doctrine/distiller.md` (relative to this workspace) first, then
 execute it with:
 
 - `agent` = `__NAME__` (KB tree = `knowledge/` in this workspace)

@@ -25,7 +25,7 @@ type AgentSpec struct {
 	Model        string
 	Repo         string
 	Workdirs     []string // local repo paths writable in delegated work (ADR-0063)
-	Harness      string // claude | opencode (ADR-0032); empty ⇒ claude
+	Harness      string   // claude | opencode (ADR-0032); empty ⇒ claude
 	// HarnessVersion pins the opencode major (1|2) to wire for; 0 ⇒ the
 	// installed binary's. Not persisted: the installed binary is the truth at
 	// runtime, and doctor flags wiring that no longer matches it.
@@ -61,11 +61,21 @@ func scaffoldKnowledgeAreas(dest string) ([]string, error) {
 	return added, nil
 }
 
+// scaffoldLedger writes an empty confirmation ledger (ADR-0067) when none
+// exists. Add-only: an existing ledger is never touched. The ledger is
+// tracked; the scaffold commit (New) or the peer's next commit carries it.
+func scaffoldLedger(dest string) (bool, error) {
+	if fileExists(LedgerPath(dest)) {
+		return false, nil
+	}
+	return true, WriteLedger(dest, Ledger{})
+}
+
 // scaffoldSkills installs the shared mesh skills, rendered into the given
 // harness's native location (ADR-0032). Add-only: never clobbers an existing
 // skill; a second run is a no-op. mesh-cognition is every agent's primary
 // cognition instructions (ADR-0014–0018).
-func scaffoldSkills(dest string, h Harness) ([]string, error) {
+func scaffoldSkills(poolRoot, dest string, h Harness) ([]string, error) {
 	var added []string
 	skills := []string{"mesh-cognition"}
 	// Update the steward skill too if this agent already has it (it's a steward),
@@ -74,11 +84,11 @@ func scaffoldSkills(dest string, h Harness) ([]string, error) {
 		skills = append(skills, "mesh-steward")
 	}
 	for _, skill := range skills {
-		b, err := templatesFS.ReadFile("templates/skills/" + skill + "/SKILL.md")
+		body, err := renderedSkill(poolRoot, skill)
 		if err != nil {
 			return added, err
 		}
-		ok, err := h.RenderSkill(skill, string(b), dest)
+		ok, err := h.RenderSkill(skill, body, dest)
 		if err != nil {
 			return added, err
 		}
@@ -87,6 +97,52 @@ func scaffoldSkills(dest string, h Harness) ([]string, error) {
 		}
 	}
 	return added, nil
+}
+
+// poolDirToken is the template placeholder for the pool directory's name
+// (`pool`, or the legacy hidden name until `pool upgrade`), so every rendered
+// pointer — CLAUDE.md stanzas, intake README, skills, the distiller binding —
+// follows the resolver (ADR-0066).
+const poolDirToken = "__POOL_DIR__"
+
+// renderPoolTokens fills the pool directory token for one pool.
+func renderPoolTokens(poolRoot, body string) string {
+	return strings.ReplaceAll(body, poolDirToken, PoolDirName(poolRoot))
+}
+
+// renderedSkill is a mesh-owned skill as it should read in this pool; onboard
+// writes it and the upgrade plan compares against it.
+func renderedSkill(poolRoot, skill string) (string, error) {
+	b, err := templatesFS.ReadFile("templates/skills/" + skill + "/SKILL.md")
+	if err != nil {
+		return "", err
+	}
+	return renderPoolTokens(poolRoot, string(b)), nil
+}
+
+// refreshPoolPointers rewrites the legacy pool directory name in files meshctl
+// rendered earlier, once the pool has moved to `pool/`. Returns how many files
+// changed. A pool still on the legacy directory is left as rendered.
+func refreshPoolPointers(poolRoot string, paths ...string) (int, error) {
+	if PoolDirIsLegacy(poolRoot) {
+		return 0, nil
+	}
+	n := 0
+	for _, p := range paths {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		out := strings.ReplaceAll(string(b), LegacyPoolDir+"/", PoolDirName(poolRoot)+"/")
+		if out == string(b) {
+			continue
+		}
+		if err := os.WriteFile(p, []byte(out), 0o644); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 // ensureMemoryIgnored appends the meshctl-managed .gitignore block if absent:
@@ -126,7 +182,7 @@ func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error)
 	if !spec.Bare && spec.Name != "" && !strings.HasSuffix(spec.Name, "-agent") {
 		spec.Name += "-agent"
 	}
-	if err := ValidName("agent name", spec.Name); err != nil {
+	if err := ValidAgentName(spec.Name); err != nil {
 		return "", err
 	}
 	dest := AgentDir(agentsDir, spec.Name)
@@ -151,7 +207,7 @@ func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error)
 	}
 
 	// Rendered template files.
-	repl := strings.NewReplacer("__NAME__", spec.Name, "__DIR__", spec.Name, "__BADGE__", spec.Badge.Label)
+	repl := strings.NewReplacer("__NAME__", spec.Name, "__DIR__", spec.Name, "__BADGE__", spec.Badge.Label, poolDirToken, PoolDirName(agentsDir))
 	if err := renderTemplate("templates/CLAUDE.md", filepath.Join(dest, "CLAUDE.md"), repl); err != nil {
 		return "", err
 	}
@@ -168,12 +224,15 @@ func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error)
 	if _, err := scaffoldKnowledgeAreas(dest); err != nil {
 		return "", err
 	}
+	if _, err := scaffoldLedger(dest); err != nil {
+		return "", err
+	}
 	if err := ensureMemoryIgnored(dest); err != nil {
 		return "", err
 	}
 	// Shared mesh skills + harness integration (ADR-0032), rendered per harness.
 	h := HarnessByNameVersion(spec.Harness, spec.HarnessVersion)
-	if _, err := scaffoldSkills(dest, h); err != nil {
+	if _, err := scaffoldSkills(agentsDir, dest, h); err != nil {
 		return "", err
 	}
 	if _, err := h.WireAgent(dest); err != nil {
@@ -216,7 +275,7 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 	}
 	res := &OnboardResult{Dir: abs}
 	name := filepath.Base(abs)
-	if err := ValidName("agent name", name); err != nil {
+	if err := ValidAgentName(name); err != nil {
 		return nil, err
 	}
 	if spec.Name == "" {
@@ -280,7 +339,7 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 		if err := os.MkdirAll(intake, 0o755); err != nil {
 			return nil, err
 		}
-		repl := strings.NewReplacer("__NAME__", name, "__DIR__", name)
+		repl := strings.NewReplacer("__NAME__", name, "__DIR__", name, poolDirToken, PoolDirName(agentsDir))
 		if err := renderTemplate("templates/intake/README.md", filepath.Join(intake, "README.md"), repl); err != nil {
 			return nil, err
 		}
@@ -289,20 +348,49 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 
 	// 3. CLAUDE.md intake section.
 	if len(claudeBody) > 0 && !hasCommsSection(string(claudeBody)) {
-		if err := appendCommsSection(claudePath, name); err != nil {
+		if err := appendCommsSection(claudePath, agentsDir); err != nil {
 			return nil, err
+		}
+		if b, err := os.ReadFile(claudePath); err == nil {
+			claudeBody = b // a Cognition refresh below rewrites from this body
 		}
 		res.AddedCommsSec = true
 	} else if len(claudeBody) == 0 {
 		res.Notes = append(res.Notes, "no CLAUDE.md — skipped intake-section injection")
+	} else if fresh, stale := refreshedCommsSection(string(claudeBody)); stale {
+		// A known older Inbound bullet becomes the current intake order
+		// (ADR-0073); human text around it is untouched.
+		if err := os.WriteFile(claudePath, []byte(fresh), 0o644); err != nil {
+			return nil, err
+		}
+		claudeBody = []byte(fresh)
+		res.Notes = append(res.Notes, "refreshed Agent Communication Inbound order in CLAUDE.md")
 	}
 
-	// 3b. CLAUDE.md cognition standing-order stanza (ADR-0026) — add-only.
+	// 3b. CLAUDE.md cognition standing-order stanza (ADR-0026): added when
+	// missing, refreshed in place when an earlier onboard wrote an older text
+	// (story 109: one re-onboard picks everything up). Human text outside the
+	// managed stanza is never touched.
 	if len(claudeBody) > 0 && !hasCognitionSection(string(claudeBody)) {
-		if err := appendCognitionSection(claudePath); err != nil {
+		if err := appendCognitionSection(claudePath, agentsDir); err != nil {
 			return nil, err
 		}
 		res.Notes = append(res.Notes, "added Cognition standing-order stanza to CLAUDE.md")
+	} else if len(claudeBody) > 0 {
+		if fresh, stale := refreshedCognitionSection(string(claudeBody), agentsDir); stale {
+			if err := os.WriteFile(claudePath, []byte(fresh), 0o644); err != nil {
+				return nil, err
+			}
+			res.Notes = append(res.Notes, "refreshed Cognition standing-order stanza in CLAUDE.md")
+		}
+	}
+
+	// 3c. Rendered pointers follow the pool directory (ADR-0066): after `pool
+	// upgrade` moved it, the next onboard re-points what earlier renders wrote.
+	if n, err := refreshPoolPointers(agentsDir, claudePath, filepath.Join(intake, "README.md")); err != nil {
+		return nil, err
+	} else if n > 0 {
+		res.Notes = append(res.Notes, fmt.Sprintf("re-pointed %d file(s) at %s/", n, PoolDirName(agentsDir)))
 	}
 
 	// 4. KB areas (ADR-0014) + 5. memory gitignore (ADR-0015) — add-only.
@@ -311,11 +399,16 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 	} else if len(added) > 0 {
 		res.Notes = append(res.Notes, "scaffolded knowledge areas: "+strings.Join(added, ", "))
 	}
+	if added, err := scaffoldLedger(abs); err != nil {
+		return nil, err
+	} else if added {
+		res.Notes = append(res.Notes, "scaffolded the confirmation ledger: "+KnowledgeDir+"/"+LedgerFile)
+	}
 	if err := ensureMemoryIgnored(abs); err != nil {
 		return nil, err
 	}
 	// 6. Shared mesh skills — rendered per harness (ADR-0032), add-only.
-	if added, err := scaffoldSkills(abs, h); err != nil {
+	if added, err := scaffoldSkills(agentsDir, abs, h); err != nil {
 		return nil, err
 	} else if len(added) > 0 {
 		res.Notes = append(res.Notes, "installed skills: "+strings.Join(added, ", "))
@@ -390,22 +483,22 @@ func ScaffoldSteward(agentsDir, harness string, now time.Time) (string, []string
 	if err != nil {
 		return dir, notes, err
 	}
-	if err := os.WriteFile(claudePath, body, 0o644); err != nil {
+	if err := os.WriteFile(claudePath, []byte(renderPoolTokens(agentsDir, string(body))), 0o644); err != nil {
 		return dir, notes, err
 	}
-	if err := appendCommsSection(claudePath, StewardName); err != nil {
+	if err := appendCommsSection(claudePath, agentsDir); err != nil {
 		return dir, notes, err
 	}
-	if err := appendCognitionSection(claudePath); err != nil {
+	if err := appendCognitionSection(claudePath, agentsDir); err != nil {
 		return dir, notes, err
 	}
 
 	// The mesh-steward skill (the interview/roster/scaffold playbook), per harness.
-	sb, err := templatesFS.ReadFile("templates/skills/mesh-steward/SKILL.md")
+	sb, err := renderedSkill(agentsDir, "mesh-steward")
 	if err != nil {
 		return dir, notes, err
 	}
-	if _, err := HarnessByName(harness).RenderSkill("mesh-steward", string(sb), dir); err != nil {
+	if _, err := HarnessByName(harness).RenderSkill("mesh-steward", sb, dir); err != nil {
 		return dir, notes, err
 	}
 	notes = append(notes, "installed mesh-steward skill")
@@ -616,22 +709,73 @@ const commsSection = `
 
 ## Agent Communication (intake)
 
-Bidirectional file-based handoff — canonical protocol: your pool's ` + "`../.agentmesh/doctrine/agent-comms.md`" + `. Inbox: ` + "`intake/`" + ` (in this workspace). The roster is computed on demand — run ` + "`meshctl agent list`" + ` (do not maintain a peer list here).
+Bidirectional file-based handoff — canonical protocol: your pool's ` + "`../__POOL_DIR__/doctrine/agent-comms.md`" + `. Inbox: ` + "`intake/`" + ` (in this workspace). The roster is computed on demand — run ` + "`meshctl agent list`" + ` (do not maintain a peer list here).
 
-- **Inbound:** at session start / on "check intake", run ` + "`meshctl inbox next --claim`" + ` (atomic claim) or scan ` + "`intake/*.md`" + ` for ` + "`status: pending`" + `; process by ` + "`type`" + `, then write the outcome back with ` + "`meshctl inbox respond <id> --status answered|filed|needs-info|needs-human --response \"…\"`" + ` (intake files are meshctl-owned — never hand-edit them). **Not yours?** ` + "`meshctl inbox decline <id> --reason \"…\" --redirect <owner>`" + ` — don't half-answer out-of-domain work.
-- **Read-back:** ` + "`meshctl sent`" + ` lists requests you sent that came back (answered / declined / needs-info); read each, act, then ` + "`meshctl sent ack <id>`" + `. The session start surfaces them automatically.
+` + inboundStanza + `- **Read-back:** ` + "`meshctl sent`" + ` lists requests you sent that came back (answered / declined / needs-info); read each, act, then ` + "`meshctl sent ack <id>`" + `. The session start surfaces them automatically.
 - **Outbound:** ` + "`meshctl send <target> <type> \"…\"`" + ` writes a request into a peer's inbox; ` + "`meshctl ask <target> <type> \"…\"`" + ` also dispatches an advisory peer headlessly and blocks for the answer. State-mutating peers (pm→tracker, developer→code) are ` + "`send`" + `-only and human-triggered.
 - **Blocked on a decision mid-task?** ` + "`meshctl ask <advisor> <type> \"…\"`" + ` for a synchronous answer; if it returns ` + "`needs-human`" + `, stop and surface to the user.
 - **Under Claude Code, prefer ` + "`meshctl ask <advisor> <type> \"…\" --in-session`" + `:** it records the dispatch and prints an Agent-tool delegation (` + "`subagent_type: mesh-<advisor>`" + `) — make that call, then read the answer with ` + "`meshctl sent`" + `. The peer runs inside this session; no second terminal.
 `
 
-func appendCommsSection(claudePath, name string) error {
+// inboundStanza is the managed intake order inside the Agent Communication
+// section (ADR-0073): "check intake" shows the queue and stops, work runs in
+// the human's order by id, and decisions are asked as a decision round. The
+// scaffold template carries the same text; re-onboard swaps a known older
+// Inbound bullet for it (refreshedCommsSection).
+const inboundStanza = `- **Inbound — "check intake" shows the queue and stops.** On "check intake" or the session-start intake line, run ` + "`" + `meshctl inbox list` + "`" + ` (pending + in-progress, priority then age, a one-line ask each) and read it to the human as a short numbered queue (id, from, type, priority, age, ask). Propose an order (priority, then age; flag anything blocking another peer) and wait: claim and work nothing until the human confirms or reorders.
+- **Work in the human's order, by id.** Claim one at a time with ` + "`" + `meshctl inbox claim <id>` + "`" + `; process it by ` + "`" + `type` + "`" + `, write the outcome back with ` + "`" + `meshctl inbox respond <id> --status answered|filed|needs-info|needs-human --response "…"` + "`" + ` (intake files are meshctl-owned — never hand-edit them) and report it in a line before the next. When the human says something more important came up, re-plan. Skipped ids go on your handoff's ` + "`" + `Deferred: <ids>` + "`" + ` line. **Not yours?** ` + "`" + `meshctl inbox decline <id> --reason "…" --redirect <owner>` + "`" + ` — don't half-answer out-of-domain work.
+- **Ask for a decision as a decision round.** Whenever you need the human's decision on proposed changes (an intake order, a plan, a rule, a KB change, an outbound write), present one item per change: ` + "`" + `📝 **C<n> — <short title>**` + "`" + `, then ` + "`" + `From now on it says: …` + "`" + ` / ` + "`" + `It no longer says: …` + "`" + ` (a change of rule or knowledge) or what you will do and why (an action), ending ` + "`" + `➡️ ✅ Confirm` + "`" + `. Then say how to answer: ` + "`" + `yes` + "`" + ` for all, or ` + "`" + `C<n> no: <reason>` + "`" + ` for one. Keep rounds small (about 3–5 items) and wait for the answer before acting.
+`
+
+// staleInboundBullets are Inbound bullets earlier onboards wrote, exactly.
+var staleInboundBullets = []string{
+	"- **Inbound:** at session start / on \"check intake\", run `meshctl inbox next --claim` (atomic claim) or scan `intake/*.md` for `status: pending`; process by `type`, then write the outcome back with `meshctl inbox respond <id> --status answered|filed|needs-info|needs-human --response \"…\"` (intake files are meshctl-owned — never hand-edit them). **Not yours?** `meshctl inbox decline <id> --reason \"…\" --redirect <owner>` — don't half-answer out-of-domain work.\n",
+}
+
+// claimOldest is the command older Inbound bullets told the agent to run on
+// "check intake"; inboundQueueAndWait replaces it inside a hand-customised
+// bullet, so the bullet's own words stay and only the claim-first order goes.
+var (
+	claimOldest         = []string{"`meshctl inbox next --claim` (atomic claim)", "`meshctl inbox next --claim`"}
+	inboundQueueAndWait = "`meshctl inbox list`, read the queue to the human as a short numbered list, propose an order and wait for the human to confirm or reorder before claiming anything (then `meshctl inbox claim <id>`, one at a time)"
+)
+
+// refreshedCommsSection returns claude with a known stale Inbound bullet
+// replaced by the current intake order, or, in a hand-customised Inbound
+// bullet, only its claim-the-oldest command swapped for the queue-and-wait
+// order (ADR-0073); stale=false when there is nothing to change.
+func refreshedCommsSection(claude string) (fresh string, stale bool) {
+	for _, old := range staleInboundBullets {
+		if i := strings.Index(claude, old); i >= 0 && (i == 0 || claude[i-1] == '\n') {
+			return claude[:i] + inboundStanza + claude[i+len(old):], true
+		}
+	}
+	lines := strings.SplitAfter(claude, "\n")
+	for n, ln := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(ln), "- **Inbound") {
+			continue
+		}
+		for _, cmd := range claimOldest {
+			if strings.Contains(ln, cmd) {
+				lines[n] = strings.Replace(ln, cmd, inboundQueueAndWait, 1)
+				stale = true
+				break
+			}
+		}
+	}
+	if !stale {
+		return claude, false
+	}
+	return strings.Join(lines, ""), true
+}
+
+func appendCommsSection(claudePath, poolRoot string) error {
 	f, err := os.OpenFile(claudePath, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	_, err = io.WriteString(f, commsSection)
+	_, err = io.WriteString(f, renderPoolTokens(poolRoot, commsSection))
 	return err
 }
 
@@ -651,16 +795,30 @@ Run the **` + "`mesh-cognition`" + ` skill** for the full procedure; its short f
 - **Recall at start.** ` + "`meshctl memory recall \"<topic>\" --budget 4000`" + ` (current tier first,
   bodies inlined), then read the KB files it points to. Your ` + "`knowledge/state.md`" + ` digest
   and ` + "`knowledge/handoff.md`" + ` are auto-injected.
+- **Align before you act.** Reach **shared understanding** with the human first: their
+  agreement to your intent, your grounding (cite, or mark *assumption*) and your
+  **precedent** (cite, or mark *new*). Required for more than one artifact, any outbound
+  write, any promotion, or any claim you cannot ground. Pools may tighten this in
+  ` + "`local.md`" + `, never loosen it. Before any outbound write, write the summary file
+  ` + "`.memory/confirm/<session>.md`" + ` and read the confirmation round in chat. Ask
+  for any decision as a decision round (` + "`📝 **C<n> — <short title>**`" + `, ending
+  ` + "`➡️ ✅ Confirm`" + `; answers ` + "`yes`" + ` or ` + "`C<n> no: <reason>`" + `).
+- **Pending work first.** When session start shows a ` + "`# Pending work`" + ` block, read it to
+  the human before new work and offer triage now, a subset, or deferral; the human
+  decides. For intake, show the queue (` + "`meshctl inbox list`" + `), propose an order
+  and wait, then claim by id in the human's order. A deferral is one
+  ` + "`Deferred: <ids>`" + ` line in your handoff; no snooze.
 - **Distill as you learn.** When a session yields a recurring pattern, a reusable
   procedure, a failure mode, or a consequential decision: ` + "`meshctl kb begin`" + ` →
   write ` + "`knowledge/candidates/<slug>.md`" + ` → consolidate into ` + "`playbooks/`" + ` /
-  ` + "`experience/`" + ` / a decision (ADR) → ` + "`meshctl kb finish`" + `.
+  ` + "`experience/`" + ` / a decision (ADR) → write the summary file and read the
+  confirmation round → ` + "`meshctl kb finish --summary-file <it>`" + `. Only the human confirms.
 - **Record decisions & risks.** Consequential domain choices become ADRs in
   ` + "`knowledge/decisions/`" + ` with status frontmatter (` + "`status:`, `supersedes:`, `updates:`" + `);
   new risks get logged in ` + "`knowledge/risks.md`" + `.
 - **Consolidate.** When ` + "`meshctl doctor`" + ` or ` + "`meshctl kb consolidate`" + ` reports debt: land the
   decision in the docs it updates, judge aged candidates, rewrite the digest with
-  ` + "`meshctl state set`" + ` (fixed template, ≤40 lines).
+  ` + "`meshctl state set --summary-file <summary>`" + ` (fixed template, ≤40 lines; a promotion).
 - **Handoff at end.** Fill in ` + "`meshctl handoff template`" + ` (fixed sections, ≤40 lines, facts only) and
   write it in one pass: ` + "`meshctl handoff set <<'EOF' … EOF`" + `.
 - **Repo hygiene (your knowledge is only as safe as your remote).** Your workspace
@@ -669,17 +827,46 @@ Run the **` + "`mesh-cognition`" + ` skill** for the full procedure; its short f
   commit it now. Then create a remote and push. Session start will keep reminding you
   until a remote exists — clear it by pushing.
 
-Authoritative spec: ` + "`.agentmesh/doctrine/agent-comms.md`" + ` §Knowledge & Memory
+Authoritative spec: ` + "`../__POOL_DIR__/doctrine/agent-comms.md`" + ` §Knowledge & Memory
 (ADR-0014–0018).
 `
 
-func appendCognitionSection(claudePath string) error {
+// cognitionStanzaHeading and cognitionStanzaEnd bound the managed stanza
+// every onboard has written: from its heading line through its closing
+// ADR line. Text before or after is the human's.
+const (
+	cognitionStanzaHeading = "## Cognition — maintain your own knowledge base (standing order)"
+	cognitionStanzaEnd     = "(ADR-0014–0018).\n"
+)
+
+// refreshedCognitionSection returns claude with its managed Cognition stanza
+// replaced by the current one; stale=false when it is already current or the
+// stanza's bounds cannot be found (a hand-edited heading or ending is left
+// alone).
+func refreshedCognitionSection(claude, poolRoot string) (fresh string, stale bool) {
+	start := strings.Index(claude, cognitionStanzaHeading)
+	if start < 0 || (start > 0 && claude[start-1] != '\n') {
+		return claude, false
+	}
+	n := strings.Index(claude[start:], cognitionStanzaEnd)
+	if n < 0 {
+		return claude, false
+	}
+	end := start + n + len(cognitionStanzaEnd)
+	want := strings.TrimLeft(renderPoolTokens(poolRoot, cognitionSection), "\n")
+	if claude[start:end] == want {
+		return claude, false
+	}
+	return claude[:start] + want + claude[end:], true
+}
+
+func appendCognitionSection(claudePath, poolRoot string) error {
 	f, err := os.OpenFile(claudePath, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	_, err = f.WriteString(cognitionSection)
+	_, err = f.WriteString(renderPoolTokens(poolRoot, cognitionSection))
 	return err
 }
 
@@ -689,7 +876,7 @@ func appendCognitionSection(claudePath string) error {
 // skips files already present (fresh init), true re-emits unconditionally.
 // Upgrades go through UpgradeDoctrine, which protects local edits.
 func emitDoctrine(poolRoot string, overwrite bool) ([]string, error) {
-	dest := filepath.Join(poolRoot, DoctrineDir)
+	dest := DoctrinePath(poolRoot)
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return nil, err
 	}
@@ -710,23 +897,25 @@ func emitDoctrine(poolRoot string, overwrite bool) ([]string, error) {
 			return did, err
 		}
 		written = append(written, e.Name())
-		did = append(did, "doctrine: "+filepath.Join(DoctrineDir, e.Name()))
+		did = append(did, "doctrine: "+poolRel(poolRoot, DoctrineDirName, e.Name()))
 	}
 	// Stamp what we wrote so a later upgrade can tell pristine from edited.
 	return did, stampEmitted(dest, written)
 }
 
 // InitPool bootstraps a NEW, isolated mesh pool at poolRoot FROM THE BINARY
-// (ADR-0031): emits the doctrine docs from embed, creates the runtime dirs, and
-// writes the .agentmesh/pool.yaml marker. No git clone, no network. Aborts if
-// poolRoot is already a pool. name defaults to the pool dir's basename.
+// (ADR-0031): emits the doctrine docs from embed, creates the runtime dirs,
+// writes the pool/pool.yaml marker and the glossary, and makes pool/ a git repo
+// on main with its ignore file and a first commit in the user's identity
+// (ADR-0066). No git clone, no network. Aborts if poolRoot is already a pool.
+// name defaults to the pool dir's basename.
 func InitPool(poolRoot, name string, now time.Time) ([]string, error) {
 	abs, err := filepath.Abs(poolRoot)
 	if err != nil {
 		return nil, err
 	}
 	if IsPool(abs) {
-		return nil, fmt.Errorf("%s is already a pool (%s/ present) — aborting to avoid clobber", abs, PoolMarkerDir)
+		return nil, fmt.Errorf("%s is already a pool (%s/ present) — aborting to avoid clobber", abs, PoolDirName(abs))
 	}
 	if err := os.MkdirAll(abs, 0o755); err != nil {
 		return nil, err
@@ -751,6 +940,13 @@ func InitPool(poolRoot, name string, now time.Time) ([]string, error) {
 		return did, err
 	}
 	did = append(did, more...)
+
+	// The pool directory is a git repo (ADR-0066): same steps as `pool upgrade`.
+	repo, err := UpgradePoolDir(abs, now)
+	if err != nil {
+		return did, err
+	}
+	did = append(did, repo...)
 	return did, nil
 }
 
@@ -772,8 +968,8 @@ func IsLegacyLayout(poolRoot string) bool {
 }
 
 // MigratePool reconciles a legacy (pre-ADR-0038) pool to the consolidated
-// `.agentmesh/` layout: emits doctrine under `.agentmesh/doctrine`, moves
-// `.worktrees` → `.agentmesh/worktrees` and `.dispatch.*` → `.agentmesh/`, and
+// pool-directory layout: emits doctrine under `<pool dir>/doctrine`, moves
+// `.worktrees` → `<pool dir>/worktrees` and `.dispatch.*` → `<pool dir>/`, and
 // removes the legacy top-level `agent-mesh/` doctrine dir — but ONLY if it is not a
 // git repo (protects a pool where `agent-mesh/` is the actual meshctl clone, e.g.
 // a `~/agents` pool). Idempotent.
@@ -783,7 +979,7 @@ func MigratePool(poolRoot string) ([]string, error) {
 		return nil, err
 	}
 	if !IsPool(abs) {
-		return nil, fmt.Errorf("%s is not a pool (no %s/ marker)", abs, PoolMarkerDir)
+		return nil, fmt.Errorf("%s is not a pool (no %s/ marker)", abs, PoolDirName(abs))
 	}
 	var did []string
 
@@ -794,19 +990,19 @@ func MigratePool(poolRoot string) ([]string, error) {
 		did = append(did, dd...)
 	}
 
-	// Move runtime into .agentmesh/.
+	// Move runtime into the pool dir.
 	moves := []struct{ from, to string }{
-		{".worktrees", WorktreesDir},
-		{".dispatch.log", DispatchLog},
-		{".dispatch.count", DispatchCount},
-		{".dispatch.lock", DispatchLock},
+		{".worktrees", WorktreesPath(abs)},
+		{".dispatch.log", DispatchLogPath(abs)},
+		{".dispatch.count", DispatchCountPath(abs)},
+		{".dispatch.lock", DispatchLockPath(abs)},
 	}
 	for _, m := range moves {
 		src := filepath.Join(abs, m.from)
 		if _, err := os.Stat(src); err != nil {
 			continue
 		}
-		dst := filepath.Join(abs, m.to)
+		dst := m.to
 		if _, err := os.Stat(dst); err == nil {
 			continue // already migrated; leave both, non-destructive
 		}
@@ -816,19 +1012,19 @@ func MigratePool(poolRoot string) ([]string, error) {
 		if err := os.Rename(src, dst); err != nil {
 			return did, err
 		}
-		did = append(did, "moved "+m.from+" → "+m.to)
+		did = append(did, "moved "+m.from+" → "+poolRel(abs, filepath.Base(dst)))
 	}
 
 	// Retire the legacy top-level doctrine dir — but never delete a git repo.
 	legacy := filepath.Join(abs, LegacyDoctrineDir)
 	if dirExists(legacy) {
 		if dirExists(filepath.Join(legacy, ".git")) {
-			did = append(did, "kept "+LegacyDoctrineDir+"/ (it is a git repo — not a doctrine emit); doctrine now lives in "+DoctrineDir)
+			did = append(did, "kept "+LegacyDoctrineDir+"/ (it is a git repo — not a doctrine emit); doctrine now lives in "+poolRel(abs, DoctrineDirName))
 		} else if fileExists(filepath.Join(legacy, CommsFile)) {
 			if err := os.RemoveAll(legacy); err != nil {
 				return did, err
 			}
-			did = append(did, "removed legacy "+LegacyDoctrineDir+"/ (doctrine now in "+DoctrineDir+")")
+			did = append(did, "removed legacy "+LegacyDoctrineDir+"/ (doctrine now in "+poolRel(abs, DoctrineDirName)+")")
 		}
 	}
 	if len(did) == 0 {
@@ -837,7 +1033,7 @@ func MigratePool(poolRoot string) ([]string, error) {
 	return did, nil
 }
 
-// TeardownPool removes a pool's mesh infrastructure (the `.agentmesh/` dir + the
+// TeardownPool removes a pool's mesh infrastructure (the pool dir + the
 // legacy `agent-mesh/` doctrine dir if present and not a git repo) and deregisters
 // it. Agent repos are LEFT in place (they hold committed knowledge). With purge,
 // agent workspaces (`*` dirs holding an agent.yaml) are also removed — destructive.
@@ -847,7 +1043,7 @@ func TeardownPool(poolRoot string, purge bool) ([]string, error) {
 		return nil, err
 	}
 	if !IsPool(abs) {
-		return nil, fmt.Errorf("%s is not a pool (no %s/ marker)", abs, PoolMarkerDir)
+		return nil, fmt.Errorf("%s is not a pool (no %s/ marker)", abs, PoolDirName(abs))
 	}
 	var did []string
 	if purge {
@@ -865,10 +1061,10 @@ func TeardownPool(poolRoot string, purge bool) ([]string, error) {
 		_ = os.RemoveAll(legacy)
 		did = append(did, "removed "+LegacyDoctrineDir+"/")
 	}
-	if err := os.RemoveAll(filepath.Join(abs, PoolMarkerDir)); err != nil {
+	if err := os.RemoveAll(PoolDir(abs)); err != nil {
 		return did, err
 	}
-	did = append(did, "removed "+PoolMarkerDir+"/")
+	did = append(did, "removed "+PoolDirName(abs)+"/")
 	if ok, _ := ForgetPool(abs); ok {
 		did = append(did, "deregistered from the pool registry")
 	}
@@ -880,9 +1076,8 @@ func TeardownPool(poolRoot string, purge bool) ([]string, error) {
 // and it never clobbers an existing doctrine file or marker.
 func InitMesh(agentsDir string) ([]string, error) {
 	var did []string
-	// Runtime artifacts live outside any repo, directly in the container.
-	for _, d := range []string{WorktreesDir} {
-		p := filepath.Join(agentsDir, d)
+	// Runtime artifacts live outside any repo, inside the pool dir.
+	for _, p := range []string{WorktreesPath(agentsDir)} {
 		if !dirExists(p) {
 			if err := os.MkdirAll(p, 0o755); err != nil {
 				return did, err

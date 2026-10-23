@@ -24,4 +24,5 @@ tags: [...]
 
 External sources are versioned; without `effective:` a note silently goes stale, so
 `meshctl doctor` warns on any reference note missing it. Populate via a priming workflow
-(read the corpus → distill cited notes → `meshctl kb finish`).
+(read the corpus → distill cited notes → summary + confirmation round →
+`meshctl kb finish --summary-file <summary>`).

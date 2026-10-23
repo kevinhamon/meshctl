@@ -252,10 +252,16 @@ func Brief(agentsDir string, a *Agent, requestID string) (string, error) {
 	b.WriteString("## Write-back contract\n\n")
 	fmt.Fprintf(&b, "- Answer ONLY through `meshctl inbox respond %s --agent %s --status answered|needs-info|needs-human --response-file -` (response markdown on stdin).\n", id, a.Name)
 	fmt.Fprintf(&b, "- Not yours: `meshctl inbox decline %s --agent %s --reason \"…\" --redirect <owner>`.\n", id, a.Name)
+	b.WriteString(onlyThisRequest)
 	b.WriteString("- No file edits, commits, KB writes or dispatch (`meshctl ask|send`) — the gate denies them. Needs another agent or a new consequential decision ⇒ `needs-human` with the question and your recommendation.\n")
 	b.WriteString("- Finish with a short summary (status, one-paragraph answer, request path).\n")
 	return b.String(), nil
 }
+
+// onlyThisRequest keeps a consulted or delegated peer on the one request it
+// was handed (ADR-0073): the intake queue and its order belong to the human
+// in the owner's session.
+const onlyThisRequest = "- **Only this request.** No human is at your prompt to order a queue: work the one request you were given, claim or list nothing else, and put any decision you would ask the human for into `needs-human` as a decision round (`📝 **C<n> — <short title>**` … `➡️ ✅ Confirm`).\n"
 
 // writeWorkContract is the brief's contract for delegated work (ADR-0063):
 // the peer edits and commits as itself, inside its own workspace (or the
@@ -274,13 +280,17 @@ func writeWorkContract(b *strings.Builder, a *Agent, r *Request) {
 	} else {
 		b.WriteString("- **No workdirs** are declared for you: writes outside your workspace are denied. Work that needs a product repo ⇒ `needs-human` naming the repo.\n")
 	}
+	b.WriteString(onlyThisRequest)
 	b.WriteString("- **No dispatch**: no `meshctl ask|send|pool|update|session` and no Agent calls — the gate denies them. Needs another agent or a new consequential decision ⇒ `needs-human` with the question and your recommendation, then stop.\n")
 	fmt.Fprintf(b, "- Write the outcome back with `meshctl inbox respond %s --agent %s --status answered|needs-info|needs-human --response-file -`; not yours ⇒ `meshctl inbox decline %s --agent %s --reason \"…\" --redirect <owner>`.\n", r.ID, a.Name, r.ID, a.Name)
 	b.WriteString("- **End with a receipt** the caller can relay as-is: files changed per repo; commits and branches")
 	if r.Worktree != "" {
 		fmt.Fprintf(b, " (incl. `%s`, pending `meshctl work merge`)", workBranch(r.ID))
 	}
-	b.WriteString("; candidates or decisions filed in your KB; open questions for the human.\n")
+	b.WriteString("; each `Confirm:` commit a `kb finish` made (`meshctl memory sessions` lists them); candidates or decisions filed in your KB; open questions for the human.\n")
+	b.WriteString("- **A promotion ends in `needs-confirm`**: no human is at your prompt, so a `kb finish` that touches your current or log tier is not confirmed here — it stops and leaves the KB branch and worktree for your own session. Respond `needs-human` with a body opening `" + NeedsConfirmPrefix + "` carrying the confirmation round and your summary path, and list `needs-confirm` in the receipt. Never relay a confirmation. Candidates-only finishes land as usual.\n")
+	fmt.Fprintf(b, "- **Receipt lists outbound calls**: every outbound call your session made under a signed batch is audited in `%s` — list them; an outbound write you stopped at (delegated work never writes one) is listed as `needs-confirm` with the round and your summary path.\n",
+		filepath.Join(a.Dir(), MemoryDir, OutboundDir, "<session>.jsonl"))
 }
 
 // contextSection extracts the "## Context" section of a request body, or ""

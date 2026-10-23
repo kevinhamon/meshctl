@@ -64,8 +64,12 @@ _Avoid_: copy, cross-link, mirror
 The state in which the human has seen and agreed to a peer's intent, the grounding of its claims, and the precedent for its proposed pattern, before the peer acts.
 _Avoid_: alignment, sign-off, approval
 
+**Decision round**:
+The way an agent asks the human for any decision on proposed changes: one numbered item per change saying what will hold from now on and what no longer holds (or, for an action, what it will do and why), ending in a recommended confirm, answered for all at once or disputed item by item, in small batches, before the agent acts.
+_Avoid_: proposal dump, plan review, approval request
+
 **Confirmation round**:
-The read-out, in chat and before a promotion or outbound write, of what each entry will say from now on and what it no longer says, with its grounding and precedent, one item per entry, which the human confirms or disputes item by item; the record is the summary file and the permission prompt is only the signature.
+The decision round read out in chat before a promotion or outbound write, of what each entry will say from now on and what it no longer says, with its grounding and precedent, one item per entry, which the human confirms or disputes item by item; the record is the summary file and the permission prompt is only the signature.
 _Avoid_: the ask (that is the prompt), diff review, approval prompt
 
 **Precedent**:

@@ -101,8 +101,13 @@ func poolLevelHygiene(agentsDir string, now time.Time) []HygieneItem {
 		items = append(items, HygieneItem{Agent: "pool", Message: msg, Fix: fix})
 	}
 
+	// Pool repo nag (ADR-0066): manual by construction — meshctl never pushes.
+	if nag := PoolRepoNag(agentsDir); nag != "" {
+		pool(nag, nil)
+	}
+
 	// Doctrine leftovers.
-	doctrine := filepath.Join(agentsDir, DoctrineDir)
+	doctrine := DoctrinePath(agentsDir)
 	if entries, err := os.ReadDir(doctrine); err == nil {
 		for _, e := range entries {
 			name := e.Name()
@@ -116,19 +121,19 @@ func poolLevelHygiene(agentsDir string, now time.Time) []HygieneItem {
 				base := strings.TrimSuffix(name, upstreamSuffix)
 				pool(fmt.Sprintf("doctrine %s differs from this meshctl's copy — merge %s into it (diff -u %s %s), "+
 					"or `meshctl pool upgrade --force` to take meshctl's copy (yours is backed up); keep pool-specific "+
-					"additions in %s/%s, which upgrades never touch", base, name, filepath.Join(doctrine, base), p, DoctrineDir, DoctrineLocalFile), nil)
+					"additions in %s/%s, which upgrades never touch", base, name, filepath.Join(doctrine, base), p, poolRel(agentsDir, DoctrineDirName), DoctrineLocalFile), nil)
 			}
 		}
 	}
 
 	// Dispatch lock whose holder is gone.
-	lockPath := filepath.Join(agentsDir, DispatchLock)
+	lockPath := DispatchLockPath(agentsDir)
 	if dirExists(lockPath) && lockReclaimable(lockPath, now) {
 		pool("dispatch lock held by a dead process ("+readLockInfo(lockPath)+")", removeFix(lockPath))
 	}
 
 	// Orphan KB worktrees: no live session owns them.
-	wtRoot := filepath.Join(agentsDir, WorktreesDir)
+	wtRoot := WorktreesPath(agentsDir)
 	if entries, err := os.ReadDir(wtRoot); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
@@ -146,6 +151,17 @@ func poolLevelHygiene(agentsDir string, now time.Time) []HygieneItem {
 			if agent != "" && sessionAlive(AgentDir(agentsDir, agent), session, now) {
 				continue
 			}
+			// A KB branch holding commits main lacks (a needs-confirm park, or
+			// an unfinished session) may be real work: never reaped, and
+			// warned only past BranchMaxAge (spec decision 54).
+			if agent != "" {
+				if it, held := kbBranchHygiene(agentsDir, agent, session, wt, now); held {
+					if it.Message != "" {
+						items = append(items, it)
+					}
+					continue
+				}
+			}
 			who := agent
 			if who == "" {
 				who = "unknown agent"
@@ -155,7 +171,7 @@ func poolLevelHygiene(agentsDir string, now time.Time) []HygieneItem {
 				if agent != "" {
 					ad := AgentDir(agentsDir, agent)
 					_ = exec.Command("git", "-C", ad, "worktree", "remove", "--force", wt).Run()
-					_ = exec.Command("git", "-C", ad, "branch", "-D", kbBranch(session)).Run()
+					_ = exec.Command("git", "-C", ad, "branch", "-D", kbBranchFor(ad, session)).Run()
 					_ = exec.Command("git", "-C", ad, "worktree", "prune").Run()
 				}
 				return removeFix(wt)()
@@ -197,7 +213,7 @@ func workWorktreeHygiene(agentsDir, agent, wt, req string, now time.Time) (Hygie
 				_, _ = git(dir, "worktree", "prune")
 				return removeFix(wt)()
 			}}, true
-	case !merged && age > hygieneStateMaxAge:
+	case !merged && age > BranchMaxAge:
 		return HygieneItem{Agent: "pool", Message: fmt.Sprintf("delegated-work branch %s (%s) unmerged for %d days — review, then `meshctl work merge %s` or `--abort`",
 			branch, agent, int(age.Hours()/24), req)}, true
 	}
@@ -229,6 +245,23 @@ func agentHygiene(agentsDir string, a *Agent, now time.Time) []HygieneItem {
 				add("stale claim "+strings.TrimSuffix(e.Name(), ".md.claim")+" (session "+c.OwnerSession+" is gone)", removeFix(cp))
 			}
 		}
+	}
+
+	// Legacy KB branches (session/<id>, from before mesh/kb/) that no worktree
+	// references: renamed in place. One a worktree still holds is left for
+	// `kb finish`, which accepts either form.
+	for _, id := range legacyKBBranches(dir) {
+		if dirExists(worktreePath(agentsDir, a.Name, id)) {
+			continue
+		}
+		id := id
+		add("legacy KB branch "+legacyKBBranch(id)+" → "+KBBranch(id), func() error {
+			if !gitRefExists(dir, legacyKBBranch(id)) {
+				return nil
+			}
+			_, err := git(dir, "branch", "-m", legacyKBBranch(id), KBBranch(id))
+			return err
+		})
 	}
 
 	// Stale presence records.
@@ -265,10 +298,15 @@ func agentHygiene(agentsDir string, a *Agent, now time.Time) []HygieneItem {
 		add("retired "+MemoryDir+"/"+MemoryIndexFile+" (recall is computed live; the file is unused)", removeFix(p))
 	}
 
-	// Per-session state older than the window: nudge markers, rule acks.
+	// Per-session state older than the window: nudge markers, rule acks,
+	// session acks (pool_commit.go), outbound audit and pending-ask files
+	// (outbound_batch.go).
 	for _, spec := range []struct{ glob, what string }{
 		{filepath.Join(dir, MemoryDir, ".distill-nudge-*.json"), "distillation nudge marker"},
 		{filepath.Join(dir, MemoryDir, ruleAckDir, "*.json"), "KB-rule ack"},
+		{filepath.Join(dir, MemoryDir, SummaryDir, "*"+SessionAckFileExt), "session ack"},
+		{filepath.Join(dir, MemoryDir, OutboundDir, "*.jsonl"), "outbound audit"},
+		{filepath.Join(dir, MemoryDir, OutboundDir, "*.pending"), "outbound pending-ask"},
 	} {
 		matches, _ := filepath.Glob(spec.glob)
 		var old []string
@@ -364,5 +402,28 @@ const DoctrineLocalFile = "local.md"
 
 // DoctrineLocalPath returns the addendum path for a pool.
 func DoctrineLocalPath(agentsDir string) string {
-	return filepath.Join(agentsDir, DoctrineDir, DoctrineLocalFile)
+	return filepath.Join(DoctrinePath(agentsDir), DoctrineLocalFile)
+}
+
+// kbBranchHygiene classifies an unheld KB worktree whose branch carries
+// commits main lacks: held=true means it is not an orphan to reap; the item
+// is a manual warning once the worktree is older than BranchMaxAge (empty
+// Message before that).
+func kbBranchHygiene(agentsDir, agent, session, wt string, now time.Time) (HygieneItem, bool) {
+	dir := AgentDir(agentsDir, agent)
+	branch := kbBranchFor(dir, session)
+	out, err := git(dir, "rev-list", "--count", mainBranch(dir)+".."+branch)
+	if err != nil || strings.TrimSpace(out) == "0" {
+		return HygieneItem{}, false
+	}
+	info, err := os.Stat(wt)
+	if err != nil {
+		return HygieneItem{}, true
+	}
+	age := now.Sub(info.ModTime())
+	if age <= BranchMaxAge {
+		return HygieneItem{}, true
+	}
+	return HygieneItem{Agent: "pool", Message: fmt.Sprintf("KB branch %s (%s) unmerged for %d days — confirm it from %s's own session (`meshctl kb finish --agent %s --session %s`) or `--abort`",
+		branch, agent, int(age.Hours()/24), agent, agent, session)}, true
 }

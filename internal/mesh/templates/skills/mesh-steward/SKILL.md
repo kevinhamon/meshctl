@@ -86,7 +86,7 @@ Verify with `meshctl doctor` and show the new roster with `meshctl agent list`.
 Turn the tools/house-rules from the interview into a **tool reference** — pointers, not
 procedures (agents self-serve `<cmd> --help`; never paste help text). Two levels:
 
-- **Mesh-wide** → edit `.agentmesh/pool.yaml`, adding a `tools:` list (a commented example
+- **Mesh-wide** → edit `__POOL_DIR__/config.yaml`, adding a `tools:` list (a commented example
   is already in that file — uncomment + fill it). Every agent inherits these.
 - **Per-agent** → add a `tools:` list to that agent's `agent.yaml` (overrides the pool by
   `cmd`).
@@ -95,7 +95,7 @@ Schema per entry: `{ cmd, use, avoid, help }` — `use` = one-line purpose; `avo
 use this here (why)"; `help` defaults to `<cmd> --help`. Example:
 
 ```yaml
-# in .agentmesh/pool.yaml
+# in __POOL_DIR__/pool.yaml
 tools:
   - { cmd: tea, use: "Gitea CLI — prefer over gh for repos/PRs/releases", help: "tea --help" }
   - { cmd: gh, avoid: "this mesh uses tea" }
@@ -110,7 +110,8 @@ them on request. `meshctl doctor` will flag a referenced tool that isn't install
 - Record the mesh's purpose + roster rationale in **your** KB (an ADR in
   `knowledge/decisions/`, and the roster in `knowledge/system-map.md`) so the design is
   durable and greppable — this is how a later steward session (or a new community member)
-  gets oriented. Use `meshctl kb begin`/`kb finish`.
+  gets oriented. Use `meshctl kb begin`/`kb finish --summary-file <summary>`, after
+  reading the confirmation round to the user (the `mesh-cognition` skill has the format).
 - When the user returns to add or repurpose agents, re-interview only the delta, update
   the roster + KB, scaffold the new agents.
 - Point new humans here: "talk to the steward" is the mesh's front door.
@@ -181,7 +182,8 @@ including yours: your own wiring changed too — and suggest a smoke test in one
 should show its handoff at session start; on opencode V2 a hand-written file under
 `intake/` is refused by the mesh gate).
 
-**g. Record it.** Add an experience note to your KB (`meshctl kb begin`/`kb finish`):
+**g. Record it.** Add an experience note to your KB (`meshctl kb begin`, then the
+confirmation round, then `kb finish --summary-file <summary>`):
 versions before/after, conflicts and how they were merged, anything left for the user.
 Update your handoff (`meshctl handoff set`) if follow-ups remain.
 

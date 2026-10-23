@@ -33,6 +33,11 @@ type HookPayload struct {
 	// per-tool input shapes.
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
+	// ToolUseID ties a PostToolUse payload to its PreToolUse (Claude Code sets
+	// it on both): the outbound ack is recorded only for the call that was asked.
+	ToolUseID string `json:"tool_use_id"`
+	// PostToolUse only: the tool's raw result, kept raw for the same reason.
+	ToolResponse json.RawMessage `json:"tool_response"`
 	// Set when the hook fires inside a subagent (Claude Code adds them).
 	AgentID   string `json:"agent_id"`
 	AgentType string `json:"agent_type"`
@@ -47,6 +52,9 @@ type HookPayload struct {
 	// Work marks a peer doing delegated work (ADR-0063): the work gate
 	// applies instead of the consult contract.
 	Work bool `json:"-"`
+	// Harness is the --harness flag the hook ran under ("" ⇒ the agent's):
+	// the outbound gate denies where the harness has no ask form.
+	Harness string `json:"-"`
 }
 
 // payloadAgent resolves the agent a hook acts for: the explicit --agent
@@ -96,6 +104,16 @@ func HookPreToolUse(agentsDir string, p HookPayload, now time.Time) GateDecision
 		}
 	}
 	return GatePreToolUse(agentsDir, p)
+}
+
+// HookPostToolUse is the after-the-fact companion of the gate, wired on the
+// same matcher (GateHookMatcher) since wiring v5. It commits a successful
+// write under pool/ to the pool repo (ADR-0066, pool_commit.go). The per-batch
+// outbound ack (ADR-0068) records through RecordSessionAck here too. It never
+// emits output and never fails a turn.
+func HookPostToolUse(agentsDir string, p HookPayload, now time.Time) {
+	hookPoolCommit(agentsDir, p, now)
+	hookOutboundAck(agentsDir, p, now)
 }
 
 // hookAgent resolves the agent whose workspace the hook fired in, from the
@@ -150,15 +168,19 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 		b.WriteString(nag)
 		b.WriteString("\n\n")
 	}
-	// Delegated work (ADR-0063) done in a worktree while this session was
-	// live: it waits on the owner to merge it.
-	if nag := WorkNag(agentsDir, a); nag != "" {
-		b.WriteString(nag)
+	// Pool repo nag (ADR-0066): the same reminder for pool/, on every peer,
+	// until the human pushes. Stays with the repo warnings, above any
+	// pending-work block.
+	if nag := PoolRepoNag(agentsDir); nag != "" {
+		b.WriteString("⚠ " + nag)
 		b.WriteString("\n\n")
 	}
-	// Requester read-back: peers' answers/declines on requests this agent sent.
-	if sent, err := ListSent(agentsDir, a.Name, true); err == nil {
-		if md := SentMarkdown(sent); md != "" {
+	// Pending work (ADR-0071): what waits on the human — parked KB branches,
+	// open conflicts, own pending intake, read-back, delegated work, KB health.
+	// Only in the peer's own interactive session: omitted under dispatch
+	// depth (distil runs returned above).
+	if !PendingBlockOmitted() {
+		if md := PendingMarkdown(agentsDir, a, now); md != "" {
 			b.WriteString(md)
 			b.WriteString("\n\n")
 		}

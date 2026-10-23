@@ -62,6 +62,7 @@ const HandoffTemplate = `## Current State
 
 ## Open Threads
 - <blocker / pending decision / follow-up — who owns it> (or: none)
+- Deferred: <ids> (only when the human deferred pending work; drop this line otherwise)
 
 ## Pointers
 - <paths, commits, intake ids, URLs the next session needs> (or: none)

@@ -86,8 +86,10 @@ silently queries the WRONG namespace and returns nothing. Pass `--agent <agent>`
 
 - **Draft only — never promote.** The distiller never writes into `playbooks/`,
   `experience/`, `decisions/` (ADRs), `glossary.md`, or `direction.md`, and never runs
-  `meshctl kb finish`. Promotion of a candidate into truth stays a **reviewed** step
-  the owning agent does interactively (meshctl ADR-0016 review gate).
+  `meshctl kb finish`. Promotion of a candidate into truth stays a **reviewed** step:
+  the owning agent proposes it in an interactive session, reads the confirmation round,
+  and the human confirms at `kb finish` (meshctl ADR-0064). A headless run has no human
+  at its prompt, so it can land candidates only.
 - **Writes confined to `knowledge/candidates/` + `knowledge/pending-decisions.md`.**
 - **claude-mem is read-only** — mine *from* it, never edit it.
 - **Idempotent** — re-running must not duplicate an existing candidate; skip slugs that

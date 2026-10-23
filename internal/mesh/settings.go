@@ -11,7 +11,7 @@ import (
 // The mesh's Claude Code integration is wired per-agent into
 // <agent>/.claude/settings.json (committed, so it travels with the workspace) —
 // not into a machine-global settings file. Two things are wired:
-//   - the four hooks, each invoking `meshctl hook …` (resolved on $PATH, so
+//   - the five hooks, each invoking `meshctl hook …` (resolved on $PATH, so
 //     the wiring carries no machine-absolute path), and
 //   - a scoped set of Bash(meshctl <verb>:*) permissions so mesh messaging,
 //     inbox and cognition commands are preapproved — but not the destructive
@@ -36,7 +36,7 @@ var meshctlAllowRules = []string{
 	"Bash(meshctl ask:*)", "Bash(meshctl send:*)", "Bash(meshctl msg:*)",
 	"Bash(meshctl inbox:*)", "Bash(meshctl sent:*)",
 	"Bash(meshctl kb:*)", "Bash(meshctl memory:*)", "Bash(meshctl intuition:*)",
-	"Bash(meshctl handoff:*)", "Bash(meshctl session:*)",
+	"Bash(meshctl handoff:*)", "Bash(meshctl session:*)", "Bash(meshctl pending:*)",
 	"Bash(meshctl agent:*)",
 	"Bash(meshctl pool init:*)", "Bash(meshctl pool upgrade:*)", "Bash(meshctl pool list:*)",
 	"Bash(meshctl pool register:*)", "Bash(meshctl pool migrate:*)",
@@ -49,22 +49,54 @@ var meshctlAllowRules = []string{
 // tell you to re-onboard. Bump it whenever hookWiring OR the gate's deny policy
 // (gate.go) changes materially. v3: scoped allow rules, shell-write gate.
 // v4: the gate also sees Agent/Task delegations (ask before delegating work to
-// a state-mutating peer, ADR-0063).
-const MeshWiringVersion = 4
+// a state-mutating peer, ADR-0063). v5: the gate matcher actually matches MCP
+// tool names (`mcp__.*`, ADR-0062/0068 amendments), the PostToolUse hook is
+// wired on the same matcher, and the gate policy changes of the
+// shared-understanding spec ride the same bump — one re-onboard per peer.
+const MeshWiringVersion = 5
 
 const meshWiringStampFile = ".mesh-wiring.json"
 
+// GateHookMatcher is the tool-name matcher the gate hooks (PreToolUse and
+// PostToolUse) are wired with, in the per-agent settings and in the rendered
+// in-session peer definitions. Claude Code applies a matcher as a FULL regex
+// match on the tool name, so an MCP tool (`mcp__<server>__<tool>`) needs the
+// `mcp__.*` alternative: the bare `mcp__` shipped in v1..v4 never matched one
+// and the gate had never seen an MCP call (ADR-0062 and ADR-0068 amendments).
+// Doctor flags the bare form; see HasBareMCPMatcher.
+const GateHookMatcher = "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__.*|Agent|Task"
+
+// staleMCPAlternative is the matcher alternative that never matches an MCP
+// tool name under a full match.
+const staleMCPAlternative = "mcp__"
+
+// HasBareMCPMatcher reports whether a hook matcher carries the bare `mcp__`
+// alternative (one that full-matches nothing an MCP server names) rather than
+// `mcp__.*` or another prefix form.
+func HasBareMCPMatcher(matcher string) bool {
+	for _, alt := range strings.Split(matcher, "|") {
+		if strings.TrimSpace(alt) == staleMCPAlternative {
+			return true
+		}
+	}
+	return false
+}
+
 // hookWiring is the (event, subcommand) set the mesh installs. PreToolUse is the
-// fail-closed enforcement gate (gate.go); the other three are advisory. The gate
-// matcher fires on file-edit tools, Bash and every MCP tool — the gate denies
+// fail-closed enforcement gate (gate.go); PostToolUse is its after-the-fact
+// companion on the same matcher (the seam for pool commits and outbound acks:
+// ADR-0066, ADR-0068); the other three are advisory. The gate matcher fires on
+// file-edit tools, Bash, every MCP tool and delegations — the gate denies
 // claude-mem writes and competing-store paths, then checks the call against the
 // agent's KB rules (kbrules.go). v2 widened the matcher for the KB-rule gate;
-// v4 added Agent/Task for delegations.
+// v4 added Agent/Task for delegations; v5 fixed the MCP alternative and added
+// PostToolUse.
 var hookWiring = []struct{ event, sub, matcher string }{
 	{"SessionStart", "session-start", "startup|resume|clear"},
 	{"UserPromptSubmit", "user-prompt", ""},
 	{"SessionEnd", "session-end", ""},
-	{"PreToolUse", "pre-tool-use", "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__|Agent|Task"},
+	{"PreToolUse", "pre-tool-use", GateHookMatcher},
+	{"PostToolUse", "post-tool-use", GateHookMatcher},
 }
 
 // EnsureAgentSettings merges the mesh integration into <dest>/.claude/settings.json.
@@ -205,7 +237,8 @@ func ensureHooks(root map[string]any) []string {
 		entries, _ := hooks[w.event].([]any)
 		if hookCommandPresent(entries, cmdStr) {
 			// The mesh owns its own entry's matcher: upgrade it in place when
-			// hookWiring widens (v2: KB-rule gate needs Bash + all MCP tools).
+			// hookWiring widens (v2: KB-rule gate needs Bash + all MCP tools;
+			// v5: `mcp__.*` so MCP tool names actually match).
 			if w.matcher != "" && upgradeHookMatcher(entries, cmdStr, w.matcher) {
 				added = append(added, w.event+" (matcher)")
 			}

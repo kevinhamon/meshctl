@@ -32,8 +32,14 @@ type SessionRecord struct {
 	Commands     []string `json:"commands,omitempty"`
 	Tools        []string `json:"tools,omitempty"`
 	Commits      []string `json:"commits,omitempty"`
+	// Confirms lists the session's `Confirm:` commits on main (KBConfirmCommits):
+	// what this session's human confirmed into the KB.
+	Confirms []string `json:"confirms,omitempty"`
 	Handoff      string   `json:"handoff_ref,omitempty"`
 	Refs         []string `json:"refs,omitempty"`
+	// Outbound lists the outbound calls the session made under a signed
+	// batch (ADR-0068 audit, outbound_batch.go), in order.
+	Outbound []OutboundAuditEntry `json:"outbound,omitempty"`
 }
 
 func sessionsDirPath(agentDir string) string {
@@ -72,6 +78,7 @@ func CaptureSession(agent *Agent, transcriptPath, id, started string, now time.T
 	rec.Summary = extractiveSummary(rec)
 	// refs: scan the opening ask + commit subjects for PROJ-1234 / R-12 / ADR-0033.
 	rec.Refs = extractRefs(rec)
+	rec.Outbound = ReadOutboundAudit(agent.Dir(), id)
 
 	if err := writeSessionRecord(agent.Dir(), rec); err != nil {
 		return nil, err
@@ -186,6 +193,7 @@ func gitContext(dir, started string, rec *SessionRecord) {
 			rec.Commits = capSlice(rec.Commits, 20)
 		}
 	}
+	rec.Confirms = KBConfirmCommits(dir, rec.ID)
 	hp := filepath.Join(KnowledgeDir, HandoffFile)
 	if out, err := exec.Command("git", "-C", dir, "log", "-1", "--format=%h", "--", hp).Output(); err == nil {
 		if h := strings.TrimSpace(string(out)); h != "" {

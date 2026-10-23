@@ -35,6 +35,10 @@ type Request struct {
 	Mode     string `yaml:"mode,omitempty"`
 	Worktree string `yaml:"worktree,omitempty"`
 
+	// Set by `inbox triage apply` (ADR-0072): `<verdict> → <ref>`, so a
+	// triage close is told from an answer without parsing prose.
+	Triage string `yaml:"triage,omitempty"`
+
 	// path is the on-disk file (set on read); Body is the markdown after the
 	// frontmatter.
 	path string `yaml:"-"`

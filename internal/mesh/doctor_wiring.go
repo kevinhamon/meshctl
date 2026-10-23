@@ -45,12 +45,41 @@ func gateWiringFindings(a *Agent) []DoctorFinding {
 			Message: "PreToolUse enforcement gate not wired — doctrine is advisory only (a model can write the " +
 				"claude-mem/Claude memory store or hand-write intake). Run `meshctl agent onboard " + a.Name + "`"})
 	}
+	out = append(out, staleMatcherFindings(a, entries)...)
 	if v := WiringVersion(a.Dir()); v < MeshWiringVersion {
 		out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
 			Message: fmt.Sprintf("mesh wiring stale (v%d < v%d) — run `meshctl agent onboard %s` to pick up gate/policy changes",
 				v, MeshWiringVersion, a.Name)})
 	}
 	out = append(out, peerWiringFindings(a)...)
+	return out
+}
+
+// staleMatcherFindings flags a PreToolUse matcher carrying the bare `mcp__`
+// alternative. Claude Code full-matches the matcher against the tool name, so
+// that form never matches an MCP tool and the gate silently never sees an MCP
+// call — the defect the v5 wiring fixes (`mcp__.*`). An error, not a warning:
+// every MCP write is unexamined while it stands. The mesh's own entry is fixed
+// by re-onboard; a hand-added entry is named so a human can fix it.
+func staleMatcherFindings(a *Agent, entries []any) []DoctorFinding {
+	var out []DoctorFinding
+	for _, e := range entries {
+		em, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		m, _ := em["matcher"].(string)
+		if !HasBareMCPMatcher(m) {
+			continue
+		}
+		fix := "run `meshctl agent onboard " + a.Name + "`"
+		if !hookCommandPresent([]any{em}, "meshctl hook pre-tool-use") {
+			fix = "change it to `mcp__.*` by hand (not a mesh-managed entry)"
+		}
+		out = append(out, DoctorFinding{Agent: a.Name, Level: "error",
+			Message: "PreToolUse matcher `" + m + "` uses the bare `mcp__` alternative, which Claude Code (full regex match on " +
+				"the tool name) never matches against an MCP tool — the gate has not been seeing MCP calls; " + fix})
+	}
 	return out
 }
 
@@ -266,7 +295,7 @@ func opencodeGateFindings(a *Agent) []DoctorFinding {
 // a typo — it is an instruction that fails every time it is followed, and the
 // model reports the capability as unavailable rather than the flag as wrong.
 func doctrineFlagFindings(poolRoot string) []DoctorFinding {
-	dir := filepath.Join(poolRoot, DoctrineDir)
+	dir := DoctrinePath(poolRoot)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil

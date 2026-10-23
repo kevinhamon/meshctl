@@ -92,7 +92,7 @@ func TestKBRules_MatchesMCPArgsAndSkipsKBEdits(t *testing.T) {
 		t.Fatalf("nested MCP args must match, got %+v", d)
 	}
 	kbEdit := HookPayload{Cwd: a.Dir(), SessionID: "m2", ToolName: "Edit",
-		ToolInput: json.RawMessage(`{"file_path":` + strconv.Quote(filepath.Join(a.Dir(), KnowledgeDir, "experience/tokens.md")) + `,"new_string":"gitconfig"}`)}
+		ToolInput: json.RawMessage(`{"file_path":` + strconv.Quote(filepath.Join(a.Dir(), KnowledgeDir, "candidates/tokens.md")) + `,"new_string":"gitconfig"}`)}
 	if d := GatePreToolUse(dir, kbEdit); d.Deny {
 		t.Fatalf("editing the KB itself must not be gated, got %+v", d)
 	}
@@ -132,7 +132,7 @@ func TestSettings_UpgradesMeshMatcher(t *testing.T) {
 	}
 	b, _ := os.ReadFile(filepath.Join(dest, ".claude", "settings.json"))
 	s := string(b)
-	if !strings.Contains(s, `"Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__|Agent|Task"`) {
+	if !strings.Contains(s, `"`+GateHookMatcher+`"`) {
 		t.Fatalf("mesh matcher not upgraded:\n%s", s)
 	}
 	if !strings.Contains(s, "pr-review-gate.sh") || strings.Count(s, "meshctl hook pre-tool-use") != 1 {

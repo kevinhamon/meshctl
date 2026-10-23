@@ -93,12 +93,12 @@ func (r ConsolidateReport) Markdown() string {
 	section("Superseded links broken", "fix the `superseded_by:` / back-reference so history stays traceable", r.SupersededBroken)
 	section("Accepted decisions not landed in the docs they update", "rewrite each target doc to reflect the decision (then it is newer than the ADR)", r.Unlanded)
 	if r.StateMissing {
-		b.WriteString("## No state digest\n- knowledge/state.md does not exist\n  → write it: `meshctl state template`, fill it in, `meshctl state set <<'EOF' … EOF`\n\n")
+		b.WriteString("## No state digest\n- knowledge/state.md does not exist\n  → write it: `meshctl state template`, fill it in, `meshctl state set --summary-file <summary> <<'EOF' … EOF` (a promotion: write the summary and read the round first)\n\n")
 	}
-	section("State digest problems", "rewrite with `meshctl state set` (it refuses a digest that fails lint)", r.StateProblems)
-	section("Accepted decisions the state digest predates", "fold each into state.md (Now / Recently decided), then `meshctl state set`", r.NotInDigest)
+	section("State digest problems", "rewrite with `meshctl state set --summary-file <summary>` (it refuses a digest that fails lint)", r.StateProblems)
+	section("Accepted decisions the state digest predates", "fold each into state.md (Now / Recently decided), then `meshctl state set --summary-file <summary>`", r.NotInDigest)
 	section("Candidates older than 14 days", "judge each: promote into playbooks/experience/a decision, or delete it", r.AgedCandidates)
 	section("Handoff problems", "rewrite with `meshctl handoff set` — template sections, ≤40 lines", r.HandoffProblems)
-	b.WriteString("Work it off in a KB worktree: `meshctl kb begin` → edit → commit → `meshctl kb finish`. Digest and handoff go through `meshctl state set` / `meshctl handoff set`.\n")
+	b.WriteString("Work it off in a KB worktree: `meshctl kb begin` → edit → commit → summary + confirmation round → `meshctl kb finish --summary-file <summary>`. Digest and handoff go through `meshctl state set --summary-file <summary>` / `meshctl handoff set`.\n")
 	return b.String()
 }

@@ -156,23 +156,7 @@ func computeTopics(agent *Agent) (*MemoryIndex, error) {
 		rel, _ := filepath.Rel(root, p)
 		stem := strings.TrimSuffix(filepath.Base(p), ".md")
 		body := string(b)
-		// topics = front-matter tags ∪ H1/H2 headings ∪ filename stem
-		set := map[string]bool{}
-		for _, t := range frontMatterTags(body) {
-			set[t] = true
-		}
-		for _, m := range reHeading.FindAllStringSubmatch(body, -1) {
-			if t := normTopic(m[1]); t != "" {
-				set[t] = true
-			}
-		}
-		if t := normTopic(stem); t != "" {
-			set[t] = true
-		}
-		var ts []string
-		for t := range set {
-			ts = append(ts, t)
-		}
+		ts := entryTopics(stem, body)
 		mt := time.Time{}
 		if info != nil {
 			mt = info.ModTime()
@@ -251,6 +235,29 @@ func computeTopics(agent *Agent) (*MemoryIndex, error) {
 	}
 	sort.Slice(idx.Topics, func(i, j int) bool { return idx.Topics[i].Topic < idx.Topics[j].Topic })
 	return idx, nil
+}
+
+// entryTopics is one KB file's topic set: front-matter tags ∪ H1/H2
+// headings ∪ filename stem, normalized (normTopic), sorted.
+func entryTopics(stem, body string) []string {
+	set := map[string]bool{}
+	for _, t := range frontMatterTags(body) {
+		set[t] = true
+	}
+	for _, m := range reHeading.FindAllStringSubmatch(body, -1) {
+		if t := normTopic(m[1]); t != "" {
+			set[t] = true
+		}
+	}
+	if t := normTopic(stem); t != "" {
+		set[t] = true
+	}
+	ts := make([]string, 0, len(set))
+	for t := range set {
+		ts = append(ts, t)
+	}
+	sort.Strings(ts)
+	return ts
 }
 
 func mentionsInSources(tag string, sources []string) bool {

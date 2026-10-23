@@ -59,6 +59,11 @@ func TestPoolUpgrade_CheckPreviewsWithoutWriting(t *testing.T) {
 
 func TestPoolUpgrade_ApplyRewiresThenConverges(t *testing.T) {
 	pool, a := v1Pool(t)
+	// The apply path in order: pool directory (ADR-0066), doctrine, agents.
+	gitIdentity(t)
+	if _, err := UpgradePoolDir(pool, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := UpgradeDoctrine(pool, false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +92,7 @@ func TestPoolUpgrade_ApplyRewiresThenConverges(t *testing.T) {
 
 func TestPoolUpgrade_UnstampedDoctrineIsAConflictNotAnUpdate(t *testing.T) {
 	pool := meshRoot(t)
-	dest := filepath.Join(pool, DoctrineDir)
+	dest := DoctrinePath(pool)
 	os.MkdirAll(dest, 0o755)
 	os.WriteFile(filepath.Join(dest, "agent-comms.md"), []byte("old pool copy"), 0o644)
 	_, conflicts, err := planDoctrine(pool)

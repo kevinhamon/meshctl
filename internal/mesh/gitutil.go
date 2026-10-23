@@ -27,6 +27,37 @@ func gitHasRemote(dir string) bool {
 	return err == nil && strings.TrimSpace(string(out)) != ""
 }
 
+// gitDirtyPaths lists the porcelain status lines of dir's own repository (a
+// `.git` entry inside it), limited to paths when given: uncommitted changes,
+// untracked files. Nil when dir is not its own repo, the status fails, or the
+// tree is clean. A directory inside somebody else's work tree is not "a repo
+// with dirty paths" for this purpose: the pool must never be judged by the
+// state of a repo it merely sits in.
+func gitDirtyPaths(dir string, paths ...string) []string {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return nil
+	}
+	return gitStatusLines(dir, paths...)
+}
+
+// gitStatusLines is `git status --porcelain -- <paths>` in dir, one line per
+// changed path; nil on a clean tree or when the status fails. The caller
+// decides what counts as a repo (gitDirtyPaths: its own; gitDirty: any).
+func gitStatusLines(dir string, paths ...string) []string {
+	args := append([]string{"-C", dir, "status", "--porcelain", "--"}, paths...)
+	out, err := exec.Command("git", args...).Output()
+	if err != nil {
+		return nil
+	}
+	var lines []string
+	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if ln != "" {
+			lines = append(lines, ln)
+		}
+	}
+	return lines
+}
+
 // initAgentRepo inits a local git repo in an agent workspace if it isn't one
 // already, with a best-effort initial commit (tolerates missing git identity —
 // init still succeeds and the agent can commit later). Best-effort throughout:

@@ -116,7 +116,7 @@ func TestDoctrineFlag_DetectsNonexistentProjectFlag(t *testing.T) {
 	// call that follows it, and the model reports the capability as
 	// unavailable rather than the instruction as wrong.
 	pool := t.TempDir()
-	dir := filepath.Join(pool, DoctrineDir)
+	dir := DoctrinePath(pool)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestDoctrineFlag_DetectsNonexistentProjectFlag(t *testing.T) {
 
 func TestDoctrineFlag_CleanDoctrinePasses(t *testing.T) {
 	pool := t.TempDir()
-	dir := filepath.Join(pool, DoctrineDir)
+	dir := DoctrinePath(pool)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestDoctrineFlag_WarningAgainstTheFlagIsNotItselfAFlagged(t *testing.T) {
 	// the check. Otherwise fixing the doctrine leaves the warning permanently
 	// in place, which trains you to ignore doctor output.
 	pool := t.TempDir()
-	dir := filepath.Join(pool, DoctrineDir)
+	dir := DoctrinePath(pool)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -166,5 +166,76 @@ func TestDoctrineFlag_WarningAgainstTheFlagIsNotItselfAFlagged(t *testing.T) {
 	}
 	if fs := doctrineFlagFindings(pool); len(fs) != 0 {
 		t.Errorf("a warning against the flag should not be flagged, got %+v", fs)
+	}
+}
+
+// writeGateSettings writes a settings.json whose mesh PreToolUse entry carries
+// the given matcher, as a hand-edited or pre-v5 wiring would.
+func writeGateSettings(t *testing.T, dir, matcher string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := `{"hooks":{"PreToolUse":[{"matcher":"` + matcher + `","hooks":[{"type":"command","command":"meshctl hook pre-tool-use","timeout":10}]}]}}`
+	if err := os.WriteFile(filepath.Join(dir, ".claude", "settings.json"), []byte(s), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGateWiring_BareMCPMatcherIsAnError(t *testing.T) {
+	// Claude Code full-matches the matcher against the tool name, so the bare
+	// `mcp__` alternative never matches an MCP tool: the gate silently never
+	// sees MCP calls. A peer not yet re-onboarded must be visible.
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	stale := "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__|Agent|Task"
+	writeGateSettings(t, a.Dir(), stale)
+	fs := gateWiringFindings(a)
+	found := false
+	for _, f := range fs {
+		if strings.Contains(f.Message, "mcp__") && strings.Contains(f.Message, stale) {
+			found = true
+			if f.Level != "error" {
+				t.Fatalf("stale matcher must be an error, got %+v", f)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected a stale-matcher error naming %q, got %+v", stale, fs)
+	}
+	// Re-onboard clears it.
+	if _, err := EnsureAgentSettings(a.Dir()); err != nil {
+		t.Fatal(err)
+	}
+	if hasFinding(gateWiringFindings(a), "bare `mcp__`") {
+		t.Fatalf("re-onboarded agent must not report a stale matcher: %+v", gateWiringFindings(a))
+	}
+}
+
+func TestGateWiring_CurrentMatcherIsClean(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	if _, err := EnsureAgentSettings(a.Dir()); err != nil {
+		t.Fatal(err)
+	}
+	if fs := gateWiringFindings(a); hasFinding(fs, "mcp__") {
+		t.Fatalf("`mcp__.*` must not be flagged as the bare form: %+v", fs)
+	}
+}
+
+func TestGateWiring_StaleVersionNamesReonboard(t *testing.T) {
+	// One bump (v4 → v5) covers the matcher fix, the PostToolUse hook and the
+	// gate policy changes; doctor's warning drives exactly one re-onboard.
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	if _, err := EnsureAgentSettings(a.Dir()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(a.Dir(), ".claude", meshWiringStampFile), []byte(`{"version":4}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs := gateWiringFindings(a)
+	if !hasFinding(fs, "mesh wiring stale (v4 < v5)") || !hasFinding(fs, "meshctl agent onboard architect") {
+		t.Fatalf("expected a stale-wiring warning naming the re-onboard, got %+v", fs)
 	}
 }

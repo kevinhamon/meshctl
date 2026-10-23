@@ -6,7 +6,7 @@ self-contained Go binary — the tool of record. No daemon, no database, no serv
 state is plain files in git-tracked workspaces; the CLI just makes the operations one
 approvable command.
 
-- **Product:** *agent mesh* (the concept + its on-disk footprint — `.agentmesh/`, `agent-mesh/`).
+- **Product:** *agent mesh* (the concept + its on-disk footprint — the `pool/` repo, `*-agent` repos).
 - **Tool:** `meshctl` (the binary you run).
 - **Home:** `https://github.com/kevinhamon/meshctl`
 - **License:** Apache-2.0.
@@ -29,7 +29,7 @@ command you approve.
 
 | Term | What |
 |------|------|
-| **Pool** | An isolated mesh rooted at a directory, marked by `.agentmesh/pool.yaml`. All comms/roster/KB scope to the pool — cross-pool contact is structurally impossible. Create with `meshctl pool init`. |
+| **Pool** | An isolated mesh rooted at a directory, marked by `pool/pool.yaml`. `pool/` is a visible git repo holding the marker, doctrine and glossary (runtime state beside them, ignored); meshctl commits there, you push. A pool still on the hidden legacy directory keeps working until `meshctl pool upgrade` moves it. All comms/roster/KB scope to the pool — cross-pool contact is structurally impossible. Create with `meshctl pool init`. |
 | **Agent** | A sibling workspace in the pool: `agent.yaml` (identity/discovery), `intake/` (inbox), `knowledge/` (git-tracked KB), harness wiring, terminal identity. |
 | **Steward** | The onboarding-hub agent scaffolded into a fresh pool. It interviews you for the mesh's purpose and builds the agent roster. Your mesh's front door. |
 | **Harness** | The coding-agent runtime an agent runs under — `claude` (Claude Code) or `opencode`. `meshctl` renders hooks/skills into each harness's native form. |
@@ -62,7 +62,7 @@ Doctrine is embedded source: edit `internal/mesh/templates/doctrine/agent-comms.
 pool whose doctrine was edited locally keeps its copy, gets the new version as
 `<file>.upstream` to merge by hand, and the command exits non-zero (`--force` overwrites,
 backing each edited file up to `<file>.bak-<timestamp>`). Pool-specific doctrine belongs
-in `.agentmesh/doctrine/local.md`, which upgrades never touch.
+in `pool/doctrine/local.md`, which upgrades never touch.
 
 ## Quickstart — stand up a mesh
 
@@ -104,21 +104,26 @@ existing pool with `meshctl agent bootstrap`.
 ## Command surface (noun → verb)
 
 ```
-meshctl pool    init [path] | upgrade [--force] | list | teardown [--purge --yes] [--dry-run]
+meshctl pool    init [path] | upgrade [--check] [--force] [--doctrine-only] | list | teardown [--purge --yes] [--dry-run]
 meshctl agent   new <name> | onboard <name|path> | bootstrap | list | identity | brief --agent <peer> [--request <id>]
 meshctl msg     ask <target> <type> "…" [--in-session [--work] | --detach] | send <target> <type> "…"
-meshctl inbox   list | next [--claim] | claim <id> | release <id>
+meshctl inbox   list [--all] | next [--claim] | claim <id> | release <id>   # list: open queue, priority then age
                 respond <id> --status <s> --response "…" | decline <id> --reason "…" [--redirect <agent>]
                 archive <id> | --answered | --closed [--force]
+                triage [--peer <name>]   # worksheet over open requests; from a hub, the walk order
+                triage apply --report <file> <id>...   # close confirmed verdicts (≤5 ids; gate-asked)
 meshctl sent    [--all] | ack <id>...      # responses to requests you sent
 meshctl work    list [--agent <a>] [--json] | merge <id> [--abort]   # delegated-work branches
-meshctl kb      begin | finish [--abort] | consolidate [--json]
-meshctl memory  recall "<q>" [--budget N] | sessions
+meshctl pending [--all] [--agent <a>]   # the session-start pending-work block; --all per peer
+meshctl kb      begin | finish [--summary-file <summary>] [--abort] | consolidate [--json]
+                reconcile [--peer <name>]   # walk order, or a canonical peer's reconcile worksheet
+                confirm <path>[#<slug>]... --report <file> [--accept-ungrounded <path>]...   # ≤5 reviewed entries → ledger + Confirm: on main
+meshctl memory  recall "<q>" [--budget N] [--scope own|canonical] | sessions
 meshctl session start | end | list
 meshctl handoff show | template | set   (set reads the body from stdin; refuses a body that fails lint)
-meshctl state   show | template | set   (the ≤40-line current-state digest, injected at session start)
+meshctl state   show | template | set --summary-file <summary>   (the ≤40-line current-state digest, injected at session start; set is a promotion)
 meshctl intuition recall "<q>"
-meshctl hook    session-start | user-prompt | session-beat | session-end | pre-tool-use   (wired per-agent; not run by hand)
+meshctl hook    session-start | user-prompt | session-beat | session-end | pre-tool-use | post-tool-use   (wired per-agent; not run by hand)
 meshctl doctor  [--fix]              # manifests, wiring, KB consistency, pool hygiene
 meshctl ask … | send …               (top-level aliases for msg ask|send)
 ```
@@ -133,7 +138,7 @@ upgrade` runs the same repairs as its last step and ends with `pool clean ✓`, 
 exactly what still needs a human. Items that need a human are never edited by meshctl:
 a doctrine file you changed (merge the `.upstream` copy, or `--force` with a backup) and
 your own text that names the retired `agentmesh` command. Put pool-specific doctrine
-(house rules, the real roster, tool policy) in `.agentmesh/doctrine/local.md` — upgrades
+(house rules, the real roster, tool policy) in `pool/doctrine/local.md` — upgrades
 never touch it, agents read it first, and the core doctrine stays upgradable.
 
 **Updating meshctl.** `meshctl update` replaces the binary with the latest GitHub release
@@ -208,13 +213,13 @@ decisions and repo. The peer edits by its own conventions: KB writes through `kb
 begin|finish --agent <peer>`, path-limited commits in its workspace, and product repos it
 declares under `workdirs:` in `agent.yaml` (added to the caller's `additionalDirectories`).
 If the peer's own session is live, the request gets a worktree + branch
-(`.agentmesh/worktrees/<peer>-work-<id>`, `mesh/work/<id>`) so the two never share a
+(`pool/worktrees/<peer>-work-<id>`, `mesh/work/<id>`) so the two never share a
 checkout; the peer's own session lands it with `meshctl work merge <id>` (rebase + ff-only;
 `--abort` discards). The work-mode gate denies writes outside those roots, dispatch and
 `work merge`; delegating to a `mutates` peer asks the human once per delegation. The peer
 ends with a receipt for the caller to relay, and its stop is distilled into its own KB.
 `meshctl doctor` flags missing `-work` definitions and workdir grants; hygiene reaps
-work worktrees already merged by hand and reports branches unmerged for over a week.
+work worktrees already merged by hand and reports branches unmerged for over 14 days.
 
 **opencode V1 vs V2.** Both lines are supported under the one `opencode` harness; their
 plugin APIs are incompatible (V2 skips a V1 plugin with only a log warning). meshctl
@@ -240,31 +245,75 @@ Every agent maintains a git-tracked `knowledge/` KB in two tiers — a **current
   landed in the docs they `updates:` (a doctor error), decisions the `state.md` digest
   predates, candidates older than 14 days, a handoff or digest that fails lint. The agent
   works it off in a `kb begin`/`finish` worktree and rewrites the digest with
-  `meshctl state set`.
+  `meshctl state set --summary-file <summary>`.
 - **Episodic capture:** at session end the harness hook writes an extractive
   session-record (files touched, commands, tools, refs, commits, handoff) — no LLM.
 - **Intuition:** `meshctl intuition recall` / the per-prompt hook surface compact
   past-work pointers from the **owned engine** by default (session-records + git spine).
   An external episodic engine is optional (`MESH_INTUITION_ENGINE=…`).
 - **Distill:** turn recurring intuition into durable KB via `meshctl kb begin` → write a
-  candidate → consolidate → `meshctl kb finish`. See the `mesh-cognition` skill. The
+  candidate → consolidate → summary + confirmation round → `meshctl kb finish
+  --summary-file <summary>`. See the `mesh-cognition` skill. The
   boundary nudge (wind-down phrase or 8 prompts) is on for every agent; on Claude Code it
   spawns the scaffolded `.claude/agents/distiller.md` subagent, on opencode the session-end
   hook runs the distiller. Narrow it with `AGENT_MESH_DISTILL_NUDGE_AGENTS=a,b` or `none`.
 - **Handoff and state:** `meshctl handoff set` writes the resume point and `meshctl state
-  set` the current-state digest, both from a fixed template and both refusing a body that
+  set --summary-file <summary>` the current-state digest, both from a fixed template and both refusing a body that
   fails lint; both are injected at session start. `meshctl doctor` validates manifests +
   KB + harness wiring.
 
+### Shared understanding before truth — the confirmation flow
+
+Agents propose; only the human confirms. Before anything changes what other sessions treat
+as true, or leaves the mesh, the agent reaches **shared understanding** with the human:
+agreement to its intent, its grounding (cited, or marked *assumption*) and its precedent
+(cited, or marked *new*). The flow is the same for every gated write:
+
+1. **Summary.** The agent writes one file per session, `<peer>/.memory/confirm/<session>.md`
+   (Intent, Grounding, Precedent, Coherence when related canonical entries exist).
+2. **Confirmation round.** It reads that summary to the human in chat, one item per entry
+   (`📝 **C<n> — <entry>** (new|amended|retired)`, what it says from now on, what it no
+   longer says, grounding, precedent, `➡️ ✅ Confirm`). "yes" confirms; "C2 no: reason"
+   sends that entry back to candidates.
+3. **Signature.** It runs the command naming the summary; the PreToolUse gate asks, with the
+   summary as the ask text:
+   - `meshctl kb finish --summary-file <summary>` when the merge touches more than
+     `candidates/` (a promotion); the merge writes the content-hash ledger
+     (`knowledge/.confirmed.yaml`) and a `Confirm: <intent>` commit on main;
+   - `meshctl state set --summary-file <summary>` for the digest;
+   - `meshctl kb confirm <path>... --report <file>` for up to five existing entries a
+     reconcile report reviewed (`meshctl kb reconcile` writes the worksheet);
+   - `meshctl inbox triage apply --report <file> <id>...` for up to five intake requests the
+     triage pass judged closed (`meshctl inbox triage` writes the worksheet);
+   - a write to a surface the pool declares under `outbound:` in `pool/config.yaml`, asked
+     once per summary and audited per session (`hook post-tool-use` records the ack).
+4. **No human, no confirmation.** Headless runs and delegated work cannot confirm: a
+   promotion or an outbound write ends in `needs-confirm` (the KB branch is parked, the
+   response carries the round and the summary path) for the peer's own session to finish.
+
+Recall marks unconfirmed entries; `memory recall --scope canonical` also reads canonical
+peers' knowledge. Session start shows a `# Pending work` block (parked branches, open
+conflicts, inbox, read-back, delegated work, KB health; `meshctl pending [--all]` prints
+it); the agent offers triage now, a subset, or deferral, and a deferral is one
+`Deferred: <ids>` line in the handoff. On "check intake" the agent shows the queue
+(`meshctl inbox list`; `--all` for every status), proposes an order (priority, then age)
+and claims nothing until the human confirms or reorders; it then claims by id in that
+order (ADR-0073). Any decision the agent needs from the human is asked as a **decision
+round**: one `📝 **C<n> — <short title>**` item per change, `From now on it says:` /
+`It no longer says:` (or the action and why), `➡️ ✅ Confirm`, answered `yes` or
+`C<n> no: <reason>`. `meshctl pool upgrade --check` shows doctrine
+changes as a diff before `pool upgrade` commits them in `pool/` as
+`doctrine: upgrade to <version>`.
+
 Authoritative protocol: `internal/mesh/templates/doctrine/agent-comms.md` (emitted into
-each pool as `.agentmesh/doctrine/agent-comms.md`). Design rationale lives in `docs/`.
+each pool as `pool/doctrine/agent-comms.md`). Design rationale lives in `docs/`.
 
 ## Bootstrap a mesh from scratch (agent runbook)
 
 A from-zero procedure an agent (or human) can follow — no prior mesh required:
 
 1. **Build the tool.** Clone this repo; `task install` (or `go build -o ~/.local/bin/meshctl ./cmd/meshctl`). Confirm `meshctl --help`.
-2. **Create the pool.** `meshctl pool init <pool-dir> --name <name> [--harness opencode]`. This emits the doctrine, runtime dirs, the `.agentmesh/pool.yaml` marker, and a **steward** agent. All later `meshctl` commands run from inside the pool (cwd resolves the pool via the marker).
+2. **Create the pool.** `meshctl pool init <pool-dir> --name <name> [--harness opencode]`. This creates `pool/` as a git repo on `main` (doctrine, glossary, the `pool/pool.yaml` marker, an ignore file for runtime state, a first commit in your git identity) and a **steward** agent. All later `meshctl` commands run from inside the pool (cwd resolves the pool via the marker).
 3. **Design the roster.** Either run the steward under a harness (it runs the `mesh-steward` skill: interview → propose a small bounded roster → scaffold), or do it directly: for each agent,
    ```sh
    meshctl agent new <name> --title "…" --role "…" \
@@ -275,7 +324,7 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
 4. **Flesh each agent's `CLAUDE.md`** with its operating doctrine (the scaffold adds the intake + Cognition stanzas; add the role-specific substance).
 5. **Verify.** `meshctl doctor` (clean but for empty-KB warnings) and `meshctl agent list`.
 6. **Onboard an existing directory** into the mesh instead of creating fresh: `meshctl agent onboard <path>` (add-only; infers title/role; autodetects harness).
-7. **Operate.** Reach a peer with `meshctl msg send|ask`; process your inbox with `meshctl inbox next --claim`, answer with `meshctl inbox respond` (or `inbox decline --redirect` when it isn't yours), and read replies with `meshctl sent`; recall with `meshctl memory recall`; record decisions via `meshctl kb begin/finish`; leave a handoff with `meshctl handoff set`.
+7. **Operate.** Reach a peer with `meshctl msg send|ask`; on "check intake" read `meshctl inbox list` to the human (pending + in-progress, priority then age, a one-line ask each), propose an order and wait, then `meshctl inbox claim <id>` in the order they give, answer with `meshctl inbox respond` (or `inbox decline --redirect` when it isn't yours), and read replies with `meshctl sent`; recall with `meshctl memory recall`; record decisions via `meshctl kb begin/finish`; leave a handoff with `meshctl handoff set`.
 
 ## Repo layout
 
@@ -290,8 +339,9 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
 ## Conventions
 
 - A pool is a plain container of workspaces — not itself a git repo. `meshctl` and each
-  agent are independent repos cloned into it. Runtime artifacts (`.dispatch.*`,
-  `.worktrees/`, `.sessions/`, `.memory/`) live outside any repo and are git-ignored.
+  agent are independent repos cloned into it; `pool/` (doctrine, glossary, config) is its
+  own git repo. Runtime artifacts (`pool/dispatch.*`, `pool/worktrees/`, `.sessions/`,
+  `.memory/`) are git-ignored.
 - Prefer SSH git remotes.
 
 ## License

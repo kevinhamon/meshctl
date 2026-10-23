@@ -50,6 +50,10 @@ type Agent struct {
 	Harness string `yaml:"harness,omitempty"`
 	// Tools are agent-specific tool references (ADR-0042), merged over the pool's.
 	Tools []ToolRef `yaml:"tools,omitempty"`
+	// Knowledge is this peer's knowledge kind (ADR-0069): canonical |
+	// perspective. Empty ⇒ the pool config's default; read it through
+	// EffectiveKnowledge, never directly.
+	Knowledge string `yaml:"knowledge,omitempty"`
 
 	// dir is the on-disk workspace directory this manifest was loaded from.
 	dir string `yaml:"-"`
@@ -177,7 +181,7 @@ func ScanAgents(agentsDir string) (agents []*Agent, loadErrs map[string]error, e
 // Matches against the real agent list with longest-prefix wins, so agent names
 // containing "-" resolve correctly against the "<agent>-<session>" worktree name.
 func AgentFromWorktreePath(agentsDir, cwd string) string {
-	rel, err := filepath.Rel(filepath.Join(agentsDir, WorktreesDir), cwd)
+	rel, err := filepath.Rel(WorktreesPath(agentsDir), cwd)
 	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
 		return "" // cwd is not inside .worktrees
 	}
@@ -220,6 +224,20 @@ func ValidName(kind, s string) error {
 	return nil
 }
 
+// ValidAgentName is ValidName for a peer name, which additionally may not be
+// the reserved owner `pool` (ADR-0066): `mesh://pool/...` must always mean the
+// pool itself, and on a case-folding filesystem `Pool/` would collide with the
+// pool directory, so the comparison ignores case.
+func ValidAgentName(name string) error {
+	if err := ValidName("agent name", name); err != nil {
+		return err
+	}
+	if strings.EqualFold(name, ReservedOwner) {
+		return fmt.Errorf("agent name %q is reserved: %q is the pool itself (mesh://%s/...) — pick another name", name, ReservedOwner, ReservedOwner)
+	}
+	return nil
+}
+
 // FindAgent loads a single agent by name; error if its manifest is missing.
 func FindAgent(agentsDir, name string) (*Agent, error) {
 	if err := ValidName("agent name", name); err != nil {
@@ -239,6 +257,9 @@ func (a *Agent) Validate() []string {
 	if a.Name == "" {
 		problems = append(problems, "name is empty")
 	}
+	if a.Name != "" && strings.EqualFold(a.Name, ReservedOwner) {
+		problems = append(problems, fmt.Sprintf("name %q is reserved: %q is the pool itself (mesh://%s/...) — rename the peer", a.Name, ReservedOwner, ReservedOwner))
+	}
 	if a.dir != "" && a.Name != "" && filepath.Base(a.dir) != a.Name {
 		problems = append(problems, fmt.Sprintf("name %q does not match directory %q", a.Name, filepath.Base(a.dir)))
 	}
@@ -254,6 +275,9 @@ func (a *Agent) Validate() []string {
 	}
 	if a.Badge.Label == "" {
 		problems = append(problems, "badge.label is empty")
+	}
+	if !ValidKnowledgeKind(a.Knowledge) {
+		problems = append(problems, knowledgeKindProblem(a.Knowledge))
 	}
 	return problems
 }

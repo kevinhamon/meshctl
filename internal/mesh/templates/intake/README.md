@@ -1,6 +1,6 @@
 # Intake — inbound requests to __NAME__
 
-Inbox for requests from the user and sibling agents. Canonical protocol: `.agentmesh/doctrine/agent-comms.md`.
+Inbox for requests from the user and sibling agents. Canonical protocol: `../__POOL_DIR__/doctrine/agent-comms.md`.
 
 ## Lifecycle
 

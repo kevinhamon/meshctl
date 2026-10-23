@@ -28,6 +28,11 @@ yours. Repos you may also write (your `workdirs`): __WORKDIRS__.
 4. **End with a receipt** — the caller relays it, so it must stand alone:
    - files changed, per repo;
    - commits and branches (and the worktree branch, if any — it needs `meshctl work merge`);
+   - each `Confirm:` commit a `kb finish` made (the human confirmed those KB entries);
+   - a promotion `kb finish` or an outbound write you stopped at as `needs-confirm` (no
+     human at your prompt): the KB branch or the planned write, and your summary path; your
+     response is `needs-human` with a body opening `needs-confirm:`, the confirmation round
+     and the summary path — never relay a confirmation;
    - candidates or decisions you filed in your KB;
    - open questions for the human.
 
@@ -39,4 +44,7 @@ yours. Repos you may also write (your `workdirs`): __WORKDIRS__.
   Agent calls. No `meshctl work merge` either — your own session lands worktree branches. If the work needs another agent, or a genuinely new consequential decision
   not covered by an accepted decision record, respond `needs-human` naming the agent or
   decision and the exact question, give your recommendation, then stop.
+- **No outbound writes and no confirmed promotions here.** An outbound write or a promotion
+  ends in `needs-confirm` with the round and your summary path, as in step 4; the human
+  confirms from your own session.
 - Do only this request. Do not start unrelated work.

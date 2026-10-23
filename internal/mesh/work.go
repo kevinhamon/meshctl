@@ -14,7 +14,7 @@ import (
 // work.go — delegated-work worktrees (ADR-0063). When a hub session delegates
 // work to a peer whose own session is live, the peer must not edit the checkout
 // that session holds: `ask --in-session --work` gives the request its own
-// worktree + branch (<pool>/.agentmesh/worktrees/<peer>-work-<reqid>, branch
+// worktree + branch (<pool dir>/worktrees/<peer>-work-<reqid>, branch
 // mesh/work/<reqid>), and the peer's owner later lands it with `work merge`,
 // the same rebase + ff-only path as `kb finish`.
 
@@ -28,7 +28,7 @@ const WorkBranchPrefix = "mesh/work/"
 func workBranch(reqID string) string { return WorkBranchPrefix + reqID }
 
 func workWorktreePath(agentsDir, peer, reqID string) string {
-	return filepath.Join(agentsDir, WorktreesDir, peer+PeerWorkSuffix+"-"+reqID)
+	return filepath.Join(WorktreesPath(agentsDir), peer+PeerWorkSuffix+"-"+reqID)
 }
 
 // workWorktreeReq returns the request id when name is a delegated-work
@@ -48,7 +48,7 @@ func WorkBegin(agentsDir string, peer *Agent, reqID string) (string, error) {
 	if dirExists(wt) {
 		return wt, nil
 	}
-	if err := os.MkdirAll(filepath.Join(agentsDir, WorktreesDir), 0o755); err != nil {
+	if err := os.MkdirAll(WorktreesPath(agentsDir), 0o755); err != nil {
 		return "", err
 	}
 	branch := workBranch(reqID)
@@ -79,7 +79,7 @@ type PendingWork struct {
 // workWorktrees scans the pool's worktree dir for delegated-work worktrees,
 // optionally of one agent. No git calls — cheap enough for session start.
 func workWorktrees(agentsDir, agent string) []PendingWork {
-	root := filepath.Join(agentsDir, WorktreesDir)
+	root := WorktreesPath(agentsDir)
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil

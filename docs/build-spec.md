@@ -78,21 +78,24 @@ user whether that counts as mutation), plus domain experts (e.g. a database expe
 
 ### `meshctl pool init [path]` — binary-native pools
 - `meshctl pool init <path>` creates a **new isolated pool** at `<path>` **from the
-  binary** — emits the doctrine (`.agentmesh/doctrine/{agent-comms.md,distiller.md}`)
-  from `go:embed`, creates runtime dirs (all under `.agentmesh/`), writes the
-  `.agentmesh/pool.yaml` marker, and scaffolds a `steward-agent`. **No git
-  clone, no network.** `--name` sets pool identity; `--no-steward` skips the steward.
+  binary** — emits the doctrine (`pool/doctrine/{agent-comms.md,distiller.md}`)
+  from `go:embed`, creates runtime dirs (all under `pool/`), writes the
+  `pool/pool.yaml` marker and `pool/glossary.md`, makes `pool/` a git repo on `main` with an
+  ignore file (dispatch runtime files, worktrees) and a first commit in the user's git identity
+  (ADR-0066), and scaffolds a `steward-agent`. **No git clone, no network.** `--name` sets pool identity; `--no-steward` skips the steward.
 - `meshctl pool init` (no path) targets the **current directory**: repairs it
   if already a pool, else creates one there — never falls back to `~/agents`.
 - `meshctl pool upgrade` refreshes the embedded doctrine without clobbering local edits:
-  `.agentmesh/doctrine/.emitted.json` records each file's hash as meshctl wrote it; a file
+  `pool/doctrine/.emitted.json` records each file's hash as meshctl wrote it; a file
   whose hash differs (or an unstamped file that differs from the embedded copy) is left
   alone, the new version written as `<file>.upstream`, and the command exits 1.
-  `--force` backs edited files up to `<file>.bak-<timestamp>` and overwrites; `pool migrate` reconciles a
-  legacy (pre-`.agentmesh/`) layout to `.agentmesh/`.
+  `--force` backs edited files up to `<file>.bak-<timestamp>` and overwrites. Before the doctrine step,
+  `pool upgrade` migrates a legacy hidden `.agentmesh/` pool directory to `pool/` (rename, `git init`
+  on `main`, ignore file, first commit with the user's identity); `--check` previews those steps too.
+  `pool migrate` reconciles the older pre-consolidation layout into the pool directory.
 
-Pool detection (`AgentsDir`) resolves the root by the `.agentmesh/` marker dir
-(preferred), else the legacy `agent-mesh/agent-comms.md` (back-compat), else
+Pool detection (`AgentsDir`) resolves the root by the `pool/pool.yaml` marker (or the
+legacy `.agentmesh/` dir until upgraded), else the legacy `agent-mesh/agent-comms.md` (back-compat), else
 `$AGENTS_DIR`, else `~/agents`. Doctrine source of truth is
 `internal/mesh/templates/doctrine/{agent-comms.md,distiller.md}` — embedded source,
 edited in place (go:embed cannot reach outside the package, so it lives there).

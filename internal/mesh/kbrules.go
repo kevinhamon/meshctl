@@ -244,5 +244,5 @@ func gateKBRules(agentsDir string, p HookPayload) GateDecision {
 		acks[r.Path] = true
 	}
 	saveRuleAcks(ackPath, acks)
-	return GateDecision{Deny: true, Reason: b.String()}
+	return GateDecision{Deny: true, Check: GateCheckKBRule, Reason: b.String()}
 }

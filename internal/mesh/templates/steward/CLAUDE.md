@@ -27,12 +27,12 @@ merge any doctrine conflicts with the user, verify with `meshctl doctor`.
 
 You also own the mesh's **tool reference** (meshctl ADR-0042): when the user names tools or house
 rules ("use `tea` not `gh`", a bespoke command), add them — mesh-wide in
-`.agentmesh/pool.yaml` `tools:`, or per-agent in that agent's `agent.yaml` `tools:` (schema
+`__POOL_DIR__/config.yaml` `tools:`, or per-agent in that agent's `agent.yaml` `tools:` (schema
 `{ cmd, use, avoid, help }`). Pointers only; agents self-serve `<cmd> --help`.
 
 ## How this mesh works (explain to newcomers when asked)
 
-- **Pool** = an isolated mesh at a directory (marker `.agentmesh/pool.yaml`). Create one
+- **Pool** = an isolated mesh at a directory (marker `__POOL_DIR__/pool.yaml`). Create one
   with `meshctl pool init <path>`.
 - **Agents** = sibling workspaces; each has an `agent.yaml` (identity/discovery), an
   `intake/` inbox, a `knowledge/` KB, and harness wiring (claude or opencode).
@@ -42,8 +42,7 @@ rules ("use `tea` not `gh`", a bespoke command), add them — mesh-wide in
   session-records, distills durable knowledge, and writes a handoff. See the
   `mesh-cognition` skill.
 
-Authoritative protocol: `.agentmesh/doctrine/agent-comms.md` (or this pool's
-`.agentmesh/doctrine/agent-comms.md`).
+Authoritative protocol: this pool's `../__POOL_DIR__/doctrine/agent-comms.md`.
 
 ## Boundaries
 

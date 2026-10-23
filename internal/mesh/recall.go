@@ -38,6 +38,15 @@ type RecallHit struct {
 	Score  int      `json:"score"`
 	Tier   string   `json:"tier,omitempty"` // kb hits: "current" | "log" | "inbox"
 	Body   string   `json:"body,omitempty"` // RecallWithBodies: the source text, within budget
+	// Via names the source peer of a hit that is not the calling peer's own:
+	// ReservedOwner for the pool glossary (ADR-0066), a peer name for canonical
+	// scope (ADR-0065). "" is the peer's own knowledge. Where[0] of a via hit
+	// is the `mesh://` reference, not a workspace-relative path.
+	Via string `json:"via,omitempty"`
+	// Confirmed is false for a hit the human has not agreed to (ADR-0067): an
+	// own entry whose hash does not match the peer's ledger (no ledger ⇒
+	// unconfirmed), any inbox hit, or a pool file with uncommitted changes.
+	Confirmed bool `json:"confirmed"`
 }
 
 // KB tiers.
@@ -77,16 +86,27 @@ func bestTier(sources []string) string {
 	return best
 }
 
-// tierBonus is the ranking prior per tier: a current-tier match outranks the
-// same match in the log, which outranks it in the inbox.
+// tierBonus is the ranking prior per tier for confirmed knowledge: a
+// current-tier match outranks the same match in the log, which outranks it in
+// the inbox. Unconfirmed knowledge takes the slot between log and inbox
+// (rankBonus).
 func tierBonus(tier string) int {
 	switch tier {
 	case TierCurrent:
-		return 2
+		return 3
 	case TierLog:
-		return 1
+		return 2
 	}
 	return 0
+}
+
+// rankBonus is tierBonus for a hit that may be unconfirmed (ADR-0067): an
+// unconfirmed current or log hit ranks below confirmed log and above inbox.
+func rankBonus(tier string, confirmed bool) int {
+	if !confirmed && (tier == TierCurrent || tier == TierLog) {
+		return 1
+	}
+	return tierBonus(tier)
 }
 
 // refsPrior caps the cross-reference boost: a heavily cited decision is
@@ -147,6 +167,7 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 	// KB topics (authoritative; live). Inactive decisions are already gone
 	// (computeTopics drops them); tiers rank what is left.
 	if idx, err := computeTopics(agent); err == nil && includeKB {
+		ledger := newLedgerCheck(agent.Dir()) // ADR-0067: no ledger ⇒ unconfirmed
 		for _, t := range idx.Topics {
 			s := len(tokens) == 0 // empty query → include, score 0
 			score := 0
@@ -156,15 +177,21 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 			}
 			if s || score > 0 {
 				tier := bestTier(t.Sources)
+				confirmed := ledger.topicConfirmed(t.Topic, t.Sources)
 				if score > 0 {
-					score = score*3 + tierBonus(tier) + refsPrior(t.Refs)
+					score = score*3 + rankBonus(tier, confirmed) + refsPrior(t.Refs)
 				}
 				hits = append(hits, RecallHit{
 					Kind: "kb", Title: t.Topic, Where: t.Sources,
-					Date: t.Freshness, Score: score, Tier: tier,
+					Date: t.Freshness, Score: score, Tier: tier, Confirmed: confirmed,
 				})
 			}
 		}
+	}
+	// The pool glossary: a current-tier source for every peer, via pool
+	// (ADR-0066). Independent of the peer's own knowledge/ being present.
+	if includeKB {
+		hits = append(hits, poolGlossaryHits(filepath.Dir(agent.Dir()), tokens)...)
 	}
 
 	// Session-records (episodic capture).
@@ -195,7 +222,7 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 		}
 		hits = append(hits, RecallHit{
 			Kind: "session", Title: truncate(title, 120), Where: where,
-			Date: r.Ended, Detail: detail, Score: score,
+			Date: r.Ended, Detail: detail, Score: score, Confirmed: true,
 		})
 	}
 
@@ -221,25 +248,54 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 // hit whose source does not fit is left as a pointer; nothing is truncated
 // mid-file except the last one that fits partially. Log-tier and inbox hits
 // stay pointers: history is for following up, not for reading by default.
+// Search is the peer's own; an inlined body's `mesh://` references are
+// followed one hop to canonical targets within the same budget (ADR-0065).
 func RecallWithBodies(agent *Agent, query string, limit, budgetTokens int) ([]RecallHit, error) {
 	hits, err := Recall(agent, query, limit)
 	if err != nil || budgetTokens <= 0 {
 		return hits, err
 	}
+	inlineBodies(agent, hits, budgetTokens, oneHopExpander(agent))
+	return hits, nil
+}
+
+// inlineBodies fills Body for current-tier kb hits in rank order until
+// budgetTokens (≈4 chars per token) is spent. expand, when set, may append
+// text to a body before it is budgeted (one-hop references).
+func inlineBodies(agent *Agent, hits []RecallHit, budgetTokens int, expand func(h *RecallHit, body string, remaining int) string) {
+	root := filepath.Dir(agent.Dir())
 	remaining := budgetTokens * 4
 	for i := range hits {
 		h := &hits[i]
 		if h.Kind != "kb" || h.Tier != TierCurrent || len(h.Where) == 0 || remaining <= 0 {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(agent.Dir(), h.Where[0]))
-		if err != nil {
-			continue
+		var body string
+		if h.Via != "" {
+			// A via hit points at a knowledge reference; the resolver reads the
+			// entry (a glossary term, a heading section, a peer's file), never
+			// anything outside the owner's knowledge.
+			text, ok, err := ResolveMeshRef(root, h.Where[0])
+			if err != nil || !ok {
+				continue
+			}
+			_, body = splitFrontmatter(text)
+		} else {
+			b, err := os.ReadFile(filepath.Join(agent.Dir(), h.Where[0]))
+			if err != nil {
+				continue
+			}
+			_, body = splitFrontmatter(string(b))
 		}
-		_, body := splitFrontmatter(string(b))
 		body = strings.TrimSpace(body)
 		if body == "" {
 			continue
+		}
+		if !h.Confirmed {
+			body = hypothesisPrefix + body // ADR-0067: a proposal, not truth
+		}
+		if expand != nil && len(body) < remaining {
+			body = expand(h, body, remaining-len(body))
 		}
 		if len(body) > remaining {
 			if remaining < 400 {
@@ -250,8 +306,10 @@ func RecallWithBodies(agent *Agent, query string, limit, budgetTokens int) ([]Re
 		h.Body = body
 		remaining -= len(body)
 	}
-	return hits, nil
 }
+
+// hypothesisPrefix opens the inlined body of an unconfirmed hit (ADR-0067).
+const hypothesisPrefix = "_hypothesis_\n"
 
 // RecallMarkdown renders hits as a list; a hit with a body gets it inlined
 // under the pointer.
@@ -261,6 +319,12 @@ func RecallMarkdown(hits []RecallHit) string {
 		fmt.Fprintf(&b, "- [%s", h.Kind)
 		if h.Tier != "" {
 			fmt.Fprintf(&b, "/%s", h.Tier)
+		}
+		if h.Via != "" {
+			fmt.Fprintf(&b, "·via %s", h.Via)
+		}
+		if h.Kind == "kb" && !h.Confirmed && h.Tier != TierInbox {
+			b.WriteString("·unconfirmed") // the inbox is unconfirmed by tier
 		}
 		fmt.Fprintf(&b, "] %s", h.Title)
 		if len(h.Where) > 0 {
@@ -313,7 +377,7 @@ func gitSpineHits(agent *Agent, tokens []string) []RecallHit {
 		}
 		hits = append(hits, RecallHit{
 			Kind: "commit", Title: truncate(subj, 120),
-			Where: []string{sha}, Date: date, Score: score,
+			Where: []string{sha}, Date: date, Score: score, Confirmed: true,
 		})
 	}
 	return hits

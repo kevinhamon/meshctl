@@ -1,11 +1,8 @@
 package mesh
 
 import (
-	"os"
 	"os/exec"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // Tool reference (ADR-0042) is the capability-awareness layer — distinct from
@@ -21,26 +18,10 @@ type ToolRef struct {
 	Help  string `yaml:"help,omitempty" json:"help,omitempty"`   // self-serve help cmd (default: "<cmd> --help")
 }
 
-// PoolConfig is the parsed .agentmesh/pool.yaml (identity + mesh-wide policy).
-type PoolConfig struct {
-	Name            string    `yaml:"name"`
-	Created         string    `yaml:"created"`
-	DoctrineVersion string    `yaml:"doctrine_version"`
-	Tools           []ToolRef `yaml:"tools"`
-}
-
-// LoadPoolConfig reads .agentmesh/pool.yaml. Missing/invalid ⇒ empty config.
-func LoadPoolConfig(poolRoot string) PoolConfig {
-	var c PoolConfig
-	if b, err := os.ReadFile(PoolMarkerPath(poolRoot)); err == nil {
-		_ = yaml.Unmarshal(b, &c)
-	}
-	return c
-}
-
 // EffectiveTools merges mesh-wide (pool) tool refs with an agent's own — agent
 // entries override pool entries with the same cmd (agent wins). Order: pool refs
-// first, then agent-only refs.
+// first, then agent-only refs. The pool list is PoolConfig.Tools (config file
+// plus the identity-file transition leftovers; see pool_config.go).
 func EffectiveTools(pool PoolConfig, agent *Agent) []ToolRef {
 	byCmd := map[string]ToolRef{}
 	var order []string

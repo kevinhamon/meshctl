@@ -350,6 +350,77 @@ func kbFileDate(agentDir, rel string) (time.Time, bool) {
 	return info.ModTime(), true
 }
 
+// kbDirDates dates every file directly inside a KB folder exactly as kbFileDate
+// dates one, but from one `git log` and one `git status` over the folder instead of
+// two git calls per file: the pending block and doctor read every candidate.
+func kbDirDates(agentDir, dirRel string) map[string]time.Time {
+	entries, err := os.ReadDir(filepath.Join(agentDir, KnowledgeDir, dirRel))
+	if err != nil {
+		return nil
+	}
+	mtimes := map[string]time.Time{}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			mtimes[e.Name()] = info.ModTime()
+		}
+	}
+	if !dirExists(filepath.Join(agentDir, ".git")) {
+		return mtimes
+	}
+	prefix := filepath.ToSlash(filepath.Join(KnowledgeDir, dirRel)) + "/"
+	// Newest commit first, so the first commit naming a file is its last change.
+	committed := map[string]time.Time{}
+	if out, err := exec.Command("git", "-C", agentDir, "-c", "core.quotePath=false", "log",
+		"--no-renames", "--format=%x01%cI", "--name-only", "--", prefix).Output(); err == nil {
+		var at time.Time
+		for _, line := range strings.Split(string(out), "\n") {
+			if stamp, ok := strings.CutPrefix(line, "\x01"); ok {
+				at, _ = time.Parse(time.RFC3339, strings.TrimSpace(stamp))
+				continue
+			}
+			name, ok := strings.CutPrefix(line, prefix)
+			if !ok || name == "" || strings.Contains(name, "/") || at.IsZero() {
+				continue
+			}
+			if _, seen := committed[name]; !seen {
+				committed[name] = at
+			}
+		}
+	}
+	dirty := map[string]bool{}
+	if out, err := exec.Command("git", "-C", agentDir, "-c", "core.quotePath=false", "status",
+		"--porcelain", "--", prefix).Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			if len(line) < 4 {
+				continue
+			}
+			path := line[3:]
+			if i := strings.Index(path, " -> "); i >= 0 {
+				path = path[i+4:]
+			}
+			if name, ok := strings.CutPrefix(path, prefix); ok {
+				dirty[name] = true
+			}
+		}
+	}
+	dates := map[string]time.Time{}
+	for name, mt := range mtimes {
+		t, ok := committed[name]
+		switch {
+		case !ok:
+			dates[name] = mt
+		case mt.After(t) && dirty[name]: // an uncommitted edit is newer than the last commit
+			dates[name] = mt
+		default:
+			dates[name] = t
+		}
+	}
+	return dates
+}
+
 func uncommitted(agentDir, rel string) bool {
 	out, err := exec.Command("git", "-C", agentDir, "status", "--porcelain", "--", rel).Output()
 	return err == nil && strings.TrimSpace(string(out)) != ""
@@ -441,12 +512,13 @@ func agedCandidates(agentDir string, now time.Time) []string {
 	if err != nil {
 		return nil
 	}
+	dates := kbDirDates(agentDir, "candidates")
 	var out []string
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") || strings.EqualFold(e.Name(), "README.md") {
 			continue
 		}
-		t, ok := kbFileDate(agentDir, "candidates/"+e.Name())
+		t, ok := dates[e.Name()]
 		if !ok {
 			continue
 		}

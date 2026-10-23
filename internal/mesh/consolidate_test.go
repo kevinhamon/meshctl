@@ -114,6 +114,9 @@ func TestRecall_TiersAndSupersededDropped(t *testing.T) {
 	writeKB(t, a, "architecture/settlement.md", "# Settlement window\n\nDaily since 0002. The warehouse exposes it as a view.\n")
 	writeKB(t, a, "candidates/settlement-window-idea.md", "# Settlement window idea\n")
 	writeKB(t, a, "handoff.md", "## Current State\nsettlement window WIP\n")
+	// Confirmed entries (ADR-0067): without a ledger every hit would rank in
+	// the one unconfirmed slot and the tier order would not show.
+	confirmKB(t, a, "architecture/settlement.md", "decisions/0002-settlement-window-daily.md")
 
 	hits, err := Recall(a, "settlement window", 20)
 	if err != nil {

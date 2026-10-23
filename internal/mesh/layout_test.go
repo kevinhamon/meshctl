@@ -8,29 +8,50 @@ import (
 	"time"
 )
 
-func TestFreshPoolFootprint_ConsolidatedUnderAgentmesh(t *testing.T) {
+func TestFreshPoolFootprint_ConsolidatedUnderPoolDir(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	gitIdentity(t)
 	root := filepath.Join(t.TempDir(), "poly")
 	if _, err := InitPool(root, "poly", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	// Everything under .agentmesh/.
+	// Everything under the visible pool/ (ADR-0066), which is a git repo.
 	for _, p := range []string{
-		".agentmesh/pool.yaml",
-		".agentmesh/doctrine/" + CommsFile,
-		".agentmesh/doctrine/distiller.md",
-		".agentmesh/worktrees",
+		"pool/pool.yaml",
+		"pool/doctrine/" + CommsFile,
+		"pool/doctrine/distiller.md",
+		"pool/worktrees",
+		"pool/glossary.md",
+		"pool/.gitignore",
+		"pool/.git",
 	} {
 		if _, err := os.Stat(filepath.Join(root, p)); err != nil {
 			t.Fatalf("expected %s: %v", p, err)
 		}
 	}
+	if dirExists(filepath.Join(root, ".agentmesh")) {
+		t.Fatal("fresh pool must not create the legacy hidden dir")
+	}
 	// No legacy top-level agent-mesh/ dir.
 	if dirExists(filepath.Join(root, "agent-mesh")) {
 		t.Fatal("fresh pool must not create a top-level agent-mesh/ dir")
 	}
-	if IsLegacyLayout(root) {
+	if IsLegacyLayout(root) || PoolDirIsLegacy(root) {
 		t.Fatal("fresh pool should not read as legacy layout")
+	}
+	pool := filepath.Join(root, "pool")
+	if gitOut(t, pool, "rev-parse", "--abbrev-ref", "HEAD") != "main" {
+		t.Fatal("pool repo is not on main")
+	}
+	if got := gitOut(t, pool, "log", "-1", "--format=%an <%ae>"); got != "t <t@e>" {
+		t.Fatalf("first commit author = %q, want the user's git identity", got)
+	}
+	// Runtime files are ignored: writing them leaves the repo clean.
+	os.WriteFile(DispatchLogPath(root), []byte("x\n"), 0o644)
+	os.MkdirAll(filepath.Join(WorktreesPath(root), "a-s1"), 0o755)
+	os.WriteFile(filepath.Join(WorktreesPath(root), "a-s1", "f"), []byte("x"), 0o644)
+	if st := gitOut(t, pool, "status", "--porcelain"); st != "" {
+		t.Fatalf("runtime files must be ignored:\n%s", st)
 	}
 }
 
@@ -65,7 +86,7 @@ func TestNaming_AgentSuffix(t *testing.T) {
 func TestMigratePool_LegacyToConsolidated(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "legacy")
 	// Hand-build a legacy pool: marker + top-level agent-mesh/ doctrine + .worktrees + .dispatch.log.
-	os.MkdirAll(filepath.Join(root, PoolMarkerDir), 0o755)
+	WritePoolMarker(root, "legacy", "v", time.Now(), false)
 	os.MkdirAll(filepath.Join(root, "agent-mesh"), 0o755)
 	os.WriteFile(filepath.Join(root, "agent-mesh", CommsFile), []byte("old doctrine"), 0o644)
 	os.MkdirAll(filepath.Join(root, ".worktrees", "x"), 0o755)
@@ -77,12 +98,12 @@ func TestMigratePool_LegacyToConsolidated(t *testing.T) {
 	if _, err := MigratePool(root); err != nil {
 		t.Fatal(err)
 	}
-	// Doctrine now under .agentmesh/doctrine; worktrees + dispatch moved; legacy dir gone.
-	if !fileExists(filepath.Join(root, DoctrineDir, CommsFile)) {
-		t.Fatal("doctrine not emitted under .agentmesh/doctrine")
+	// Doctrine now under the pool doctrine dir; worktrees + dispatch moved; legacy dir gone.
+	if !fileExists(filepath.Join(DoctrinePath(root), CommsFile)) {
+		t.Fatal("doctrine not emitted under the pool doctrine dir")
 	}
-	if !dirExists(filepath.Join(root, WorktreesDir)) {
-		t.Fatal(".worktrees not moved under .agentmesh")
+	if !dirExists(WorktreesPath(root)) {
+		t.Fatal(".worktrees not moved under the pool dir")
 	}
 	if dirExists(filepath.Join(root, "agent-mesh")) {
 		t.Fatal("legacy agent-mesh/ (non-repo) should be removed")
@@ -94,7 +115,7 @@ func TestMigratePool_LegacyToConsolidated(t *testing.T) {
 
 func TestMigratePool_KeepsGitRepoDoctrineDir(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "poollike")
-	os.MkdirAll(filepath.Join(root, PoolMarkerDir), 0o755)
+	WritePoolMarker(root, "poollike", "v", time.Now(), false)
 	// agent-mesh/ is a git repo (the real meshctl clone) — must be preserved.
 	os.MkdirAll(filepath.Join(root, "agent-mesh", ".git"), 0o755)
 	os.WriteFile(filepath.Join(root, "agent-mesh", CommsFile), []byte("real repo"), 0o644)
@@ -105,8 +126,8 @@ func TestMigratePool_KeepsGitRepoDoctrineDir(t *testing.T) {
 	if !dirExists(filepath.Join(root, "agent-mesh", ".git")) {
 		t.Fatal("must NOT delete a git-repo agent-mesh/ dir")
 	}
-	if !fileExists(filepath.Join(root, DoctrineDir, CommsFile)) {
-		t.Fatal("doctrine should still be emitted under .agentmesh even when legacy dir kept")
+	if !fileExists(filepath.Join(DoctrinePath(root), CommsFile)) {
+		t.Fatal("doctrine should still be emitted under the pool dir even when legacy dir kept")
 	}
 	// A kept git-repo agent-mesh/ must NOT read as legacy (no doctor false-positive).
 	if IsLegacyLayout(root) {
@@ -125,7 +146,7 @@ func TestTeardownPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	if IsPool(dir) {
-		t.Fatal(".agentmesh should be removed after teardown")
+		t.Fatal("pool dir should be removed after teardown")
 	}
 	if !dirExists(a.Dir()) {
 		t.Fatal("teardown without --purge must keep agent repos")

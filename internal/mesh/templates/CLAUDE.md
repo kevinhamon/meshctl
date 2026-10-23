@@ -10,7 +10,8 @@ _The main loop: what the user hands it, and the steps it runs._
 
 ## Operating principles
 
-- _Plan before acting; confirm before large/ambiguous changes._
+- **Align before you act.** Reach **shared understanding** with the human first: their agreement to your intent, your grounding (cite each claim, or mark it *assumption*) and your **precedent** (cite where the pattern already exists, or mark it *new*). It is required whenever the work touches more than one artifact, makes any outbound write, makes any promotion (a `kb finish` beyond candidates, `state set`, `kb confirm`), or rests on any claim you cannot ground. Pools may tighten this in `local.md`, never loosen it.
+- **Before any outbound write** (a surface the pool declares outbound: tracker, wiki, chat, a product-repo PR), write your summary file `.memory/confirm/<session>.md` (Intent, Grounding, Precedent) and read the confirmation round in chat. The gate asks once per summary and denies a write without one.
 - _Read before you write; match surrounding conventions._
 - _Verify behavior; report outcomes faithfully._
 - _When at a genuine crossroads, stop and ask — the user drives._
@@ -27,9 +28,11 @@ _If your work spans git repos, **sync before you inspect** — `git -C <repo> fe
 
 ## Agent Communication (intake)
 
-Bidirectional file-based handoff — canonical protocol: your pool's `../.agentmesh/doctrine/agent-comms.md`. Inbox: `intake/`. The roster is computed on demand — run `meshctl agent list` (do not maintain a peer list here); all `meshctl` commands scope to THIS pool automatically.
+Bidirectional file-based handoff — canonical protocol: your pool's `../__POOL_DIR__/doctrine/agent-comms.md`. Inbox: `intake/`. The roster is computed on demand — run `meshctl agent list` (do not maintain a peer list here); all `meshctl` commands scope to THIS pool automatically.
 
-- **Inbound:** at session start / on "check intake", run `meshctl inbox next --claim` (atomic claim) or scan `intake/*.md` for `status: pending`; process by `type`, then write the outcome back with `meshctl inbox respond <id> --status answered|filed|needs-info|needs-human --response "…"` (intake files are meshctl-owned — never hand-edit them). **Not yours?** `meshctl inbox decline <id> --reason "…" --redirect <owner>` — don't half-answer out-of-domain work.
+- **Inbound — "check intake" shows the queue and stops.** On "check intake" or the session-start intake line, run `meshctl inbox list` (pending + in-progress, priority then age, a one-line ask each) and read it to the human as a short numbered queue (id, from, type, priority, age, ask). Propose an order (priority, then age; flag anything blocking another peer) and wait: claim and work nothing until the human confirms or reorders.
+- **Work in the human's order, by id.** Claim one at a time with `meshctl inbox claim <id>`; process it by `type`, write the outcome back with `meshctl inbox respond <id> --status answered|filed|needs-info|needs-human --response "…"` (intake files are meshctl-owned — never hand-edit them) and report it in a line before the next. When the human says something more important came up, re-plan. Skipped ids go on your handoff's `Deferred: <ids>` line. **Not yours?** `meshctl inbox decline <id> --reason "…" --redirect <owner>` — don't half-answer out-of-domain work.
+- **Ask for a decision as a decision round.** Whenever you need the human's decision on proposed changes (an intake order, a plan, a rule, a KB change, an outbound write), present one item per change: `📝 **C<n> — <short title>**`, then `From now on it says: …` / `It no longer says: …` (a change of rule or knowledge) or what you will do and why (an action), ending `➡️ ✅ Confirm`. Then say how to answer: `yes` for all, or `C<n> no: <reason>` for one. Keep rounds small (about 3–5 items) and wait for the answer before acting.
 - **Read-back:** `meshctl sent` lists requests you sent that came back (answered / declined / needs-info); read each, act, then `meshctl sent ack <id>`. The session start surfaces them automatically.
 - **Outbound:** `meshctl send <target> <type> "…"` writes a request into a peer's inbox; `meshctl ask <target> <type> "…"` also dispatches an advisory peer headlessly and blocks for the answer. Route work to the agent that **owns** it (find owners via `meshctl agent list`); never mutate a peer's KB/board directly.
 - **Blocked on a decision mid-task?** `meshctl ask <advisor> <type> "…"` for a synchronous answer; if it returns `needs-human`, stop and surface to the user.
@@ -42,11 +45,11 @@ Bidirectional file-based handoff — canonical protocol: your pool's `../.agentm
 
 Internal references (banned when crossing out): decision/ADR ids, risk ids, `knowledge/…` paths, `candidates/`/`playbooks/` slugs, memory slugs, intake filenames/ids, `[[wikilinks]]`, mesh workspace paths. State the **decision** in plain domain terms, never the internal id. Domain-technical detail (repo/tool/table names) is fine — only mesh-internal **governance** artifacts are the leak.
 
-**Boundary:** this pool's own repos (KB, decisions, intake files, their git history) are *internal* — citing decision/risk ids there is correct. The rule governs content **crossing out** to an external surface. Canonical: `../.agentmesh/doctrine/agent-comms.md` Core rule 7.
+**Boundary:** this pool's own repos (KB, decisions, intake files, their git history) are *internal* — citing decision/risk ids there is correct. The rule governs content **crossing out** to an external surface. Canonical: `../__POOL_DIR__/doctrine/agent-comms.md` Core rule 7.
 
 ## Communication tone (external, human-facing)
 
-When a **human** will read what you write on an external surface (tickets, PRs, review, email, chat) — **especially speaking as the user** — be tactful: critique the work, not the person; don't flatly call a solution "wrong" — frame it as a trade-off, risk, or recommendation, and lead with what's sound. Direct on substance, diplomatic on tone. Be blunt only in internal mesh artifacts and this chat. Canonical: `../.agentmesh/doctrine/agent-comms.md` Core rule 8. **This is a default — if THIS agent's role defines a different voice/communication style, that guidance wins (Core rule 9); state it above in ## Role.**
+When a **human** will read what you write on an external surface (tickets, PRs, review, email, chat) — **especially speaking as the user** — be tactful: critique the work, not the person; don't flatly call a solution "wrong" — frame it as a trade-off, risk, or recommendation, and lead with what's sound. Direct on substance, diplomatic on tone. Be blunt only in internal mesh artifacts and this chat. Canonical: `../__POOL_DIR__/doctrine/agent-comms.md` Core rule 8. **This is a default — if THIS agent's role defines a different voice/communication style, that guidance wins (Core rule 9); state it above in ## Role.**
 
 ## Cognition — maintain your own knowledge base (standing order)
 
@@ -55,13 +58,20 @@ Run the **`mesh-cognition` skill** for the full procedure; its short form:
 
 - **Recall at start.** `meshctl memory recall "<topic>"`, then read the KB files it
   points to. Your `knowledge/handoff.md` is auto-injected.
+- **Pending work first.** When session start shows a `# Pending work` block, read it to
+  the human before new work and offer triage now, a subset, or deferral; the human
+  decides. For intake, show the queue (`meshctl inbox list`), propose an order and
+  wait, then claim by id in the human's order. A deferral is one `Deferred: <ids>`
+  line in your handoff; there is no snooze, the items return next session.
 - **Distill as you learn.** When a session yields a recurring pattern, a reusable
   procedure, a failure mode, or a consequential decision: `meshctl kb begin` →
   write `knowledge/candidates/<slug>.md` → consolidate into `playbooks/` /
-  `experience/` / a decision (ADR) → `meshctl kb finish`.
+  `experience/` / a decision (ADR) → write the summary file (`.memory/confirm/<session>.md`)
+  and read the confirmation round to the human → `meshctl kb finish --summary-file <it>`.
+  Only the human confirms; candidates-only finishes need no round.
 - **Record decisions & risks.** Consequential domain choices become ADRs in
   `knowledge/decisions/`; new risks get logged in `knowledge/risks.md`.
 - **Handoff at end.** Rewrite `knowledge/handoff.md` via `meshctl handoff set`.
 - **Repo hygiene.** Your workspace must be its own git repo **with a remote** — `knowledge/` is durable only once committed **and pushed**. If it's not a repo, `git init` + commit; then create a remote and push. Session start nags until a remote exists.
 
-Authoritative spec: your pool's `../.agentmesh/doctrine/agent-comms.md` §Knowledge & Memory.
+Authoritative spec: your pool's `../__POOL_DIR__/doctrine/agent-comms.md` §Knowledge & Memory.

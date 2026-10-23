@@ -16,34 +16,117 @@ const (
 	MeshRepoName = "agent-mesh" // legacy doctrine dir name (detection + doctor skip only)
 	CommsFile    = "agent-comms.md"
 
-	// PoolMarkerDir (ADR-0031/0037/0038) is the pool's single infra footprint: a
-	// `.agentmesh/` dir at the pool root holding the marker, doctrine, and all
-	// runtime state. Agents are first-class sibling repos next to it (poly-repo
-	// native, ADR-0038).
-	PoolMarkerDir  = ".agentmesh"
-	PoolMarkerFile = "pool.yaml"
+	// CurrentPoolDir is the pool directory (ADR-0066): the pool's single infra
+	// footprint at the pool root — a visible git repo holding the marker, the
+	// doctrine, the pool glossary and (ignored) runtime state, with agents as
+	// first-class sibling repos beside it.
+	CurrentPoolDir = "pool"
+	// LegacyPoolDir is the hidden pool directory of ADR-0031/0037/0038, recognised
+	// until `pool upgrade` renames it. Both names live here and nowhere else —
+	// PoolDir resolves them (ADR-0066 decision 8).
+	LegacyPoolDir = ".agentmesh"
 
-	// All pool infra now lives UNDER .agentmesh/ (ADR-0038), so a fresh pool root
-	// shows exactly one mesh entry (`.agentmesh/`) beside the agent repos.
-	DispatchLog   = ".agentmesh/dispatch.log"
-	DispatchCount = ".agentmesh/dispatch.count"
-	DispatchLock  = ".agentmesh/dispatch.lock"
+	// Names inside the pool directory. Build paths with the *Path helpers below;
+	// nothing joins these onto a pool root directly.
+	PoolMarkerFile    = "pool.yaml"
+	PoolConfigFile    = "config.yaml"
+	PoolGlossaryFile  = "glossary.md"
+	PoolIgnoreFile    = ".gitignore"
+	DispatchLogFile   = "dispatch.log"
+	DispatchCountFile = "dispatch.count"
+	DispatchLockFile  = "dispatch.lock"
+	WorktreesDirName  = "worktrees"
+	DoctrineDirName   = "doctrine"
 
-	SessionsDir  = ".sessions" // per-agent, inside the agent workspace
-	WorktreesDir = ".agentmesh/worktrees"
+	SessionsDir = ".sessions" // per-agent, inside the agent workspace
 
 	ManifestName = "agent.yaml"
 	IntakeDir    = "intake"
-
-	// DoctrineDir is the pool-relative dir the doctrine docs are emitted to
-	// (ADR-0038: under .agentmesh/). Legacy pools used the top-level `agent-mesh/`
-	// dir — see `pool migrate`.
-	DoctrineDir = ".agentmesh/doctrine"
 
 	// LegacyDoctrineDir is the pre-ADR-0038 top-level doctrine dir; detected for
 	// migration + back-compat.
 	LegacyDoctrineDir = MeshRepoName
 )
+
+// PoolDir resolves the pool directory for a pool root: the one directory that
+// holds the marker, the doctrine and the runtime state. Every runtime path is
+// built from its result, so a change of layout is a change here alone.
+// Resolution: `pool/pool.yaml` when present; else the legacy hidden directory
+// when it exists (marker or not — pre-ADR-0031 pools had none); else `pool/`,
+// the layout every new pool gets.
+func PoolDir(poolRoot string) string {
+	cur := filepath.Join(poolRoot, CurrentPoolDir)
+	if fileExists(filepath.Join(cur, PoolMarkerFile)) {
+		return cur
+	}
+	if legacy := filepath.Join(poolRoot, LegacyPoolDir); dirExists(legacy) {
+		return legacy
+	}
+	return cur
+}
+
+// PoolDirIsLegacy reports whether the pool still lives in the hidden legacy
+// directory, i.e. `pool upgrade` has not migrated it yet (ADR-0066).
+func PoolDirIsLegacy(poolRoot string) bool {
+	return filepath.Base(PoolDir(poolRoot)) == LegacyPoolDir
+}
+
+// PoolDirName is the resolved pool directory's name relative to the pool root,
+// for messages and rendered pointers.
+func PoolDirName(poolRoot string) string {
+	return filepath.Base(PoolDir(poolRoot))
+}
+
+// DispatchLogPath is the dispatch audit log (ADR-0011).
+func DispatchLogPath(poolRoot string) string {
+	return filepath.Join(PoolDir(poolRoot), DispatchLogFile)
+}
+
+// DispatchCountPath is the rolling-hour dispatch counter.
+func DispatchCountPath(poolRoot string) string {
+	return filepath.Join(PoolDir(poolRoot), DispatchCountFile)
+}
+
+// DispatchLockPath is the single-flight dispatch lock (a mkdir lock).
+func DispatchLockPath(poolRoot string) string {
+	return filepath.Join(PoolDir(poolRoot), DispatchLockFile)
+}
+
+// WorktreesPath holds the KB and delegated-work worktrees of every peer.
+func WorktreesPath(poolRoot string) string {
+	return filepath.Join(PoolDir(poolRoot), WorktreesDirName)
+}
+
+// DoctrinePath is where the doctrine docs are emitted (ADR-0038). Legacy pools
+// used the top-level `agent-mesh/` dir — see `pool migrate`.
+func DoctrinePath(poolRoot string) string {
+	return filepath.Join(PoolDir(poolRoot), DoctrineDirName)
+}
+
+// PoolGlossaryPath is the pool glossary (ADR-0066): the one vocabulary every
+// peer uses, tracked in the pool repo.
+func PoolGlossaryPath(poolRoot string) string {
+	return filepath.Join(PoolDir(poolRoot), PoolGlossaryFile)
+}
+
+// PoolConfigPath is the human-owned pool settings file (ADR-0066): knowledge
+// kind, outbound surfaces, reconcile order, tool reference. Never rewritten by
+// meshctl; see pool_config.go.
+func PoolConfigPath(poolRoot string) string {
+	return filepath.Join(PoolDir(poolRoot), PoolConfigFile)
+}
+
+// PoolIgnorePath is the pool repo's ignore file, which keeps runtime state
+// (dispatch files, worktrees) out of the pool's history.
+func PoolIgnorePath(poolRoot string) string {
+	return filepath.Join(PoolDir(poolRoot), PoolIgnoreFile)
+}
+
+// poolRel is a path under the pool directory, relative to the pool root, for
+// messages that report what was written.
+func poolRel(poolRoot string, elem ...string) string {
+	return filepath.Join(append([]string{PoolDirName(poolRoot)}, elem...)...)
+}
 
 // AgentsDir resolves the agents container, in priority order:
 //  1. $AGENTS_DIR if set.
@@ -66,8 +149,8 @@ func AgentsDir() (string, error) {
 
 	if cwd, err := os.Getwd(); err == nil {
 		for dir := cwd; ; {
-			// Preferred marker (ADR-0031): a .agentmesh/ pool dir.
-			if dirExists(filepath.Join(dir, PoolMarkerDir)) {
+			// Preferred marker (ADR-0031): the resolved pool dir.
+			if IsPool(dir) {
 				return dir, nil
 			}
 			// Back-compat (ADR-0029): the doctrine clone marker.
@@ -84,7 +167,7 @@ func AgentsDir() (string, error) {
 
 	cwd, _ := os.Getwd()
 	return "", fmt.Errorf("not inside a mesh pool: no %s/ in %s or any parent — run meshctl from a pool "+
-		"or agent workspace, or set $AGENTS_DIR (`meshctl pool list` shows this machine's pools)", PoolMarkerDir, cwd)
+		"or agent workspace, or set $AGENTS_DIR (`meshctl pool list` shows this machine's pools)", PoolDirName(cwd), cwd)
 }
 
 // AgentDir returns the workspace directory for a named agent.
@@ -95,17 +178,23 @@ func ManifestPath(agentsDir, name string) string {
 	return filepath.Join(agentsDir, name, ManifestName)
 }
 
-// PoolMarkerPath is <poolRoot>/.agentmesh/pool.yaml.
+// PoolMarkerPath is the binary-managed pool identity file inside PoolDir.
 func PoolMarkerPath(poolRoot string) string {
-	return filepath.Join(poolRoot, PoolMarkerDir, PoolMarkerFile)
+	return filepath.Join(PoolDir(poolRoot), PoolMarkerFile)
 }
 
-// IsPool reports whether poolRoot already carries the binary-managed marker.
+// IsPool reports whether poolRoot is a pool: it carries `pool/pool.yaml`, or the
+// legacy hidden directory (whose marker is optional — pools older than ADR-0031
+// gained it on their first repair). A bare `pool/` without a marker is not a
+// pool: the visible name can collide with a user's own directory.
 func IsPool(poolRoot string) bool {
-	return dirExists(filepath.Join(poolRoot, PoolMarkerDir))
+	if dirExists(filepath.Join(poolRoot, LegacyPoolDir)) {
+		return true
+	}
+	return fileExists(filepath.Join(poolRoot, CurrentPoolDir, PoolMarkerFile))
 }
 
-// WritePoolMarker writes <poolRoot>/.agentmesh/pool.yaml with pool identity.
+// WritePoolMarker writes the pool marker (PoolMarkerPath) with pool identity.
 // Idempotent by caller: pass overwrite=false to leave an existing marker intact.
 func WritePoolMarker(poolRoot, name, doctrineVersion string, created time.Time, overwrite bool) error {
 	p := PoolMarkerPath(poolRoot)
@@ -118,14 +207,15 @@ func WritePoolMarker(poolRoot, name, doctrineVersion string, created time.Time, 
 	if name == "" {
 		name = filepath.Base(poolRoot)
 	}
-	body := fmt.Sprintf("# meshctl pool marker (ADR-0031) — binary-managed; identity for this pool.\nname: %s\ncreated: %s\ndoctrine_version: %s\n"+
-		"# Mesh-wide tool reference (ADR-0042) — uncomment + edit; injected at session start,\n"+
-		"# checked by `meshctl doctor`. Pointers only; agents self-serve `<cmd> --help`.\n"+
-		"# tools:\n"+
-		"#   - { cmd: tea, use: \"Gitea CLI — prefer over gh\", help: \"tea --help\" }\n"+
-		"#   - { cmd: gh, avoid: \"this mesh uses tea\" }\n",
-		name, created.UTC().Format(time.RFC3339), doctrineVersion)
-	return os.WriteFile(p, []byte(body), 0o644)
+	return os.WriteFile(p, []byte(poolMarkerBody(name, created.UTC().Format(time.RFC3339), doctrineVersion)), 0o644)
+}
+
+// poolMarkerBody is the identity file's whole content: identity only. Human
+// settings (tool reference included) live in PoolConfigPath (ADR-0066).
+func poolMarkerBody(name, created, doctrineVersion string) string {
+	return fmt.Sprintf("# meshctl pool marker (ADR-0031) — binary-managed; identity for this pool.\n"+
+		"# Pool settings (knowledge, outbound, reconcile, tools) go in %s beside this file.\n"+
+		"name: %s\ncreated: %s\ndoctrine_version: %s\n", PoolConfigFile, name, created, doctrineVersion)
 }
 
 func fileExists(p string) bool {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 )
 
@@ -126,4 +127,85 @@ func anyStr(xs []any, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestSettings_GateMatcherFullMatchesMCPToolName reproduces how Claude Code
+// applies a hook matcher: as a full regex match on the tool name. The bare
+// `mcp__` alternative shipped in v1..v4 never matched an MCP tool, so the gate
+// had never seen an MCP call (ADR-0062 and ADR-0068 amendments).
+func TestSettings_GateMatcherFullMatchesMCPToolName(t *testing.T) {
+	full := regexp.MustCompile("^(?:" + GateHookMatcher + ")$")
+	for _, tool := range []string{"mcp__tracker__createTicket", "mcp__plugin_claude-mem__memory_add", "Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task"} {
+		if !full.MatchString(tool) {
+			t.Errorf("matcher %q must full-match %q", GateHookMatcher, tool)
+		}
+	}
+	for _, tool := range []string{"Read", "Grep", "BashOutput", "WebFetch"} {
+		if full.MatchString(tool) {
+			t.Errorf("matcher %q must not match %q", GateHookMatcher, tool)
+		}
+	}
+	old := regexp.MustCompile("^(?:Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__|Agent|Task)$")
+	if old.MatchString("mcp__tracker__createTicket") {
+		t.Fatal("the bare mcp__ alternative is supposed to be the defect; it must not full-match an MCP tool name")
+	}
+}
+
+// TestSettings_ReonboardV4AddsPostToolUse: a peer wired at v4 (bare mcp__
+// matcher, no PostToolUse) re-onboards to v5 in one pass: the matcher is
+// rewritten in place and a PostToolUse entry on the same matcher runs
+// `meshctl hook post-tool-use`.
+func TestSettings_ReonboardV4AddsPostToolUse(t *testing.T) {
+	dest := t.TempDir()
+	v4 := `{"hooks":{"PreToolUse":[
+	  {"matcher":"Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__|Agent|Task","hooks":[{"type":"command","command":"meshctl hook pre-tool-use","timeout":10}]}]}}`
+	if err := os.MkdirAll(filepath.Join(dest, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, ".claude", "settings.json"), []byte(v4), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, ".claude", meshWiringStampFile), []byte(`{"version":4}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureAgentSettings(dest); err != nil {
+		t.Fatal(err)
+	}
+	m := readSettings(t, dest)
+	hooks := m["hooks"].(map[string]any)
+	pre := hooks["PreToolUse"].([]any)
+	if len(pre) != 1 || pre[0].(map[string]any)["matcher"] != GateHookMatcher {
+		t.Fatalf("PreToolUse matcher not rewritten in place: %v", pre)
+	}
+	post, _ := hooks["PostToolUse"].([]any)
+	if !hookCommandPresent(post, "meshctl hook post-tool-use") {
+		t.Fatalf("PostToolUse hook not wired: %v", hooks)
+	}
+	if len(post) != 1 || post[0].(map[string]any)["matcher"] != GateHookMatcher {
+		t.Fatalf("PostToolUse must use the gate matcher: %v", post)
+	}
+	if v := WiringVersion(dest); v != 5 || MeshWiringVersion != 5 {
+		t.Fatalf("stamp = v%d, want v5 (MeshWiringVersion=%d)", v, MeshWiringVersion)
+	}
+}
+
+// TestSettings_PendingIsPreApprovedAndAddedOnReWire: `meshctl pending` is a
+// read-only listing the session-start block points at, so it is pre-approved;
+// an agent wired before it gains the rule on its next re-onboard (the rules
+// are merged add-only, delivered by the same wiring v5).
+func TestSettings_PendingIsPreApprovedAndAddedOnReWire(t *testing.T) {
+	dest := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dest, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, ".claude", "settings.json"), []byte(`{"permissions": {"allow": ["Bash(meshctl inbox:*)"]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureAgentSettings(dest); err != nil {
+		t.Fatal(err)
+	}
+	allow := readSettings(t, dest)["permissions"].(map[string]any)["allow"].([]any)
+	if !anyStr(allow, "Bash(meshctl pending:*)") {
+		t.Fatalf("missing Bash(meshctl pending:*) in permissions.allow: %v", allow)
+	}
 }
