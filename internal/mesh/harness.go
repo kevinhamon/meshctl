@@ -240,6 +240,19 @@ func (opencodeHarness) EmitGate(w io.Writer, d GateDecision) error {
 	return err
 }
 
+// RunningHarness names the harness whose tool call runs this process, from the
+// marker each exports to tool subprocesses: CLAUDECODE (Claude Code), OPENCODE
+// (opencode). "" for a human's own terminal.
+func RunningHarness() string {
+	switch {
+	case os.Getenv("CLAUDECODE") != "":
+		return HarnessClaude
+	case os.Getenv("OPENCODE") != "":
+		return HarnessOpencode
+	}
+	return ""
+}
+
 // WireAgent for opencode:
 //   - merges opencode.json: instructions ⊇ CLAUDE.md (loads the agent's doctrine
 //   - cognition/comms stanzas on V1; inert on V2, where the plugin injects it).
@@ -253,7 +266,7 @@ func (opencodeHarness) EmitGate(w io.Writer, d GateDecision) error {
 // Idempotent.
 func (h opencodeHarness) WireAgent(dest string) ([]string, error) {
 	var notes []string
-	if n, err := ensureOpencodeConfig(dest); err != nil {
+	if n, err := ensureOpencodeConfig(dest, h.Major()); err != nil {
 		return nil, err
 	} else {
 		notes = append(notes, n...)
@@ -275,8 +288,9 @@ func (h opencodeHarness) WireAgent(dest string) ([]string, error) {
 	return notes, nil
 }
 
-// ensureOpencodeConfig add-only merges opencode.json: instructions ⊇ CLAUDE.md.
-func ensureOpencodeConfig(dest string) ([]string, error) {
+// ensureOpencodeConfig add-only merges opencode.json: instructions ⊇ CLAUDE.md,
+// and on V2 the ask rules for the gate-asked commands (ADR-0075).
+func ensureOpencodeConfig(dest string, major int) ([]string, error) {
 	path := filepath.Join(dest, "opencode.json")
 	root := map[string]any{"$schema": "https://opencode.ai/config.json"}
 	if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) > 0 {
@@ -287,6 +301,11 @@ func ensureOpencodeConfig(dest string) ([]string, error) {
 	var notes []string
 	if addStringToArray(root, "instructions", "CLAUDE.md") {
 		notes = append(notes, "opencode.json: instructions += CLAUDE.md")
+	}
+	if major >= 2 {
+		if added := ensureOpencodeAskRules(root); len(added) > 0 {
+			notes = append(notes, "opencode.json: ask rules for "+strings.Join(added, ", "))
+		}
 	}
 	if len(notes) == 0 {
 		return nil, nil

@@ -129,3 +129,41 @@ func TestPoolUpgrade_GlobalOpencodeConfigV1Keys(t *testing.T) {
 		t.Fatalf("V2 config must be clean: %v", ws)
 	}
 }
+
+func TestPoolUpgrade_AddsMissingStatusLine(t *testing.T) {
+	pool := meshRoot(t)
+	a := newTestAgent(t, pool, "architect", true, nil)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	settings := filepath.Join(a.Dir(), ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings, []byte(`{"hooks":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const action = "add the mesh status line to .claude/settings.json"
+	hasAction := func() bool {
+		plan, err := PlanPoolUpgrade(pool, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, x := range plan.Agents {
+			if x.Name == a.Name {
+				return strings.Contains(strings.Join(x.Actions, "\n"), action)
+			}
+		}
+		return false
+	}
+	if !hasAction() {
+		t.Fatal("--check must report the missing status line")
+	}
+	if _, err := UpgradeAgents(pool); err != nil {
+		t.Fatal(err)
+	}
+	if !hasStatusLine(a.Dir()) {
+		t.Fatal("upgrade did not wire the status line")
+	}
+	if hasAction() {
+		t.Fatal("a second check must not report the status line again")
+	}
+}

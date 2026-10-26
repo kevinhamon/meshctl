@@ -808,6 +808,15 @@ Run the **` + "`mesh-cognition`" + ` skill** for the full procedure; its short f
   decides. For intake, show the queue (` + "`meshctl inbox list`" + `), propose an order
   and wait, then claim by id in the human's order. A deferral is one
   ` + "`Deferred: <ids>`" + ` line in your handoff; no snooze.
+- **Status-line phrases.** Each pending group on the status line ends in a phrase to
+  say. A phrase starts a review; the human still decides each step. Run
+  ` + "`meshctl pending`" + ` first (the block is injected only at session start), then:
+  "confirm kb": read the parked confirmation round, then the ` + "`meshctl kb finish`" + ` it names.
+  "resolve conflicts": open the reconcile report it names, ask each conflict as a
+  decision round, ` + "`meshctl kb confirm <path> --report <report>`" + ` for what is confirmed.
+  "check intake": the intake order above. "review work": ` + "`meshctl work list`" + `,
+  review each, then ` + "`meshctl work merge <id>`" + ` or ` + "`--abort`" + ` as the human says.
+  "consolidate": ` + "`meshctl kb consolidate`" + `, then the Consolidate step below.
 - **Distill as you learn.** When a session yields a recurring pattern, a reusable
   procedure, a failure mode, or a consequential decision: ` + "`meshctl kb begin`" + ` →
   write ` + "`knowledge/candidates/<slug>.md`" + ` → consolidate into ` + "`playbooks/`" + ` /

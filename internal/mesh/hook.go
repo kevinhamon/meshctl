@@ -291,7 +291,7 @@ func HookUserPrompt(agentsDir string, p HookPayload, now time.Time) string {
 	}
 
 	var parts []string
-	// Owned engine by default (session-records + git spine); claude-mem opt-in.
+	// Owned engine: session records + the git spine.
 	if len(strings.TrimSpace(p.Prompt)) >= intuitionMinQuery {
 		if md := IntuitionMarkdown(RecallIntuition(a, p.Prompt, 3)); md != "" {
 			parts = append(parts, strings.TrimRight(md, "\n"))

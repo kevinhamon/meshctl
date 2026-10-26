@@ -33,17 +33,16 @@ import (
 // rule that produced a decision; ticket 40 (outbound) and ticket 26 (pool
 // path) set the reserved ones.
 const (
-	GateCheckNone        = "none"         // allow: no check touched the call
-	GateCheckMemoryStore = "memory-store" // claude-mem write tool, by name
-	GateCheckDelegation  = "delegation"   // Agent/Task to a mutating peer (ask), or from a peer (deny)
-	GateCheckPeer        = "peer"         // in-session consult / work contract
-	GateCheckPath        = "path"         // file-edit path into a competing store or intake/
-	GateCheckShellWrite  = "shell-write"  // shell write into the same stores
-	GateCheckKBBranch    = "kb-branch"    // shell command naming a mesh/kb/ branch outside `meshctl kb`
-	GateCheckKBRule      = "kb-rule"      // standing rule from the agent's own KB (deny-once)
-	GateCheckOutbound    = "outbound"     // reserved: the outbound gate (ticket 40)
-	GateCheckPoolPath    = "pool-path"    // pool writes asked with the summary; git in pool/ denied
-	GateCheckUnavailable = "unavailable"  // the gate could not evaluate the call at all
+	GateCheckNone        = "none"        // allow: no check touched the call
+	GateCheckDelegation  = "delegation"  // Agent/Task to a mutating peer (ask), or from a peer (deny)
+	GateCheckPeer        = "peer"        // in-session consult / work contract
+	GateCheckPath        = "path"        // file-edit path into a competing store or intake/
+	GateCheckShellWrite  = "shell-write" // shell write into the same stores
+	GateCheckKBBranch    = "kb-branch"   // shell command naming a mesh/kb/ branch outside `meshctl kb`
+	GateCheckKBRule      = "kb-rule"     // standing rule from the agent's own KB (deny-once)
+	GateCheckOutbound    = "outbound"    // reserved: the outbound gate (ticket 40)
+	GateCheckPoolPath    = "pool-path"   // pool writes asked with the summary; git in pool/ denied
+	GateCheckUnavailable = "unavailable" // the gate could not evaluate the call at all
 )
 
 // Mode names: the `mode=` field, which hook is speaking and in what role.

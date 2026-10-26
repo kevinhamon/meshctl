@@ -4,7 +4,7 @@ date: 2026-07-24
 ---
 # 0033. Owned, vertically-integrated agent memory — KB + episodic + recall as one system; retire the claude-mem dependency
 
-- **Status:** accepted — **stages 1–3 shipped.** Stage 1: extractive capture + live unified recall. Stages 2–3: the injection surface (`meshctl hook user-prompt`) + `intuition recall` now default to the **owned engine** (session-records + git time-spine via `Recall`); claude-mem is opt-in only (`MESH_INTUITION_ENGINE=claude-mem`) — dependency retired. Stage 4 (embeddings/RAG) remains future/gated.
+- **Status:** accepted — **stages 1–3 shipped; claude-mem retired 2026-10-26.** Stage 1: extractive capture + live unified recall. Stages 2–3: the injection surface (`meshctl hook user-prompt`) + `intuition recall` use the **owned engine** (session-records + git time-spine via `Recall`). The claude-mem engine, its `MESH_INTUITION_ENGINE` switch and every claude-mem reference in the gate, doctrine and skills are removed (see the amendment). Stage 4 (embeddings/RAG) remains future/gated.
 - **Date:** 2026-07-24
 - **Deciders:** maintainer
 - **Related:** exercises the follow-up ADR-0016 and ADR-0015 both pre-authorized ("an owned engine slots behind the same contract"); amends ADR-0016 (the intuition *engine* swaps from claude-mem to owned) and extends ADR-0015 (recall backend scales); builds on ADR-0014 (KB structure), ADR-0017 (handoff), ADR-0027 (distiller). Injection surfaces are rendered via ADR-0032.
@@ -79,5 +79,11 @@ Build an **owned memory engine inside `agentmesh`** that unifies the durable and
 - Migration / sequence:
   1. **Records + floor recall (LLM-free):** SessionEnd extractive capture (via ADR-0032 surface) + session-record schema; unify `memory recall` over KB + records + time-spine with live keyword/BM25; retire the persisted-index staleness path.
   2. **Transition:** keep claude-mem as an optional backend behind the contract; compare felt recall vs records.
-  3. **Retire claude-mem** once records suffice; drop the plugin/worker dependency.
+  3. **Retire claude-mem** once records suffice; drop the plugin/worker dependency. **Done 2026-10-26.**
   4. **Embeddings/RAG (further, gated) — PARKED:** add vector recall for deep topics behind the same contract when corpus size warrants; opt-in per pool. **Intended engine: an optional `postgres + pgvector` backend** selected via `MESH_MEMORY_BACKEND=postgres://…`, holding a `sessions` table (episodic, queryable, cross-agent/cross-machine) + a `chunks` table with `vector` embeddings of KB + records. **Durable KB stays in git** (never moves to the DB); the server is the *recall* layer only, and recall **fails open to the file/git-spine floor** when the backend is absent (self-contained mode preserved). This also supersedes the "commit `.memory/sessions/` to git" idea — episodic persistence/sync belongs in the shared DB, not git blobs. **Trigger to build:** file/keyword recall demonstrably misses (corpus growth), or a multi-machine / shared cross-agent recall need. Open new-dependency decision then: embeddings source (local model vs embed API). Parked 2026-07-24 at user direction — not warranted at current scale.
+
+## Amendment (2026-10-26): claude-mem removed from meshctl
+
+The owned engine has been the default since stage 2 and produced every intuition line since; no pool sets `MESH_INTUITION_ENGINE`. The planned felt-recall comparison (stage 2) is skipped: there is no live use of the claude-mem path to compare. The plugin's background observer, running in every session whether the mesh used it or not, was a large share of measured usage cost, which settles the trigger in the follow-ups above.
+
+Removed: the claude-mem recall client and the `MESH_INTUITION_ENGINE` switch (a leftover setting is ignored); the gate's claude-mem checks (its write tools by name, its on-disk store path) and the `memory-store` check name; the claude-mem mining steps in the distiller doctrine and the mesh-cognition skill. The gate's other competing-store rule, Claude Code's built-in auto-memory, and the hand-written intake rules stay. Removing the plugin itself is a per-machine step outside meshctl.

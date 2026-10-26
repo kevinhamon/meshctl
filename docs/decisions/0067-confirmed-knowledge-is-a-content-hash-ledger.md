@@ -85,3 +85,8 @@ One real run of the full path (a hand-wired prototype in a live peer; the human 
 ## Amendment (2026-10-16): deleting a section drops its ledger line
 
 A `kb finish` that deletes a section of a sectioned file (or a whole file) drops that entry's ledger line in the same `Confirm:` commit. The ledger never lists an absent section, and doctor flags a ledger line with no matching section or file as stale. Raised by the glossary migration (ADR-0066 amendment), where whole sections leave a peer file; the rule applies to any deletion.
+
+## Amendment (2026-10-26): the trust guard follows the harness actually running
+
+The guard, as built, treated every opencode peer as having no ask path, V2 included, though this ADR expected only V1 peers to be blocked; and it checked only the workspace's wiring, so opencode run inside a Claude Code workspace passed a guard whose gate never saw the call. ADR-0075 gives opencode V2 an ask path and changes the guard: it refuses when the harness running the command differs from the workspace's harness, accepts an opencode peer with the current V2 plugin and opencode's ask rules in force, and keeps refusing opencode V1.
+

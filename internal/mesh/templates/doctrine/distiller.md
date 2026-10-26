@@ -27,14 +27,11 @@ silently queries the WRONG namespace and returns nothing. Pass `--agent <agent>`
 
 ## Steps (all off the main thread)
 
-1. **Mine.** Pull the owner's recent episodic signal. Use, in order of reliability:
-   - `meshctl intuition recall --agent <agent> "<topic>"` — compact pointers, the
-     primary source (works on the default `worker` runtime).
-   - claude-mem `search` and `timeline` (mcp-search) — these work on `worker`. The
-     `observation_search` / `observation_context` / `memory_search` tools require the
-     `server-beta` runtime and will FAIL on the default `worker` — **do not depend on
-     them**; if present they are a bonus.
-   Look for signal that **repeats across sessions**, not one-offs.
+1. **Mine.** Pull the owner's recent episodic signal with
+   `meshctl intuition recall --agent <agent> "<topic>"` — compact pointers from the
+   session records and git history — then read the session records it points to
+   (`<agent>/.memory/sessions/`). Look for signal that **repeats across sessions**,
+   not one-offs.
 2. **Reconcile against everything already known — both stores:**
    - the git KB: `meshctl memory recall --agent <agent>` + read what it points to;
    - the owner's **private recall-memory store**, if the harness maintains one (a
@@ -91,7 +88,6 @@ silently queries the WRONG namespace and returns nothing. Pass `--agent <agent>`
   and the human confirms at `kb finish` (meshctl ADR-0064). A headless run has no human
   at its prompt, so it can land candidates only.
 - **Writes confined to `knowledge/candidates/` + `knowledge/pending-decisions.md`.**
-- **claude-mem is read-only** — mine *from* it, never edit it.
 - **Idempotent** — re-running must not duplicate an existing candidate; skip slugs that
   already exist and update the watermark.
 - **Mesh-internal** — candidate/decision text may cite ADRs/R-NN/KB paths (internal); it

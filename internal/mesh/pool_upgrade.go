@@ -204,10 +204,15 @@ func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
 		}
 		if major < 2 {
 			p.Warnings = append(p.Warnings, "opencode V1: no pre-tool hook, so the mesh gate stays unavailable until opencode V2")
+		} else if !opencodeAskWired(dir, false) {
+			p.Actions = append(p.Actions, "add opencode ask rules for promotions to opencode.json")
 		}
 	} else {
 		if v := WiringVersion(dir); v < MeshWiringVersion {
 			p.Actions = append(p.Actions, fmt.Sprintf("refresh .claude/settings.json mesh hooks (v%d → v%d)", v, MeshWiringVersion))
+		}
+		if !hasStatusLine(dir) {
+			p.Actions = append(p.Actions, "add the mesh status line to .claude/settings.json")
 		}
 		// In-session peer subagents are derived from the roster; a roster
 		// change or a template change makes them stale.

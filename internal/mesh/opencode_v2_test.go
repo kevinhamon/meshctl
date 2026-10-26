@@ -140,9 +140,6 @@ func TestGate_OpencodeShapes(t *testing.T) {
 		{"apply_patch elsewhere", ocPayload(ws, "apply_patch", map[string]string{
 			"patchText": "*** Begin Patch\n*** Update File: src/a.go\n*** End Patch"}), false},
 		{"read intake is fine", ocPayload(ws, "read", map[string]string{"path": "intake/x.md"}), false},
-		{"opencode claude-mem MCP write", ocPayload(ws, "claude-mem_memory_add", map[string]string{}), true},
-		{"opencode claude-mem MCP read", ocPayload(ws, "claude-mem_search", map[string]string{}), false},
-		{"claude plugin claude-mem write", ocPayload(ws, "mcp__plugin_claude-mem_mcp-search__memory_add", map[string]string{}), true},
 	}
 	for _, c := range cases {
 		if got := GatePreToolUse("", c.p); got.Deny != c.deny {

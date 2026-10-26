@@ -89,15 +89,30 @@ func kbFinishStage(stage string) error {
 }
 
 // KBTrustGuard refuses a promotion when the peer's gate could not have put
-// the promotion ask to a human: a harness with no ask path (opencode today),
-// the PreToolUse gate not wired, or mesh wiring stamped below
+// the promotion ask to a human: the call runs under a different harness than
+// the one the workspace is wired for (that harness's gate never saw it); an
+// opencode peer without the V2 plugin or without opencode's ask rules
+// (ADR-0075; V1 has no pre-tool hook at all); a Claude Code peer whose
+// PreToolUse gate is not wired or whose wiring is stamped below
 // PromotionAskWiringVersion. nil means the ledger may trust the gate.
-// `kb finish` and `kb confirm` both run it before touching main.
+// `kb finish`, `kb confirm` and `state set` run it before touching main.
 func KBTrustGuard(a *Agent) error {
 	fix := "run `meshctl agent onboard " + a.Name + "`, then re-run from a gated session"
-	if h := a.HarnessName(); !harnessHasAskForm(h) {
-		return fmt.Errorf("%w: harness %s has no ask path, so the gate cannot ask the human to confirm a promotion — "+
-			"finish it from a Claude Code session of %s (the branch and worktree are left intact)", ErrKBTrustGuard, h, a.Name)
+	h := a.HarnessName()
+	if run := RunningHarness(); run != "" && run != h {
+		return fmt.Errorf("%w: this runs under %s, but %s is wired for %s, so %s's gate never saw the call — "+
+			"run it from a %s session of %s (the branch and worktree are left intact)", ErrKBTrustGuard, run, a.Name, h, h, h, a.Name)
+	}
+	if h == HarnessOpencode {
+		if opencodePluginState(a.Dir(), opencodePluginV2Rel, opencodePluginV2JS) != pluginCurrent {
+			return fmt.Errorf("%w: %s has no current opencode V2 gate plugin (%s), so no promotion ask could have been shown "+
+				"(opencode V1 has no pre-tool hook and cannot promote) — %s", ErrKBTrustGuard, a.Name, opencodePluginV2Rel, fix)
+		}
+		if !opencodeAskWired(a.Dir(), true) {
+			return fmt.Errorf("%w: opencode would not ask the human before %s's promotions — its ask rules are missing from "+
+				"opencode.json or overridden by OPENCODE_CONFIG_CONTENT — %s", ErrKBTrustGuard, a.Name, fix)
+		}
+		return nil
 	}
 	if !gateHookWired(a.Dir()) {
 		return fmt.Errorf("%w: %s's PreToolUse gate is not wired, so no promotion ask could have been shown — %s",

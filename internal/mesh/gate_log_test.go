@@ -49,8 +49,8 @@ func TestGate_StepAsideForSubagentCalls(t *testing.T) {
 	}{
 		{"subagent id, no peer flag: KB rule is not the hub's to apply",
 			sub(bash(hub, "s1", "git remote -v")), false, GateCheckNone, GateModeStepAside},
-		{"subagent id, no peer flag: claude-mem mutator still denied",
-			sub(HookPayload{Cwd: hub.Dir(), SessionID: "s1", ToolName: "mcp__plugin_claude-mem__memory_add"}), true, GateCheckMemoryStore, GateModeStepAside},
+		{"subagent id, no peer flag: competing memory store still denied",
+			sub(editAt(hub, "s1", "Write", "/Users/k/.claude/projects/p/memory/note.md")), true, GateCheckPath, GateModeStepAside},
 		{"subagent id, no peer flag: hand-written intake still denied",
 			sub(editAt(hub, "s1", "Write", intake)), true, GateCheckPath, GateModeStepAside},
 		{"subagent id, no peer flag: shell write to intake still denied",
@@ -144,7 +144,6 @@ func TestGate_DecisionLogNamesTheDecidingCheck(t *testing.T) {
 	}{
 		{"path rule", editAt(a, "s1", "Write", "/Users/k/.claude/projects/p/memory/note.md"), "deny", GateCheckPath},
 		{"shell-write rule", bash(a, "s1", "sed -i s/a/b/ "+filepath.Join(a.Dir(), IntakeDir, "x.md")), "deny", GateCheckShellWrite},
-		{"memory-store tool", HookPayload{Cwd: a.Dir(), SessionID: "s1", ToolName: "mcp__plugin_claude-mem__observation_add"}, "deny", GateCheckMemoryStore},
 		{"delegation to a mutating peer", HookPayload{Cwd: a.Dir(), SessionID: "s1", ToolName: "Agent",
 			ToolInput: json.RawMessage(`{"subagent_type":"` + PeerAgentPrefix + a.Name + PeerWorkSuffix + `"}`)}, "ask", GateCheckDelegation},
 		{"untouched allow", bash(a, "s1", "go test ./..."), "allow", GateCheckNone},
@@ -166,8 +165,10 @@ func TestGate_DecisionLogNamesTheDecidingCheck(t *testing.T) {
 // Outside any pool there is no agent to log for: the gate still decides and
 // writes nothing.
 func TestGate_NoAgentNoLog(t *testing.T) {
-	d := GatePreToolUse("", HookPayload{ToolName: "mcp__plugin_claude-mem__memory_add", AgentID: "sub"})
-	if !d.Deny || d.Check != GateCheckMemoryStore {
+	p := edit("Write", "/Users/k/.claude/projects/p/memory/note.md")
+	p.AgentID = "sub"
+	d := GatePreToolUse("", p)
+	if !d.Deny || d.Check != GateCheckPath {
 		t.Fatalf("got %+v", d)
 	}
 }

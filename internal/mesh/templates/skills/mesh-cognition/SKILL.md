@@ -40,6 +40,18 @@ Recognize → Recall → Retrieve → Reconcile → Verify → **Align** → Act
    work nothing before the answer. Then work in the human's order, by id: `meshctl inbox
    claim <id>`, one at a time, a one-line outcome before the next; re-plan when the human
    says something more important came up; skipped ids go on the `Deferred: <ids>` line.
+   **Status-line phrases.** Each pending group on the status line ends in a phrase the
+   human can say. A phrase starts a review; the human still decides each step. Run
+   `meshctl pending` first (the block is injected only at session start), then:
+   - "confirm kb": read the parked confirmation round, then run the `meshctl kb finish`
+     that pending names; the gate asks the human.
+   - "resolve conflicts": open the reconcile report pending names, ask each conflict as a
+     decision round, then `meshctl kb confirm <path> --report <report>` for what the
+     human confirms.
+   - "check intake": the intake order above.
+   - "review work": `meshctl work list`, review each branch with the human, then
+     `meshctl work merge <id>` or `--abort` as the human says.
+   - "consolidate": `meshctl kb consolidate`, then work the debt as in Consolidation below.
 1. **Recall.** `meshctl memory recall "<topic>"` returns tiered pointers — current
    tier outranks log, superseded decisions never appear. Add `--budget 4000` to inline
    the top current-tier bodies so the knowledge is in view. Your `state.md` digest and
@@ -122,8 +134,8 @@ Run it opportunistically: a *recurring* pattern/gotcha/lesson, a task that left 
 reusable procedure or failure mode, a consequential decision, or when `meshctl
 doctor` warns `playbooks/`/`experience/` are empty. Quality over volume.
 
-1. **Mine** the intuition engine — `meshctl intuition recall "<topic>"` (or the
-   claude-mem `mcp-search` tools for depth). Keep signal that repeats, not one-offs.
+1. **Mine** the intuition engine — `meshctl intuition recall "<topic>"`, then the
+   session records it points to. Keep signal that repeats, not one-offs.
 2. **Draft a candidate.** `meshctl kb begin`, then write one
    `knowledge/candidates/<slug>.md` per learning: *what* it is, *why* it matters,
    the *evidence* (session/obs/file refs). Candidates are proposals, not truth.
@@ -193,8 +205,8 @@ session at a work boundary (a wind-down phrase, or ~8 exchanges in) — act on i
 The distiller drafts candidates only; **you** do step 3.
 
 Guardrails: **review gate** (only the human confirms before a candidate becomes truth,
-after the confirmation round; you never confirm your own writes) · **KB is authoritative, claude-mem is never edited** (distill *from*
-it) · **all writes via `kb begin`/`kb finish`** (git-tracked, recoverable).
+after the confirmation round; you never confirm your own writes) · **KB is authoritative**
+(distill *into* it) · **all writes via `kb begin`/`kb finish`** (git-tracked, recoverable).
 
 **Standing rules → gated (meshctl ADR-0062).** A "never / do not repeat / user directive" note gets
 `rule: "<one line>"` + `triggers: ['<case-insensitive Go regex on the action text>']`

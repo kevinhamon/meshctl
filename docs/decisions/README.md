@@ -22,7 +22,7 @@ CLI's earlier name, `agentmesh` (renamed `meshctl` in [0034](0034-rename-meshctl
 | [0011](0011-agent-mesh-concurrency-and-claims.md) | Agent-mesh concurrency: intake claims, session presence, KB branch-merge | accepted |
 | [0014](0014-agent-knowledge-and-memory-layers.md) | Agent knowledge base structure + disposable memory layer | accepted |
 | [0015](0015-agent-memory-index-schema-and-cli.md) | Agent memory: index schema, topic extraction, and `memory` CLI | accepted |
-| [0016](0016-claude-mem-to-kb-distillation-bridge.md) | Agent memory as engine / contract / surface — two tiers, portable across harnesses | accepted |
+| [0016](0016-claude-mem-to-kb-distillation-bridge.md) | Agent memory as engine / contract / surface — two tiers, portable across harnesses | accepted, partially superseded by 0033 |
 | [0017](0017-session-handoff-resumable-state.md) | Session handoff — an authoritative, resumable "where we are + next step" | accepted |
 | [0018](0018-cross-agent-learning-capture.md) | Cross-agent learning capture — dispatched exchanges land in the owner's candidates/ | accepted |
 | [0019](0019-external-reference-corpus.md) | External reference corpus → distilled `reference/` KB (expert priming) | accepted |
@@ -32,7 +32,7 @@ CLI's earlier name, `agentmesh` (renamed `meshctl` in [0034](0034-rename-meshctl
 | [0030](0030-self-contained-hooks-in-binary.md) | Claude Code hooks fold into the `agentmesh` binary; wired per-agent | accepted |
 | [0031](0031-binary-native-pool-init.md) | Pools are created by the binary, not by cloning a doctrine repo | accepted |
 | [0032](0032-multi-harness-adapter-seam.md) | Multi-harness adapter seam — skills, hooks, and injection rendered per harness | accepted |
-| [0033](0033-owned-vertical-memory-system.md) | Owned, vertically-integrated agent memory — KB + episodic + recall as one system; retire the claude-mem dependency | accepted |
+| [0033](0033-owned-vertical-memory-system.md) | Owned, vertically-integrated agent memory — KB + episodic + recall as one system; retire the claude-mem dependency | accepted (claude-mem retired 2026-10-26) |
 | [0034](0034-rename-meshctl-noun-verb-cli.md) | CLI renamed `meshctl`; noun-verb command groups; repo home on gitea | accepted |
 | [0035](0035-mesh-steward-onboarding-hub.md) | Mesh steward — an interview-and-build onboarding hub agent | accepted |
 | [0036](0036-installable-module-path-release-workflow.md) | Installable module path + Gitea release workflow (cross-platform binaries) | accepted |
@@ -52,3 +52,5 @@ CLI's earlier name, `agentmesh` (renamed `meshctl` in [0034](0034-rename-meshctl
 | [0068](0068-outbound-writes-are-gate-asked-per-batch.md) | Outbound writes are gate-asked once per summary; surfaces are pool config keyed by `mutates` | accepted |
 | [0069](0069-knowledge-kind-per-peer-and-cross-peer-recall.md) | Knowledge kind is declared per peer; canonical peers recall each other and classify conflicts at promotion | accepted |
 | [0073](0073-intake-order-and-decision-rounds.md) | "check intake" shows the queue and waits for the human's order; decisions are asked as decision rounds | accepted |
+| [0074](0074-status-line-is-a-hook-subcommand.md) | The status line is a meshctl hook subcommand, wired per agent and refreshed on a timer | accepted |
+| [0075](0075-opencode-v2-promotions-use-opencodes-own-ask.md) | opencode V2 promotions use opencode's own permission ask; harness parity is a tested table | accepted |

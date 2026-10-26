@@ -453,3 +453,17 @@ func TestRecallActivity_ExcludesKB(t *testing.T) {
 		t.Fatal("intuition crowded out by KB density")
 	}
 }
+
+// The external engine switch is gone (ADR-0033, final stage): a leftover
+// MESH_INTUITION_ENGINE setting changes nothing, the owned engine answers.
+func TestRecallIntuition_IgnoresRetiredEngineSwitch(t *testing.T) {
+	t.Setenv("MESH_INTUITION_ENGINE", "claude-mem")
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	sess := filepath.Join(a.Dir(), ".memory", "sessions")
+	_ = os.MkdirAll(sess, 0o755)
+	_ = os.WriteFile(filepath.Join(sess, "s1.json"), []byte(`{"id":"s1","first_prompt":"fix the deploy pipeline","summary":"fix the deploy pipeline","ended":"2026-01-01T00:00:00Z"}`), 0o644)
+	if got := RecallIntuition(a, "deploy", 3); len(got) == 0 {
+		t.Fatal("owned engine must answer whatever MESH_INTUITION_ENGINE says")
+	}
+}

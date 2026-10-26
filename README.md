@@ -123,7 +123,7 @@ meshctl session start | end | list
 meshctl handoff show | template | set   (set reads the body from stdin; refuses a body that fails lint)
 meshctl state   show | template | set --summary-file <summary>   (the ≤40-line current-state digest, injected at session start; set is a promotion)
 meshctl intuition recall "<q>"
-meshctl hook    session-start | user-prompt | session-beat | session-end | pre-tool-use | post-tool-use   (wired per-agent; not run by hand)
+meshctl hook    session-start | user-prompt | session-beat | session-end | pre-tool-use | post-tool-use | status-line   (wired per-agent; not run by hand)
 meshctl doctor  [--fix]              # manifests, wiring, KB consistency, pool hygiene
 meshctl ask … | send …               (top-level aliases for msg ask|send)
 ```
@@ -170,7 +170,32 @@ python, no loose scripts, no machine-absolute paths):
 | inject | `hookSpecificOutput` JSON | `experimental.chat.system.transform` | `session.hook("context")` |
 | capture | SessionEnd | `session.idle` = heartbeat; session-end after an idle window | `session.execution.succeeded` = heartbeat; session-end after an idle window (`AGENT_MESH_OPENCODE_IDLE_SEC`, 600s) or `session.deleted` |
 | gate | PreToolUse deny envelope | — (advisory only) | `tool.hook("execute.before")` throws the reason |
+| ask | PreToolUse ask envelope | — | `opencode.json` `permissions` rules with effect `ask` for the promotion commands; the gate lets those calls through to opencode's prompt |
+| status line | settings.json `statusLine` → `meshctl hook status-line`, every 10s | — | — |
 | dispatch | `claude -p` | `opencode run --pure --auto` | `opencode run --standalone --auto` |
+
+### Feature parity
+
+What works where (ADR-0075). The table is generated from `internal/mesh/parity.go`; a test
+fails when a command is not classified there or when this block is out of date, and the
+release workflow runs it before building.
+
+<!-- parity:begin (generated from internal/mesh/parity.go; do not edit by hand) -->
+| Feature | Claude Code | opencode V2 (2.x) | opencode V1 (1.x) |
+|---|---|---|---|
+| Doctrine and mesh skills loaded | ✅ CLAUDE.md, `.claude/skills/` | ✅ plugin injects CLAUDE.md; `.opencode/skills/` | ✅ `instructions`; `.opencode/skills/` |
+| Session start: handoff, state digest, pending work, intuition | ✅ | ✅ | ✅ |
+| Session presence and capture | ✅ SessionEnd | ✅ heartbeat, idle window | ✅ idle event |
+| Pre-tool gate: memory stores, intake, KB rules, peer contracts | ✅ | ✅ | ✗ no pre-tool hook |
+| Promotion asks: `kb finish`, `kb confirm`, `state set`, `inbox triage apply` | ✅ gate ask | ✅ opencode's permission ask | ✗ refused |
+| Agent writes to `pool/` | ✅ asked, committed after | ✗ refused; edit by hand | ✗ |
+| Outbound-write gate | ✅ asked once per summary | ✗ refused, no ask path | ✗ |
+| After-call record: pool commits, outbound acks | ✅ PostToolUse | ✗ not called | ✗ |
+| Headless dispatch | ✅ `claude -p` | ✅ `opencode run --standalone`, locked-down permissions | ✅ `opencode run --pure` |
+| In-session peers, consult and work (`ask --in-session [--work]`) | ✅ | ✗ refused | ✗ refused |
+| Distillation at a boundary | ✅ distiller subagent | ✅ at session end | ✅ at session end |
+| Status line | ✅ every 10s | ✗ none | ✗ none |
+<!-- parity:end -->
 
 `meshctl agent new --harness …` picks it; `onboard` autodetects; it's recorded in
 `agent.yaml`. Adding a harness = one adapter (`internal/mesh/harness.go`).
@@ -249,8 +274,7 @@ Every agent maintains a git-tracked `knowledge/` KB in two tiers — a **current
 - **Episodic capture:** at session end the harness hook writes an extractive
   session-record (files touched, commands, tools, refs, commits, handoff) — no LLM.
 - **Intuition:** `meshctl intuition recall` / the per-prompt hook surface compact
-  past-work pointers from the **owned engine** by default (session-records + git spine).
-  An external episodic engine is optional (`MESH_INTUITION_ENGINE=…`).
+  past-work pointers from the **owned engine** (session-records + git spine).
 - **Distill:** turn recurring intuition into durable KB via `meshctl kb begin` → write a
   candidate → consolidate → summary + confirmation round → `meshctl kb finish
   --summary-file <summary>`. See the `mesh-cognition` skill. The
@@ -343,6 +367,8 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
   own git repo. Runtime artifacts (`pool/dispatch.*`, `pool/worktrees/`, `.sessions/`,
   `.memory/`) are git-ignored.
 - Prefer SSH git remotes.
+- A change to what a harness can do updates `internal/mesh/parity.go` in the same commit:
+  every command is classified there, and the README table above is generated from it.
 
 ## License
 

@@ -101,6 +101,40 @@ func TestSettings_PreservesExisting(t *testing.T) {
 	}
 }
 
+func TestSettings_WiresStatusLine(t *testing.T) {
+	dest := t.TempDir()
+	if _, err := EnsureAgentSettings(dest); err != nil {
+		t.Fatal(err)
+	}
+	sl, ok := readSettings(t, dest)["statusLine"].(map[string]any)
+	if !ok {
+		t.Fatal("statusLine not wired")
+	}
+	if sl["type"] != "command" || sl["command"] != StatusLineCommand || sl["refreshInterval"] != float64(StatusLineRefreshSeconds) {
+		t.Fatalf("statusLine = %v", sl)
+	}
+}
+
+func TestSettings_HandSetStatusLineIsKept(t *testing.T) {
+	dest := t.TempDir()
+	claude := filepath.Join(dest, ".claude")
+	os.MkdirAll(claude, 0o755)
+	os.WriteFile(filepath.Join(claude, "settings.json"), []byte(`{"statusLine":{"type":"command","command":"my-line"}}`), 0o644)
+	notes, err := EnsureAgentSettings(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range notes {
+		if n == "wired status line" {
+			t.Fatal("reported wiring over a hand-set status line")
+		}
+	}
+	sl := readSettings(t, dest)["statusLine"].(map[string]any)
+	if sl["command"] != "my-line" || sl["refreshInterval"] != nil {
+		t.Fatalf("hand-set status line changed: %v", sl)
+	}
+}
+
 func TestSettings_UnparseableLeftAlone(t *testing.T) {
 	dest := t.TempDir()
 	claude := filepath.Join(dest, ".claude")
@@ -135,7 +169,7 @@ func anyStr(xs []any, want string) bool {
 // had never seen an MCP call (ADR-0062 and ADR-0068 amendments).
 func TestSettings_GateMatcherFullMatchesMCPToolName(t *testing.T) {
 	full := regexp.MustCompile("^(?:" + GateHookMatcher + ")$")
-	for _, tool := range []string{"mcp__tracker__createTicket", "mcp__plugin_claude-mem__memory_add", "Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task"} {
+	for _, tool := range []string{"mcp__tracker__createTicket", "mcp__tracker__search", "Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task"} {
 		if !full.MatchString(tool) {
 			t.Errorf("matcher %q must full-match %q", GateHookMatcher, tool)
 		}

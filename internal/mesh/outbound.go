@@ -176,8 +176,9 @@ func hasTag(tags []string, t string) bool {
 	return false
 }
 
-// harnessHasAskForm reports whether a harness can put a gate ask to the human.
-// Only Claude Code's PreToolUse envelope can; opencode turns an ask into a deny.
+// harnessHasAskForm reports whether a harness can put an outbound gate ask to
+// the human. Only Claude Code's PreToolUse envelope can; opencode's own ask
+// covers only the promotion commands (ADR-0075), so an outbound ask is a deny.
 func harnessHasAskForm(name string) bool {
 	return name == "" || name == HarnessClaude
 }

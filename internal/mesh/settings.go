@@ -10,12 +10,14 @@ import (
 
 // The mesh's Claude Code integration is wired per-agent into
 // <agent>/.claude/settings.json (committed, so it travels with the workspace) —
-// not into a machine-global settings file. Two things are wired:
+// not into a machine-global settings file. Three things are wired:
 //   - the five hooks, each invoking `meshctl hook …` (resolved on $PATH, so
-//     the wiring carries no machine-absolute path), and
+//     the wiring carries no machine-absolute path),
 //   - a scoped set of Bash(meshctl <verb>:*) permissions so mesh messaging,
 //     inbox and cognition commands are preapproved — but not the destructive
-//     ones (pool teardown/forget, update).
+//     ones (pool teardown/forget, update), and
+//   - the status line, `meshctl hook status-line` (ADR-0074), only when the
+//     workspace has none: a hand-set status line is never replaced.
 //
 // EnsureAgentSettings is idempotent and near add-only: it inserts what is
 // missing and never removes a key. The one rewrite is the matcher on the mesh's
@@ -87,7 +89,7 @@ func HasBareMCPMatcher(matcher string) bool {
 // companion on the same matcher (the seam for pool commits and outbound acks:
 // ADR-0066, ADR-0068); the other three are advisory. The gate matcher fires on
 // file-edit tools, Bash, every MCP tool and delegations — the gate denies
-// claude-mem writes and competing-store paths, then checks the call against the
+// competing-store and intake paths, then checks the call against the
 // agent's KB rules (kbrules.go). v2 widened the matcher for the KB-rule gate;
 // v4 added Agent/Task for delegations; v5 fixed the MCP alternative and added
 // PostToolUse.
@@ -124,6 +126,10 @@ func EnsureAgentSettings(dest string) ([]string, error) {
 	}
 	if added := ensureHooks(root); len(added) > 0 {
 		notes = append(notes, "wired hooks: "+strings.Join(added, ", "))
+		changed = true
+	}
+	if ensureStatusLine(root) {
+		notes = append(notes, "wired status line")
 		changed = true
 	}
 
@@ -220,6 +226,40 @@ func ensureMeshctlPermission(root map[string]any) string {
 	default:
 		return fmt.Sprintf("added %d scoped meshctl permissions", added)
 	}
+}
+
+// StatusLineCommand is the status-line command the mesh wires (ADR-0074).
+const StatusLineCommand = "meshctl hook status-line"
+
+// ensureStatusLine sets statusLine when the workspace has none. Any existing
+// statusLine, the mesh's own or hand-set, is left as it is. Returns true if it
+// wrote.
+func ensureStatusLine(root map[string]any) bool {
+	if _, ok := root["statusLine"]; ok {
+		return false
+	}
+	root["statusLine"] = map[string]any{
+		"type":            "command",
+		"command":         StatusLineCommand,
+		"refreshInterval": StatusLineRefreshSeconds,
+	}
+	return true
+}
+
+// hasStatusLine reports whether the workspace's settings.json sets statusLine
+// (the mesh's or a hand-set one). An unreadable file counts as set: the
+// wiring would leave it alone anyway.
+func hasStatusLine(dest string) bool {
+	b, err := os.ReadFile(filepath.Join(dest, ".claude", "settings.json"))
+	if err != nil {
+		return false
+	}
+	var root map[string]any
+	if json.Unmarshal(b, &root) != nil {
+		return true
+	}
+	_, ok := root["statusLine"]
+	return ok
 }
 
 // ensureHooks inserts any missing mesh hook entry. A hook is considered present

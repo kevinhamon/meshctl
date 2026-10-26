@@ -64,6 +64,8 @@ type PendingLine struct {
 	Detail string
 	// TriageSignals counts open requests with a triage signal (intake only).
 	TriageSignals int
+	// Aged counts candidates past PendingStaleDays (health only).
+	Aged int
 }
 
 // PendingBlock is a peer's pending work.
@@ -382,7 +384,7 @@ func pendingHealth(a *Agent, report string, hasReport bool, now time.Time) *Pend
 	} else {
 		parts = append(parts, "no reconcile report yet")
 	}
-	return &PendingLine{Kind: PendingHealth, Label: "KB health", Count: len(cands) + unconfirmed,
+	return &PendingLine{Kind: PendingHealth, Label: "KB health", Count: len(cands) + unconfirmed, Aged: aged,
 		Detail: strings.Join(parts, ", ") + " — `meshctl kb consolidate` (candidates), `meshctl kb reconcile` (unconfirmed)"}
 }
 

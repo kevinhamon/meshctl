@@ -44,21 +44,6 @@ type GateDecision struct {
 	Check string
 }
 
-const claudeMemPrefix = "mcp__plugin_claude-mem__"
-
-// claudeMemMutators are the claude-mem MCP tools that WRITE its store. Reads
-// (search/query/get/list/*context*/timeline/outline) stay allowed — the gate
-// removes the competing write path, not lookups.
-var claudeMemMutators = map[string]bool{
-	"memory_add":               true,
-	"observation_add":          true,
-	"observation_record_event": true,
-	"build_corpus":             true,
-	"rebuild_corpus":           true,
-	"prime_corpus":             true,
-	"reprime_corpus":           true,
-}
-
 // fileEditTools name the tools whose input carries a target path the gate reads:
 // Claude Code's, and opencode's (lowercase; V2 write/edit take a `path`).
 var fileEditTools = map[string]bool{
@@ -68,25 +53,6 @@ var fileEditTools = map[string]bool{
 
 // patchTools carry their target paths inside patch text (opencode apply_patch).
 var patchTools = map[string]bool{"apply_patch": true, "patch": true}
-
-// isClaudeMemMutator reports whether a tool name is a claude-mem write tool.
-// Claude Code names it mcp__plugin_claude-mem__<tool>; opencode names MCP tools
-// <server>_<tool> with a user-chosen server name, so match any name carrying
-// "claude-mem"/"claude_mem" that ends in a mutator.
-func isClaudeMemMutator(name string) bool {
-	if strings.HasPrefix(name, claudeMemPrefix) {
-		return claudeMemMutators[strings.TrimPrefix(name, claudeMemPrefix)]
-	}
-	if !strings.Contains(name, "claude-mem") && !strings.Contains(name, "claude_mem") {
-		return false
-	}
-	for m := range claudeMemMutators {
-		if strings.HasSuffix(name, "_"+m) {
-			return true
-		}
-	}
-	return false
-}
 
 // GatePreToolUse evaluates a PreToolUse payload against mesh doctrine and
 // appends the attributed decision to the deciding agent's log (gate_log.go).
@@ -104,19 +70,9 @@ func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
 
 // gateEvaluate is the decision without the log. Every return names its check.
 func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
-	name := p.ToolName
-
-	// 1. claude-mem write tools — competing memory store. Denied by name, so this
-	//    holds even if tool_input is missing or malformed. Reads fall through to
-	//    the KB-rule check.
-	if isClaudeMemMutator(name) {
-		return GateDecision{Deny: true, Check: GateCheckMemoryStore, Reason: "mesh: memory is owned by the mesh — do not write the claude-mem store. " +
-			"Persist through `meshctl memory` / `meshctl kb` (knowledge), or `meshctl send` / `meshctl ask` (messages)."}
-	}
-
-	// 1a. A delegation (Agent/Task call) from the caller's session. Delegating
-	//     work to a state-mutating peer (ADR-0063) is the human's call, every
-	//     time: ask. Nothing else about a delegation is the gate's business.
+	// 1. A delegation (Agent/Task call) from the caller's session. Delegating
+	//    work to a state-mutating peer (ADR-0063) is the human's call, every
+	//    time: ask. Nothing else about a delegation is the gate's business.
 	if p.ToolName == "Agent" || p.ToolName == "Task" {
 		if p.InSession {
 			return GateDecision{Deny: true, Check: GateCheckDelegation, Reason: peerWorkDenyDispatch}
@@ -202,32 +158,35 @@ func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 	//    path. After the KB rules, so a rule deny-once delays the ask to the
 	//    retry rather than skipping it; never in step-aside mode, since the
 	//    summary is the subagent's, not the hub's.
+	//    Every ask in steps 5–5e goes through opencodeAskPath: under opencode
+	//    it becomes opencode's own permission ask where one is wired
+	//    (ADR-0075), else a deny naming why.
 	if d := gatePoolPathAsk(agentsDir, p); d.Ask || d.Deny {
-		return d
+		return opencodeAskPath(p, d)
 	}
 
 	// 5b. Promotion at `kb finish` (ADR-0067, gate_promotion.go): asked with
 	//     the peer's summary as the signature; candidates-only passes.
 	if d := gatePromotion(agentsDir, p); d.Ask || d.Deny {
-		return d
+		return opencodeAskPath(p, d)
 	}
 
 	// 5c. Promotion at `state set` (ADR-0067, gate_state.go): the digest meets
 	//     the same ask; no summary or no human at the prompt is a deny.
 	if d := gateStateSet(agentsDir, p); d.Ask || d.Deny {
-		return d
+		return opencodeAskPath(p, d)
 	}
 
 	// 5d. Bulk confirmation at `kb confirm` (ADR-0070, gate_kb_confirm.go):
 	//     asked with the reconcile report's lines for the named paths.
 	if d := gateKBConfirm(agentsDir, p); d.Ask || d.Deny {
-		return d
+		return opencodeAskPath(p, d)
 	}
 
 	// 5e. Intake triage apply (ADR-0072, triage_apply.go): asked with the
 	//     report lines for the named ids; no report is a deny.
 	if d := gateTriageApply(agentsDir, p); d.Ask || d.Deny {
-		return d
+		return opencodeAskPath(p, d)
 	}
 
 	// 6. Outbound gate (ADR-0068, outbound.go): after the KB rules and never in
@@ -515,7 +474,7 @@ var reShellWriteOp = regexp.MustCompile(`^(?:tee|sed\s+-[a-zA-Z]*i|mv|cp|rm|touc
 
 // reShellIntakePath matches a request or claim file path under an intake/
 // directory, or a competing memory store path, anywhere on the command line.
-var reShellIntakePath = regexp.MustCompile(`(?:^|[\s"'=])(?:[^\s"']*/)?` + IntakeDir + `/[^\s"']*\.(?:md|claim)\b|/\.claude/[^\s"']*/memory/|/\.claude-mem/`)
+var reShellIntakePath = regexp.MustCompile(`(?:^|[\s"'=])(?:[^\s"']*/)?` + IntakeDir + `/[^\s"']*\.(?:md|claim)\b|/\.claude/[^\s"']*/memory/`)
 
 // deniedShellWrite returns a reason when a shell command both names a gated
 // path and carries a write operation. Reads (`cat intake/x.md`, `grep`) pass.
@@ -540,7 +499,7 @@ func deniedShellWrite(agentsDir string, p HookPayload) string {
 	}
 	// Scope the intake rule to this pool when the pool is known: a command
 	// writing some unrelated repo's intake/ is not the mesh's business.
-	if agentsDir != "" && !strings.Contains(args, "/.claude") && !strings.Contains(args, "/.claude-mem") {
+	if agentsDir != "" && !strings.Contains(args, "/.claude") {
 		if abs := shellIntakePathAbs(args, p.Cwd); abs != "" && !underDir(abs, agentsDir) {
 			return ""
 		}
@@ -666,10 +625,10 @@ func patchFilePaths(raw json.RawMessage) []string {
 }
 
 // deniedWritePath returns a non-empty reason when the path is a competing memory
-// store (Claude Code auto-memory or claude-mem) or a hand-written intake file.
+// store (Claude Code auto-memory) or a hand-written intake file.
 // The mesh's OWN stores — <agent>/knowledge/ and <agent>/.memory/ — are not
 // matched: ".memory" never contains the "/memory/" segment, and neither carries
-// a ".claude"/".claude-mem"/"intake" segment.
+// a ".claude"/"intake" segment.
 func deniedWritePath(agentsDir, path string) string {
 	s := filepath.ToSlash(path)
 
@@ -677,10 +636,6 @@ func deniedWritePath(agentsDir, path string) string {
 	if strings.Contains(s, "/.claude/") && (strings.Contains(s, "/memory/") || strings.HasSuffix(s, "/memory")) {
 		return "mesh: this writes Claude Code's built-in memory store, which the mesh replaces. " +
 			"Persist through the mesh (`meshctl memory` / `meshctl kb`), not ~/.claude/**/memory/**."
-	}
-	// claude-mem on-disk store.
-	if strings.Contains(s, "/.claude-mem/") || strings.HasSuffix(s, "/.claude-mem") {
-		return "mesh: this writes the claude-mem store, which the mesh replaces. Use `meshctl memory` / `meshctl kb`."
 	}
 	// Hand-written intake (ADR-0043): intake/ is an ephemeral queue owned by
 	// meshctl, never authored by hand. Scoped to this pool when the pool is

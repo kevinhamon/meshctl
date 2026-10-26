@@ -4,7 +4,7 @@ date: 2026-07-16
 ---
 # 0016. Agent memory as engine / contract / surface — two tiers, portable across harnesses
 
-- **Status:** accepted
+- **Status:** accepted, partially superseded by ADR-0033 — the engine section is retired (claude-mem removed 2026-10-26); the contract/surface split and the two tiers stand.
 - **Date:** 2026-07-16
 - **Deciders:** maintainer
 - **Related:** ADR-0014 (KB structure + disposable memory), ADR-0015 (memory index + `memory` CLI), ADR-0011 (`kb begin/finish` write path), claude-mem plugin (`thedotmack/claude-mem` v13.3.0 — a local worker service at `127.0.0.1:37777` + SQLite/chroma + MCP `mcp-search`)

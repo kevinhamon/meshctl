@@ -43,7 +43,7 @@ func gateWiringFindings(a *Agent) []DoctorFinding {
 	if !hookCommandPresent(entries, "meshctl hook pre-tool-use") {
 		out = append(out, DoctorFinding{Agent: a.Name, Level: "error",
 			Message: "PreToolUse enforcement gate not wired — doctrine is advisory only (a model can write the " +
-				"claude-mem/Claude memory store or hand-write intake). Run `meshctl agent onboard " + a.Name + "`"})
+				"Claude Code memory store or hand-write intake). Run `meshctl agent onboard " + a.Name + "`"})
 	}
 	out = append(out, staleMatcherFindings(a, entries)...)
 	if v := WiringVersion(a.Dir()); v < MeshWiringVersion {
@@ -272,6 +272,10 @@ func opencodeGateFindings(a *Agent) []DoctorFinding {
 		}
 		if managed(v1) {
 			out = append(out, f("warn", "leftover opencode V1 plugin ("+opencodePluginV1Rel+") — V2 warns on it every start; "+onboard))
+		}
+		if !opencodeAskWired(a.Dir(), false) {
+			out = append(out, f("error", "opencode.json lacks the ask rules for promotions (ADR-0075), so `kb finish`, `kb confirm` "+
+				"and `state set` are refused; "+onboard))
 		}
 		return out
 	}

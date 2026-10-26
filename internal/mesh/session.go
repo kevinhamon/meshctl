@@ -29,9 +29,10 @@ func sessionPath(agentDir, id string) string {
 
 // sessionIDEnv lists the env vars that carry the harness session id, in
 // precedence order. CLAUDE_SESSION_ID is the explicit override; Claude Code
-// exports CLAUDE_CODE_SESSION_ID to every tool subprocess, and it matches the
-// session_id the hooks register presence under.
-var sessionIDEnv = []string{"CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID"}
+// exports CLAUDE_CODE_SESSION_ID and opencode V2 OPENCODE_SESSION_ID to every
+// tool subprocess, each matching the session_id its hooks register presence
+// under.
+var sessionIDEnv = []string{"CLAUDE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "OPENCODE_SESSION_ID"}
 
 // ResolveSessionID returns the harness session id from the environment, or
 // mints a per-process id. The minted id is unique to one meshctl invocation, so
@@ -48,8 +49,8 @@ func ResolveSessionID(pid int, now time.Time) string {
 // ResolveAgentSessionID resolves the session a claim/release acts on in an
 // agent workspace. Precedence: the harness session id from the environment;
 // else the sole live registered session (hooks register presence under the
-// harness id, so a harness that does not export it to tool shells — opencode —
-// still resolves to its session); else a minted per-process id.
+// harness id, so a harness that does not export it to tool shells — opencode
+// V1 — still resolves to its session); else a minted per-process id.
 func ResolveAgentSessionID(agent *Agent, pid int, now time.Time) string {
 	for _, k := range sessionIDEnv {
 		if v := os.Getenv(k); v != "" {

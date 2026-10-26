@@ -1570,7 +1570,7 @@ func intuitionCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "intuition recall <query>",
-		Short: "Compact past-work pointers (owned engine by default; claude-mem opt-in) — advisory",
+		Short: "Compact past-work pointers from session records and git — advisory",
 	}
 	recall := &cobra.Command{
 		Use:   "recall <query>",
@@ -1813,7 +1813,7 @@ func hookCmd() *cobra.Command {
 	var harness, peer string
 	var inSession, work bool
 	cmd := &cobra.Command{
-		Use:   "hook session-start|user-prompt|session-beat|session-end|pre-tool-use|post-tool-use",
+		Use:   "hook session-start|user-prompt|session-beat|session-end|pre-tool-use|post-tool-use|status-line",
 		Short: "Harness hook handlers (self-contained; wired per-agent by agent new/onboard)",
 	}
 	cmd.PersistentFlags().StringVar(&harness, "harness", "", "output envelope: claude|opencode (default: agent's harness)")
@@ -1936,7 +1936,20 @@ func hookCmd() *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(sessionStart, userPrompt, sessionBeat, sessionEnd, preToolUse, postToolUse)
+	// The status line is not a hook event but rides the same wiring: Claude
+	// Code runs it with its own stdin JSON and shows stdout verbatim (ADR-0074).
+	statusLine := &cobra.Command{
+		Use:   "status-line",
+		Short: "Status line: the agent and the pending work waiting on you, one line",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			b, _ := io.ReadAll(os.Stdin)
+			dir, _ := agentsDir()
+			fmt.Println(mesh.StatusLine(dir, mesh.ParseStatusLinePayload(b), time.Now()))
+			return nil
+		},
+	}
+
+	cmd.AddCommand(sessionStart, userPrompt, sessionBeat, sessionEnd, preToolUse, postToolUse, statusLine)
 	return cmd
 }
 

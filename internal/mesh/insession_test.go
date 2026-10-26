@@ -216,7 +216,7 @@ func TestGate_InSessionPeerContract(t *testing.T) {
 		}
 	}
 	// Reads and MCP lookups pass.
-	for _, tool := range []string{"Read", "Grep", "Glob", "mcp__plugin_claude-mem__search"} {
+	for _, tool := range []string{"Read", "Grep", "Glob", "mcp__tracker__search"} {
 		p := HookPayload{Cwd: caller.Dir(), ToolName: tool, PeerAgent: "architect", InSession: true}
 		if GatePreToolUse(dir, p).Deny {
 			t.Errorf("peer should be allowed %s", tool)

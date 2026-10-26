@@ -16,9 +16,22 @@ permissions:
   contents: write
 
 jobs:
+  # Harness parity (ADR-0075): every command classified per harness and the
+  # README table current. Fast and deterministic; nothing is released without it.
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Harness parity
+        run: go test ./cmd/meshctl -run HarnessParity
+
   # Create the release once, before the matrix: five jobs racing
   # `gh release view || gh release create` made the losers fail on "already exists".
   release:
+    needs: parity
     runs-on: ubuntu-latest
     steps:
       - name: Create release
