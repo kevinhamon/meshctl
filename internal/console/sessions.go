@@ -53,9 +53,14 @@ func Sessions(dir string, now time.Time) []SessionReport {
 		for _, s := range mesh.OpenSessions(a, now) {
 			r := SessionReport{Agent: a.Name, ID: s.ID, Started: unix(s.Started), LastActive: unix(s.LastBeat),
 				IdleSeconds: now.Unix() - s.LastBeat, TTY: s.TTY, Focusable: s.TTY != "" && focusSupported(),
-				Claim: s.CurrentClaim, KBBranch: s.KBBranch, Jobs: []JobReport{}, JobsAt: unix(s.JobsAt)}
-			for _, j := range s.Jobs {
-				r.Jobs = append(r.Jobs, JobReport{ID: j.ID, Schedule: j.Schedule, Recurring: j.Recurring, Prompt: j.Prompt})
+				Claim: s.CurrentClaim, KBBranch: s.KBBranch, Jobs: []JobReport{}}
+			// Jobs belong to the harness process, so a session started by
+			// /clear shows the jobs its process kept.
+			if js, ok := mesh.SessionJobs(a, s); ok {
+				r.JobsAt = unix(js.At)
+				for _, j := range js.Jobs {
+					r.Jobs = append(r.Jobs, JobReport{ID: j.ID, Schedule: j.Schedule, Recurring: j.Recurring, Prompt: j.Prompt})
+				}
 			}
 			out = append(out, r)
 		}

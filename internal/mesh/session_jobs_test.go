@@ -2,6 +2,7 @@ package mesh
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -35,20 +36,27 @@ func TestHookSessionBeat_RecordsScheduledJobs(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)
 	now := time.Now()
+	jobsOf := func(id string) []SessionJob {
+		s, err := readSession(sessionPath(a.Dir(), id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		js, _ := SessionJobs(a, s)
+		return js.Jobs
+	}
 	jobs := []SessionJob{{ID: "39c9cdf1", Schedule: "*/10 * * * *", Recurring: true, Prompt: "check the PRs"}}
 	HookSessionBeat(dir, HookPayload{Cwd: a.Dir(), SessionID: "s1", SessionCrons: &jobs}, now)
-	s, err := readSession(sessionPath(a.Dir(), "s1"))
-	if err != nil || len(s.Jobs) != 1 || s.Jobs[0].Prompt != "check the PRs" || s.JobsAt != now.Unix() {
-		t.Fatalf("jobs: %+v %v", s, err)
+	if j := jobsOf("s1"); len(j) != 1 || j[0].Prompt != "check the PRs" {
+		t.Fatalf("jobs: %+v", j)
 	}
 	// A heartbeat without the field keeps them; an empty list clears them.
 	HookSessionBeat(dir, HookPayload{Cwd: a.Dir(), SessionID: "s1"}, now.Add(time.Minute))
-	if s, _ := readSession(sessionPath(a.Dir(), "s1")); len(s.Jobs) != 1 {
+	if len(jobsOf("s1")) != 1 {
 		t.Fatal("a plain heartbeat must keep the jobs")
 	}
 	none := []SessionJob{}
 	HookSessionBeat(dir, HookPayload{Cwd: a.Dir(), SessionID: "s1", SessionCrons: &none}, now.Add(2*time.Minute))
-	if s, _ := readSession(sessionPath(a.Dir(), "s1")); len(s.Jobs) != 0 {
+	if len(jobsOf("s1")) != 0 {
 		t.Fatal("an empty list must clear the jobs")
 	}
 	p := ParseHookPayload([]byte(`{"session_id":"s2","session_crons":[{"id":"a","schedule":"0 * * * *","recurring":false,"prompt":"x"}]}`))
@@ -57,6 +65,48 @@ func TestHookSessionBeat_RecordsScheduledJobs(t *testing.T) {
 	}
 	if ParseHookPayload([]byte(`{"session_id":"s2"}`)).SessionCrons != nil {
 		t.Fatal("absent field must stay nil")
+	}
+}
+
+// /clear ends one session id and starts another in the same harness process,
+// which keeps its scheduled jobs: the new session shows them at once.
+func TestScheduledJobs_SurviveClear(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	me := os.Getpid()
+	old := psParentTTY
+	// Every process in the walk reports a terminal: the harness is this test process.
+	psParentTTY = func(pid int) (int, string, bool) { return 1, "ttys042", true }
+	defer func() { psParentTTY = old }()
+	now := time.Now()
+	jobs := []SessionJob{{ID: "j1", Schedule: "*/5 * * * *", Recurring: true, Prompt: "watch the inbox"}}
+	HookSessionBeat(dir, HookPayload{Cwd: a.Dir(), SessionID: "before-clear", SessionCrons: &jobs}, now)
+	_ = SessionEnd(a, "before-clear")                              // /clear: SessionEnd for the old id …
+	if err := TouchSession(a, "after-clear", 0, now); err != nil { // … and a new session in the same process
+		t.Fatal(err)
+	}
+	s, err := readSession(sessionPath(a.Dir(), "after-clear"))
+	if err != nil || s.HarnessPID != me {
+		t.Fatalf("new session's harness: %+v %v", s, err)
+	}
+	js, ok := SessionJobs(a, s)
+	if !ok || len(js.Jobs) != 1 || js.Jobs[0].Prompt != "watch the inbox" {
+		t.Fatalf("jobs after /clear: %+v %v", js, ok)
+	}
+	// Hygiene keeps a live process's list and drops a dead one's.
+	dead := filepath.Join(jobsDir(a.Dir()), "pid-999999.json")
+	_ = os.WriteFile(dead, []byte(`{"harness_pid":999999,"jobs":[],"at":1}`), 0o644)
+	var flagged []string
+	for _, h := range PoolHygiene(dir, now) {
+		if strings.Contains(h.Message, "scheduled-job list") {
+			flagged = append(flagged, h.Message)
+		}
+		if strings.Contains(h.Message, "stale session record jobs") {
+			t.Errorf("the jobs folder is not a session record: %s", h.Message)
+		}
+	}
+	if len(flagged) != 1 || !strings.Contains(flagged[0], "pid-999999") {
+		t.Fatalf("hygiene: %v", flagged)
 	}
 }
 

@@ -46,3 +46,7 @@ Verified while building (2026-10-26):
 - Negative: when a job last fired is not known; the harness does not report it.
 - Negative: an upgrade notice appears only after a `pool upgrade` with this version has written the stamp.
 - Follow-ups: answering in the console (option 4) if a signing path the human accepts emerges; a native shell if a menu-bar badge proves worth its cost; opencode scheduled work once it has an equivalent.
+
+## Amendment (2026-10-26, v1.8.1): scheduled jobs belong to the harness process
+
+Claude Code keeps a session's scheduled jobs across `/clear`, which ends one session id (SessionEnd) and starts another (SessionStart) in the same process. Stored in the presence record, the jobs vanished from the console with the old id and came back only after the next turn's Stop hook. The Stop hook now writes the job list to `<agent>/.sessions/jobs/pid-<harness pid>.json` (per session id when the process is unknown), and the console shows a process's jobs on whichever session it runs. Hygiene removes the list once the process has exited. The session listings skip the `jobs/` folder.

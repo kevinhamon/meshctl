@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -267,10 +268,33 @@ func agentHygiene(agentsDir string, a *Agent, now time.Time) []HygieneItem {
 	// Stale presence records.
 	if entries, err := os.ReadDir(sessionsDir(dir)); err == nil {
 		for _, e := range entries {
+			if e.IsDir() {
+				continue // jobs/: below
+			}
 			p := filepath.Join(sessionsDir(dir), e.Name())
 			s, err := readSession(p)
 			if err != nil || (int(now.Unix()-s.LastBeat) > staleSec() && !s.harnessAlive()) {
 				add("stale session record "+e.Name(), removeFix(p))
+			}
+		}
+	}
+	// Scheduled-job lists of processes that have exited (or, kept per
+	// session, of sessions that are gone).
+	if entries, err := os.ReadDir(jobsDir(dir)); err == nil {
+		for _, e := range entries {
+			p := filepath.Join(jobsDir(dir), e.Name())
+			var js JobSet
+			b, err := os.ReadFile(p)
+			gone := err != nil || json.Unmarshal(b, &js) != nil
+			switch {
+			case gone:
+			case js.HarnessPID > 0:
+				gone = !processAlive(js.HarnessPID)
+			default:
+				gone = !fileExists(sessionPath(dir, js.Session))
+			}
+			if gone {
+				add("scheduled-job list of an ended session "+e.Name(), removeFix(p))
 			}
 		}
 	}

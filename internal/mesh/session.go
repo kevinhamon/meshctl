@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -25,11 +26,45 @@ type Session struct {
 	// is open but idle, and to bring its terminal to the front.
 	HarnessPID int    `json:"harness_pid,omitempty"`
 	TTY        string `json:"tty,omitempty"`
-	// Jobs are the session's scheduled jobs as of JobsAt (unix seconds), from
-	// the harness's end-of-turn payload (Claude Code's Stop hook).
-	Jobs   []SessionJob `json:"jobs,omitempty"`
-	JobsAt int64        `json:"jobs_at,omitempty"`
-	path   string       `json:"-"`
+	path       string `json:"-"`
+}
+
+// Scheduled jobs belong to the harness process, not the conversation:
+// Claude Code keeps a session's jobs across /clear, which ends one session id
+// and starts another in the same process. So they are stored per harness
+// process (per session id when the process is unknown), under
+// <agent>/.sessions/jobs/, a folder the session listings skip.
+
+// JobSet is the scheduled jobs one harness process runs, as of At.
+type JobSet struct {
+	HarnessPID int          `json:"harness_pid,omitempty"`
+	Session    string       `json:"session,omitempty"` // when the harness process is unknown
+	Jobs       []SessionJob `json:"jobs"`
+	At         int64        `json:"at"`
+}
+
+func jobsDir(agentDir string) string { return filepath.Join(sessionsDir(agentDir), "jobs") }
+
+// jobsPath is where the jobs of session s are kept: by its harness process,
+// else by its id.
+func jobsPath(agentDir string, s *Session) string {
+	if s.HarnessPID > 0 {
+		return filepath.Join(jobsDir(agentDir), "pid-"+strconv.Itoa(s.HarnessPID)+".json")
+	}
+	return filepath.Join(jobsDir(agentDir), "session-"+s.ID+".json")
+}
+
+// SessionJobs returns the scheduled jobs of the process running session s.
+func SessionJobs(agent *Agent, s *Session) (JobSet, bool) {
+	b, err := os.ReadFile(jobsPath(agent.Dir(), s))
+	if err != nil {
+		return JobSet{}, false
+	}
+	var js JobSet
+	if json.Unmarshal(b, &js) != nil {
+		return JobSet{}, false
+	}
+	return js, true
 }
 
 // harnessAlive reports whether the session's harness process is still
@@ -163,8 +198,8 @@ func TouchSession(agent *Agent, id string, pid int, now time.Time) error {
 	return writeSession(s)
 }
 
-// SetSessionJobs records a session's scheduled jobs (an empty list clears
-// them), touching its presence.
+// SetSessionJobs records the scheduled jobs of the process running session
+// id (an empty list clears them), touching its presence.
 func SetSessionJobs(agent *Agent, id string, pid int, jobs []SessionJob, now time.Time) error {
 	if err := TouchSession(agent, id, pid, now); err != nil {
 		return err
@@ -173,8 +208,15 @@ func SetSessionJobs(agent *Agent, id string, pid int, jobs []SessionJob, now tim
 	if err != nil {
 		return err
 	}
-	s.Jobs, s.JobsAt = jobs, now.Unix()
-	return writeSession(s)
+	if err := os.MkdirAll(jobsDir(agent.Dir()), 0o755); err != nil {
+		return err
+	}
+	js := JobSet{HarnessPID: s.HarnessPID, Jobs: jobs, At: now.Unix()}
+	if s.HarnessPID == 0 {
+		js.Session = s.ID
+	}
+	b, _ := json.Marshal(js)
+	return writeFileAtomic(jobsPath(agent.Dir(), s), b, 0o644)
 }
 
 // OpenSessions lists a peer's sessions that are still open, without reaping

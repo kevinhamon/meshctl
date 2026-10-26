@@ -282,7 +282,8 @@ func WatchPaths(dir string) []string {
 		d := a.Dir()
 		add(d)
 		add(a.InboxPath())
-		add(filepath.Join(d, mesh.SessionsDir)) // presence
+		add(filepath.Join(d, mesh.SessionsDir))         // presence
+		add(filepath.Join(d, mesh.SessionsDir, "jobs")) // scheduled jobs, per harness process
 		add(filepath.Join(d, mesh.MemoryDir))
 		for _, sub := range []string{"sessions", "confirm", "reconcile", mesh.OutboundDir} {
 			add(filepath.Join(d, mesh.MemoryDir, sub))
