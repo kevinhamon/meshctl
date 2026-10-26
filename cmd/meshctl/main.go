@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kevinhamon/meshctl/internal/console"
 	"github.com/kevinhamon/meshctl/internal/mesh"
 	"github.com/kevinhamon/meshctl/internal/selfupdate"
 	"github.com/spf13/cobra"
@@ -123,6 +124,9 @@ func updateCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("meshctl %s installed. Next, in each pool: `meshctl pool upgrade --check`\n", rel.Tag)
+			if console.RestartLoginItem() {
+				fmt.Println("restarted the console login item on the new binary")
+			}
 			return nil
 		},
 	}
@@ -161,7 +165,7 @@ func rootCmd() *cobra.Command {
 		msgCmd(),   // ask | send
 		inboxCmd(), // list | next | claim | release | respond | decline | archive
 		sentCmd(),  // requester side: responses awaiting read-back
-		kbCmd(), workCmd(), pendingCmd(), memoryCmd(), sessionCmd(), handoffCmd(), stateCmd(), intuitionCmd(), hookCmd(),
+		kbCmd(), workCmd(), pendingCmd(), consoleCmd(), memoryCmd(), sessionCmd(), handoffCmd(), stateCmd(), intuitionCmd(), hookCmd(),
 		doctorCmd(),
 		// Top-level aliases for high-frequency verbs (muscle memory + one preapproval).
 		askCmd(), sendCmd(),
@@ -585,6 +589,16 @@ func poolUpgradeCmd() *cobra.Command {
 					return err
 				}
 				fmt.Println("restart every open agent session — running harnesses keep the old wiring until restarted")
+				// Record which meshctl upgraded the pool, so a newer one can say
+				// the pool is behind (console and doctor).
+				if err := mesh.WriteUpgradeStamp(dir, resolveVersion(), time.Now()); err != nil {
+					fmt.Println("  (could not record the upgrade stamp: " + err.Error() + ")")
+				}
+				if p, err := console.LoginItemPath(); err == nil && runtime.GOOS == "darwin" {
+					if _, err := os.Stat(p); err != nil {
+						fmt.Println("tip: `meshctl console install` keeps a live view of this pool running from login")
+					}
+				}
 			}
 			// Hygiene last: an upgraded pool should also be a clean one. Automatic
 			// repairs are applied; anything needing a human is listed.
@@ -1078,7 +1092,7 @@ func sendCmd() *cobra.Command {
 // --- doctor ---
 
 func doctorCmd() *cobra.Command {
-	var fix bool
+	var fix, asJSON bool
 	c := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check manifests, wiring, KB consistency and pool hygiene; non-zero exit on any error",
@@ -1092,33 +1106,40 @@ need a human (text you wrote, doctrine you edited) are always reported, never ch
 			if err != nil {
 				return err
 			}
-			findings, ok := mesh.Doctor(dir)
-			for _, l := range mesh.OutboundWiringLines(dir) {
+			now := time.Now()
+			info := mesh.OutboundWiringLines(dir)
+			if n := mesh.UpgradeNotice(dir, resolveVersion()); n != "" {
+				info = append(info, n)
+			}
+			if n := selfupdate.Notice(resolveVersion(), now); n != "" {
+				info = append(info, n)
+			}
+			findings, ok, fixed, errs := mesh.DoctorWithHygiene(dir, fix, now)
+			for _, m := range console.LoginItemFindings(console.ReadSettings()) {
+				findings = append(findings, mesh.DoctorFinding{Agent: "console", Level: "warn", Message: m})
+			}
+			if asJSON {
+				if err := printJSON(mesh.NewDoctorReport(findings, ok, info, now)); err != nil {
+					return err
+				}
+				if !ok {
+					return &mesh.CodedError{Code: 1, Msg: "doctor found errors"}
+				}
+				return nil
+			}
+			for _, l := range info {
 				fmt.Println("ℹ " + l)
 			}
-			if n := selfupdate.Notice(resolveVersion(), time.Now()); n != "" {
-				fmt.Println("ℹ " + n)
+			for _, f := range fixed {
+				fmt.Println("✓ fixed " + f)
 			}
-			hyg := mesh.PoolHygiene(dir, time.Now())
-			if fix {
-				fixed, errs := mesh.ApplyHygiene(hyg)
-				for _, f := range fixed {
-					fmt.Println("✓ fixed " + f)
-				}
-				for _, e := range errs {
-					fmt.Println("✗ fix failed: " + e.Error())
-				}
-				hyg = mesh.ManualItems(hyg)
+			for _, e := range errs {
+				fmt.Println("✗ fix failed: " + e.Error())
 			}
-			for _, h := range hyg {
-				if findingSeen(findings, h.Agent, h.Message) {
-					continue // reported by Doctor already (the pool repo nag lives in both)
+			for i, f := range findings {
+				if f.Fixable {
+					findings[i].Message += "  (fixable: meshctl doctor --fix)"
 				}
-				msg := h.Message
-				if h.Fixable() {
-					msg += "  (fixable: meshctl doctor --fix)"
-				}
-				findings = append(findings, mesh.DoctorFinding{Agent: h.Agent, Level: "warn", Message: msg})
 			}
 			if len(findings) == 0 {
 				fmt.Println("doctor: clean ✓")
@@ -1141,18 +1162,8 @@ need a human (text you wrote, doctrine you edited) are always reported, never ch
 		},
 	}
 	c.Flags().BoolVar(&fix, "fix", false, "apply the automatic hygiene repairs (stale state, retired files, legacy statuses)")
+	c.Flags().BoolVar(&asJSON, "json", false, "machine-readable report (versioned schema); exit status as without it")
 	return c
-}
-
-// findingSeen reports whether Doctor already produced this exact finding, so a
-// hygiene item that mirrors one (the pool repo nag) prints once.
-func findingSeen(findings []mesh.DoctorFinding, agent, msg string) bool {
-	for _, f := range findings {
-		if f.Agent == agent && f.Message == msg {
-			return true
-		}
-	}
-	return false
 }
 
 // --- session ---

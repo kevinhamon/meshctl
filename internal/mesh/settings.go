@@ -55,7 +55,9 @@ var meshctlAllowRules = []string{
 // tool names (`mcp__.*`, ADR-0062/0068 amendments), the PostToolUse hook is
 // wired on the same matcher, and the gate policy changes of the
 // shared-understanding spec ride the same bump — one re-onboard per peer.
-const MeshWiringVersion = 5
+// v6: a Stop hook (session-beat) records the session's heartbeat and its
+// scheduled jobs at the end of every turn (mesh console).
+const MeshWiringVersion = 6
 
 const meshWiringStampFile = ".mesh-wiring.json"
 
@@ -87,7 +89,7 @@ func HasBareMCPMatcher(matcher string) bool {
 // hookWiring is the (event, subcommand) set the mesh installs. PreToolUse is the
 // fail-closed enforcement gate (gate.go); PostToolUse is its after-the-fact
 // companion on the same matcher (the seam for pool commits and outbound acks:
-// ADR-0066, ADR-0068); the other three are advisory. The gate matcher fires on
+// ADR-0066, ADR-0068); the others are advisory (Stop, v6, is the end-of-turn heartbeat that also records the session's scheduled jobs). The gate matcher fires on
 // file-edit tools, Bash, every MCP tool and delegations — the gate denies
 // competing-store and intake paths, then checks the call against the
 // agent's KB rules (kbrules.go). v2 widened the matcher for the KB-rule gate;
@@ -97,6 +99,7 @@ var hookWiring = []struct{ event, sub, matcher string }{
 	{"SessionStart", "session-start", "startup|resume|clear"},
 	{"UserPromptSubmit", "user-prompt", ""},
 	{"SessionEnd", "session-end", ""},
+	{"Stop", "session-beat", ""},
 	{"PreToolUse", "pre-tool-use", GateHookMatcher},
 	{"PostToolUse", "post-tool-use", GateHookMatcher},
 }

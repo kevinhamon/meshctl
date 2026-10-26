@@ -129,6 +129,39 @@ func sayHint(group, label string) string {
 	return strings.TrimSuffix(group, "]") + fmt.Sprintf(", %ssay \"%s\"%s]", ansiDim, StatusLinePhrases[label], ansiReset)
 }
 
+// statusGroupSpec is one status-line group a pending line renders as: its
+// label (the StatusLinePhrases key), color and the value pairs after it.
+type statusGroupSpec struct {
+	label, color string
+	kv           []string
+}
+
+// statusGroups maps a pending line to its status-line groups (none for
+// read-back). `pending --json` reuses it for each line's phrases, so the line
+// and the report cannot disagree.
+func statusGroups(l PendingLine) []statusGroupSpec {
+	switch l.Kind {
+	case PendingKBBranches:
+		return []statusGroupSpec{{"needs-confirm", ansiRed, []string{fmt.Sprint(l.Count)}}}
+	case PendingConflicts:
+		return []statusGroupSpec{{"conflicts", ansiRed, []string{fmt.Sprint(l.Count)}}}
+	case PendingIntake:
+		return []statusGroupSpec{{"intake", "", []string{fmt.Sprint(l.Count), "oldest", fmt.Sprintf("%dd", l.OldestDays)}}}
+	case PendingDelegated:
+		return []statusGroupSpec{{"dispatched", "", []string{fmt.Sprint(l.Count), "oldest", fmt.Sprintf("%dd", l.OldestDays)}}}
+	case PendingHealth:
+		var out []statusGroupSpec
+		if l.Aged > 0 {
+			out = append(out, statusGroupSpec{"kb", "", []string{fmt.Sprintf("%d overdue", l.Aged)}})
+		}
+		if l.Unconfirmed > 0 {
+			out = append(out, statusGroupSpec{"unconfirmed", "", []string{fmt.Sprint(l.Unconfirmed)}})
+		}
+		return out
+	}
+	return nil
+}
+
 // renderStatusLine: the agent, then what waits on the human, each group with
 // the phrase that starts its review. Read-back is left out: answers are read
 // at session start, not chased from the prompt. Candidates show only once
@@ -136,26 +169,9 @@ func sayHint(group, label string) string {
 // there are any, since nothing else ever surfaces them between sessions.
 func renderStatusLine(b PendingBlock) string {
 	parts := []string{statusGroup(ansiBold, "agent", b.Agent)}
-	add := func(label string, color string, kv ...string) {
-		parts = append(parts, sayHint(statusGroup(color, append([]string{label}, kv...)...), label))
-	}
 	for _, l := range b.Lines {
-		switch l.Kind {
-		case PendingKBBranches:
-			add("needs-confirm", ansiRed, fmt.Sprint(l.Count))
-		case PendingConflicts:
-			add("conflicts", ansiRed, fmt.Sprint(l.Count))
-		case PendingIntake:
-			add("intake", "", fmt.Sprint(l.Count), "oldest", fmt.Sprintf("%dd", l.OldestDays))
-		case PendingDelegated:
-			add("dispatched", "", fmt.Sprint(l.Count), "oldest", fmt.Sprintf("%dd", l.OldestDays))
-		case PendingHealth:
-			if l.Aged > 0 {
-				add("kb", "", fmt.Sprintf("%d overdue", l.Aged))
-			}
-			if l.Unconfirmed > 0 {
-				add("unconfirmed", "", fmt.Sprint(l.Unconfirmed))
-			}
+		for _, g := range statusGroups(l) {
+			parts = append(parts, sayHint(statusGroup(g.color, append([]string{g.label}, g.kv...)...), g.label))
 		}
 	}
 	if len(parts) == 1 {

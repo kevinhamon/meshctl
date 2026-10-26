@@ -114,7 +114,7 @@ meshctl inbox   list [--all] | next [--claim] | claim <id> | release <id>   # li
                 triage apply --report <file> <id>...   # close confirmed verdicts (≤5 ids; gate-asked)
 meshctl sent    [--all] | ack <id>...      # responses to requests you sent
 meshctl work    list [--agent <a>] [--json] | merge <id> [--abort]   # delegated-work branches
-meshctl pending [--all] [--agent <a>]   # the session-start pending-work block; --all per peer
+meshctl pending [--all] [--agent <a>] [--json]   # the session-start pending-work block; --all per peer
 meshctl kb      begin | finish [--summary-file <summary>] [--abort] | consolidate [--json]
                 reconcile [--peer <name>]   # walk order, or a canonical peer's reconcile worksheet
                 confirm <path>[#<slug>]... --report <file> [--accept-ungrounded <path>]...   # ≤5 reviewed entries → ledger + Confirm: on main
@@ -124,7 +124,8 @@ meshctl handoff show | template | set   (set reads the body from stdin; refuses 
 meshctl state   show | template | set --summary-file <summary>   (the ≤40-line current-state digest, injected at session start; set is a promotion)
 meshctl intuition recall "<q>"
 meshctl hook    session-start | user-prompt | session-beat | session-end | pre-tool-use | post-tool-use | status-line   (wired per-agent; not run by hand)
-meshctl doctor  [--fix]              # manifests, wiring, KB consistency, pool hygiene
+meshctl doctor  [--fix] [--json]     # manifests, wiring, KB consistency, pool hygiene
+meshctl console [--open] [--print-url] | install | uninstall   # live read-only view of the pool on localhost
 meshctl ask … | send …               (top-level aliases for msg ask|send)
 ```
 
@@ -145,7 +146,22 @@ never touch it, agents read it first, and the core doctrine stays upgradable.
 (checksum-verified, in place; `--check` only reports, `--version vX.Y.Z` pins a release).
 `meshctl version` and `meshctl doctor` mention a newer release (checked at most once a day;
 `MESHCTL_NO_UPDATE_CHECK=1` turns it off). A local build (`task install`) is only replaced
-with `--force`. After updating, run `meshctl pool upgrade --check` in each pool.
+with `--force`. After updating, run `meshctl pool upgrade --check` in each pool. Each
+`pool upgrade` records the version that ran it, so the console and `doctor` say when an
+installed meshctl is newer than the pool's wiring.
+
+**The console ([ADR-0077](docs/decisions/0077-mesh-console.md)).** `meshctl console` serves a
+live, read-only view of the whole pool at `http://127.0.0.1:7717/`: every peer's pending
+work with the phrase to say and to which agent, doctor findings (with a re-check button),
+pool notices such as a pending upgrade, and the open agent sessions with their scheduled
+jobs (Claude Code reports them at the end of every turn). A link beside each session
+brings its iTerm2 tab to the front. It watches the pool's state files, so the view moves
+within a moment of a change; nothing in it changes the pool. Pin the page as a browser
+app window to keep it beside your terminals. `meshctl console install` starts it at login
+(macOS LaunchAgent; `meshctl update` restarts it on the new binary); `--print-url` prints
+the address with its token. It listens on 127.0.0.1 only and every request needs the
+token kept in your user config (`meshctl/console.json`). `meshctl pending --json` and
+`meshctl doctor --json` give agents the same data, versioned.
 
 Key flags: `agent new/onboard --harness claude|opencode`, `--dispatchable`,
 `--mutates code,tracker` (non-empty ⇒ not dispatchable), `--accepts type:desc,…`,
@@ -195,6 +211,7 @@ release workflow runs it before building.
 | In-session peers, consult and work (`ask --in-session [--work]`) | ✅ Agent tool | ✅ `subagent` tool; mutating peers asked by opencode | ✗ refused |
 | Distillation at a boundary | ✅ distiller subagent | ✅ at session end | ✅ at session end |
 | Status line | ✅ every 10s | ✗ none | ✗ none |
+| Console: live pool view, open sessions (`meshctl console`) | ✅ with scheduled jobs | ✅ no scheduled jobs | ✅ no scheduled jobs |
 <!-- parity:end -->
 
 `meshctl agent new --harness …` picks it; `onboard` autodetects; it's recorded in

@@ -44,12 +44,14 @@ var HarnessParity = []ParityRow{
 		nil},
 	{"Status line", "✅ every 10s", "✗ none", "✗ none",
 		[]string{"hook status-line"}},
+	{"Console: live pool view, open sessions (`meshctl console`)", "✅ with scheduled jobs", "✅ no scheduled jobs", "✅ no scheduled jobs",
+		[]string{"console"}},
 }
 
 // ParityNeutral lists the commands that behave the same on every harness:
 // plain CLI over files and git.
 var ParityNeutral = []string{
-	"agent identity", "agent list", "doctor",
+	"agent identity", "agent list", "console install", "console uninstall", "doctor",
 	"handoff set", "handoff show", "handoff template",
 	"inbox", "inbox archive", "inbox claim", "inbox decline", "inbox list", "inbox next", "inbox release", "inbox respond", "inbox triage",
 	"intuition recall",

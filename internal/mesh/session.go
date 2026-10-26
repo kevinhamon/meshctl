@@ -19,7 +19,29 @@ type Session struct {
 	LastBeat     int64  `json:"last_beat"`
 	CurrentClaim string `json:"current_claim,omitempty"`
 	KBBranch     string `json:"kb_branch,omitempty"`
-	path         string `json:"-"`
+	// HarnessPID and TTY are the harness process that runs the session and
+	// its terminal, found by walking up from the hook (hooks run without a
+	// terminal of their own). The console uses them to show a session that
+	// is open but idle, and to bring its terminal to the front.
+	HarnessPID int    `json:"harness_pid,omitempty"`
+	TTY        string `json:"tty,omitempty"`
+	// Jobs are the session's scheduled jobs as of JobsAt (unix seconds), from
+	// the harness's end-of-turn payload (Claude Code's Stop hook).
+	Jobs   []SessionJob `json:"jobs,omitempty"`
+	JobsAt int64        `json:"jobs_at,omitempty"`
+	path   string       `json:"-"`
+}
+
+// harnessAlive reports whether the session's harness process is still
+// running (false when it was never recorded).
+func (s *Session) harnessAlive() bool { return s.HarnessPID > 0 && processAlive(s.HarnessPID) }
+
+// SessionJob is one scheduled job a session runs, as the harness reports it.
+type SessionJob struct {
+	ID        string `json:"id"`
+	Schedule  string `json:"schedule"`
+	Recurring bool   `json:"recurring"`
+	Prompt    string `json:"prompt"`
 }
 
 func sessionsDir(agentDir string) string { return filepath.Join(agentDir, SessionsDir) }
@@ -81,6 +103,7 @@ func SessionStart(agent *Agent, id string, pid int, now time.Time) (warning stri
 	}
 
 	s := &Session{ID: id, PID: pid, Started: now.Unix(), LastBeat: now.Unix(), path: sessionPath(agent.Dir(), id)}
+	s.HarnessPID, s.TTY = harnessTerminal(os.Getpid())
 	if err := writeSession(s); err != nil {
 		return "", err
 	}
@@ -134,9 +157,50 @@ func TouchSession(agent *Agent, id string, pid int, now time.Time) error {
 			return err
 		}
 		s = &Session{ID: id, PID: pid, Started: now.Unix(), path: p}
+		s.HarnessPID, s.TTY = harnessTerminal(os.Getpid())
 	}
 	s.LastBeat = now.Unix()
 	return writeSession(s)
+}
+
+// SetSessionJobs records a session's scheduled jobs (an empty list clears
+// them), touching its presence.
+func SetSessionJobs(agent *Agent, id string, pid int, jobs []SessionJob, now time.Time) error {
+	if err := TouchSession(agent, id, pid, now); err != nil {
+		return err
+	}
+	s, err := readSession(sessionPath(agent.Dir(), id))
+	if err != nil {
+		return err
+	}
+	s.Jobs, s.JobsAt = jobs, now.Unix()
+	return writeSession(s)
+}
+
+// OpenSessions lists a peer's sessions that are still open, without reaping
+// anything (the console only reads): those whose harness process is alive,
+// or, when it is unknown, whose heartbeat is fresh. Oldest first.
+func OpenSessions(agent *Agent, now time.Time) []*Session {
+	entries, err := os.ReadDir(sessionsDir(agent.Dir()))
+	if err != nil {
+		return nil
+	}
+	var out []*Session
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		s, err := readSession(sessionPath(agent.Dir(), e.Name()))
+		if err != nil {
+			continue
+		}
+		fresh := int(now.Unix()-s.LastBeat) <= staleSec()
+		if s.harnessAlive() || (s.HarnessPID == 0 && fresh) {
+			out = append(out, s)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Started < out[j].Started })
+	return out
 }
 
 // SessionList returns the live sessions for an agent.
@@ -171,8 +235,11 @@ func liveSessions(agentDir string, now time.Time) []*Session {
 			continue
 		}
 		if int(now.Unix()-s.LastBeat) > staleSec() {
-			// Stale: reap it opportunistically.
-			_ = os.Remove(s.path)
+			// Stale: reap it opportunistically — unless its harness is still
+			// running (an open, idle session keeps its terminal and jobs).
+			if !s.harnessAlive() {
+				_ = os.Remove(s.path)
+			}
 			continue
 		}
 		out = append(out, s)

@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,7 +236,7 @@ func TestGateWiring_StaleVersionNamesReonboard(t *testing.T) {
 		t.Fatal(err)
 	}
 	fs := gateWiringFindings(a)
-	if !hasFinding(fs, "mesh wiring stale (v4 < v5)") || !hasFinding(fs, "meshctl agent onboard architect") {
+	if !hasFinding(fs, fmt.Sprintf("mesh wiring stale (v4 < v%d)", MeshWiringVersion)) || !hasFinding(fs, "meshctl agent onboard architect") {
 		t.Fatalf("expected a stale-wiring warning naming the re-onboard, got %+v", fs)
 	}
 }

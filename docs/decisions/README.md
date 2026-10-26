@@ -55,3 +55,4 @@ CLI's earlier name, `agentmesh` (renamed `meshctl` in [0034](0034-rename-meshctl
 | [0074](0074-status-line-is-a-hook-subcommand.md) | The status line is a meshctl hook subcommand, wired per agent and refreshed on a timer | accepted |
 | [0075](0075-opencode-v2-promotions-use-opencodes-own-ask.md) | opencode V2 promotions use opencode's own permission ask; harness parity is a tested table | accepted |
 | [0076](0076-opencode-in-session-peers.md) | opencode V2 in-session peers: rendered subagents, one plugin maps child sessions to the peer gate | accepted |
+| [0077](0077-mesh-console.md) | The mesh console: a live, read-only view of the pool served by meshctl | accepted |

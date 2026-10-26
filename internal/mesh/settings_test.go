@@ -218,8 +218,11 @@ func TestSettings_ReonboardV4AddsPostToolUse(t *testing.T) {
 	if len(post) != 1 || post[0].(map[string]any)["matcher"] != GateHookMatcher {
 		t.Fatalf("PostToolUse must use the gate matcher: %v", post)
 	}
-	if v := WiringVersion(dest); v != 5 || MeshWiringVersion != 5 {
-		t.Fatalf("stamp = v%d, want v5 (MeshWiringVersion=%d)", v, MeshWiringVersion)
+	if v := WiringVersion(dest); v != MeshWiringVersion {
+		t.Fatalf("stamp = v%d, want v%d", v, MeshWiringVersion)
+	}
+	if stop, _ := hooks["Stop"].([]any); !hookCommandPresent(stop, "meshctl hook session-beat") {
+		t.Fatalf("Stop hook (session-beat, wiring v6) not wired: %v", hooks)
 	}
 }
 

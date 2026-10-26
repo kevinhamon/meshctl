@@ -269,7 +269,7 @@ func agentHygiene(agentsDir string, a *Agent, now time.Time) []HygieneItem {
 		for _, e := range entries {
 			p := filepath.Join(sessionsDir(dir), e.Name())
 			s, err := readSession(p)
-			if err != nil || int(now.Unix()-s.LastBeat) > staleSec() {
+			if err != nil || (int(now.Unix()-s.LastBeat) > staleSec() && !s.harnessAlive()) {
 				add("stale session record "+e.Name(), removeFix(p))
 			}
 		}

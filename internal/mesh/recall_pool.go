@@ -63,7 +63,7 @@ func poolGlossaryHits(root string, tokens []string) []RecallHit {
 
 // poolFileDate is a pool file's last-commit date, or its mtime when the pool
 // is not a repo or the file has uncommitted changes (the edit is newer than
-// the commit). The kbFileDate twin for files under the pool directory.
+// the commit). The kbDater twin for files under the pool directory.
 func poolFileDate(poolDir, file string) (time.Time, bool) {
 	info, err := os.Stat(filepath.Join(poolDir, file))
 	if err != nil {

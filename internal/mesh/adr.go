@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -327,30 +328,82 @@ func migrateADRFrontmatter(path string) error {
 
 // --- "an ADR must land in state" ---
 
-// kbFileDate is the date a KB file last changed: its last commit when the
-// workspace is a git repo (mtime lies after a clone), else its mtime.
-func kbFileDate(agentDir, rel string) (time.Time, bool) {
-	p := filepath.Join(agentDir, KnowledgeDir, rel)
-	info, err := os.Stat(p)
+// kbDater dates KB files: a file's last commit when the workspace is a git
+// repo (mtime lies after a clone), its mtime when it has no commit or an
+// uncommitted edit newer than the commit, and its mtime outside a repo. Each
+// file costs one `git log -1`, remembered; whether a file has uncommitted
+// edits comes from one `git status` over knowledge/, read on first need
+// (after a clone every mtime is newer than its commit, so a per-file status
+// would run for every file). A dater is for one check: it does not see later
+// changes.
+type kbDater struct {
+	agentDir  string
+	repo      bool
+	committed map[string]time.Time // knowledge-relative path → last commit (zero: none)
+	dirtyOnce sync.Once
+	dirty     map[string]bool
+}
+
+func newKBDater(agentDir string) *kbDater {
+	return &kbDater{agentDir: agentDir, repo: dirExists(filepath.Join(agentDir, ".git")), committed: map[string]time.Time{}}
+}
+
+func (d *kbDater) lastCommit(rel string) time.Time {
+	if t, ok := d.committed[rel]; ok {
+		return t
+	}
+	var t time.Time
+	if out, err := exec.Command("git", "-C", d.agentDir, "log", "-1", "--format=%cI", "--", KnowledgeDir+"/"+rel).Output(); err == nil {
+		t, _ = time.Parse(time.RFC3339, strings.TrimSpace(string(out)))
+	}
+	d.committed[rel] = t
+	return t
+}
+
+func (d *kbDater) isDirty(rel string) bool {
+	d.dirtyOnce.Do(func() {
+		d.dirty = map[string]bool{}
+		prefix := KnowledgeDir + "/"
+		out, err := exec.Command("git", "-C", d.agentDir, "-c", "core.quotePath=false", "status",
+			"--porcelain", "--", prefix).Output()
+		if err != nil {
+			return
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			if len(line) < 4 {
+				continue
+			}
+			path := line[3:]
+			if k := strings.Index(path, " -> "); k >= 0 {
+				path = path[k+4:]
+			}
+			if r, ok := strings.CutPrefix(path, prefix); ok {
+				d.dirty[r] = true
+			}
+		}
+	})
+	return d.dirty[rel]
+}
+
+// date is when the KB file at the knowledge-relative path last changed;
+// false when it does not exist.
+func (d *kbDater) date(rel string) (time.Time, bool) {
+	rel = filepath.ToSlash(rel)
+	info, err := os.Stat(filepath.Join(d.agentDir, KnowledgeDir, filepath.FromSlash(rel)))
 	if err != nil {
 		return time.Time{}, false
 	}
-	if dirExists(filepath.Join(agentDir, ".git")) {
-		out, err := exec.Command("git", "-C", agentDir, "log", "-1", "--format=%cI", "--", filepath.Join(KnowledgeDir, rel)).Output()
-		if err == nil {
-			if t, err := time.Parse(time.RFC3339, strings.TrimSpace(string(out))); err == nil {
-				// An uncommitted edit is newer than the last commit.
-				if info.ModTime().After(t) && uncommitted(agentDir, filepath.Join(KnowledgeDir, rel)) {
-					return info.ModTime(), true
-				}
-				return t, true
-			}
-		}
+	if !d.repo {
+		return info.ModTime(), true
 	}
-	return info.ModTime(), true
+	t := d.lastCommit(rel)
+	if t.IsZero() || (info.ModTime().After(t) && d.isDirty(rel)) {
+		return info.ModTime(), true
+	}
+	return t, true
 }
 
-// kbDirDates dates every file directly inside a KB folder exactly as kbFileDate
+// kbDirDates dates every file directly inside a KB folder exactly as kbDater
 // dates one, but from one `git log` and one `git status` over the folder instead of
 // two git calls per file: the pending block and doctor read every candidate.
 func kbDirDates(agentDir, dirRel string) map[string]time.Time {
@@ -421,19 +474,14 @@ func kbDirDates(agentDir, dirRel string) map[string]time.Time {
 	return dates
 }
 
-func uncommitted(agentDir, rel string) bool {
-	out, err := exec.Command("git", "-C", agentDir, "status", "--porcelain", "--", rel).Output()
-	return err == nil && strings.TrimSpace(string(out)) != ""
-}
-
 // adrDate is when a decision took effect: its stated date, else the file date.
-func adrDate(agentDir string, d ADR) (time.Time, bool) {
+func adrDate(dates *kbDater, d ADR) (time.Time, bool) {
 	if d.Date != "" {
 		if t, err := time.Parse("2006-01-02", d.Date); err == nil {
 			return t, true
 		}
 	}
-	return kbFileDate(agentDir, "decisions/"+d.File)
+	return dates.date("decisions/" + d.File)
 }
 
 // ADRDebt is one accepted decision that has not landed in the state docs it
@@ -448,18 +496,19 @@ type ADRDebt struct {
 // checked here; the digest-level check is stateDigestDebt.
 func adrLandingDebt(agentDir string) []ADRDebt {
 	kb := filepath.Join(agentDir, KnowledgeDir)
+	dates := newKBDater(agentDir)
 	var out []ADRDebt
 	for _, d := range LoadADRs(kb) {
 		if d.Status != ADRAccepted || len(d.Updates) == 0 {
 			continue
 		}
-		when, ok := adrDate(agentDir, d)
+		when, ok := adrDate(dates, d)
 		if !ok {
 			continue
 		}
 		var stale []string
 		for _, u := range d.Updates {
-			t, exists := kbFileDate(agentDir, u)
+			t, exists := dates.date(u)
 			if !exists {
 				stale = append(stale, u+" (missing)")
 				continue
@@ -480,7 +529,8 @@ func adrLandingDebt(agentDir string) []ADRDebt {
 // every accepted decision back (the digest is yet to be written).
 func stateDigestDebt(agentDir string) []ADR {
 	kb := filepath.Join(agentDir, KnowledgeDir)
-	stateAt, hasState := kbFileDate(agentDir, StateFile)
+	dates := newKBDater(agentDir)
+	stateAt, hasState := dates.date(StateFile)
 	var out []ADR
 	for _, d := range LoadADRs(kb) {
 		if d.Status != ADRAccepted {
@@ -490,7 +540,7 @@ func stateDigestDebt(agentDir string) []ADR {
 			out = append(out, d)
 			continue
 		}
-		when, ok := adrDate(agentDir, d)
+		when, ok := adrDate(dates, d)
 		if ok && when.After(stateAt) {
 			out = append(out, d)
 		}

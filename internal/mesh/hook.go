@@ -41,6 +41,9 @@ type HookPayload struct {
 	// Set when the hook fires inside a subagent (Claude Code adds them).
 	AgentID   string `json:"agent_id"`
 	AgentType string `json:"agent_type"`
+	// SessionCrons is the session's scheduled jobs, on Claude Code's Stop
+	// payload; nil when the payload has no such field (not "no jobs").
+	SessionCrons *[]SessionJob `json:"session_crons"`
 
 	// PeerAgent names the agent this hook acts for when the payload cwd is not
 	// its workspace: an in-session peer subagent runs in the CALLER's cwd, so
@@ -301,6 +304,12 @@ func HookSessionEnd(agentsDir string, p HookPayload, pid int, now time.Time) {
 func HookSessionBeat(agentsDir string, p HookPayload, now time.Time) {
 	a := hookAgent(agentsDir, p.Cwd)
 	if a == nil || p.SessionID == "" {
+		return
+	}
+	// Claude Code's Stop hook (wiring v6) carries the session's scheduled
+	// jobs at the end of every turn: record them for the console.
+	if p.SessionCrons != nil {
+		_ = SetSessionJobs(a, p.SessionID, os.Getppid(), *p.SessionCrons, now)
 		return
 	}
 	_ = TouchSession(a, p.SessionID, os.Getppid(), now)

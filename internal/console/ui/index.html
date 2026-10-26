@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh console</title>
+<style>
+  :root {
+    --bg: #f6f6f3; --panel: #ffffff; --text: #1c1c1a; --muted: #6d6c66; --faint: #9a9993; --line: #e4e3dd;
+    --accent: #2f5fd0; --chip: #eef1f8; --hover: #fbfbf9;
+    --red: #b42318; --red-bg: #fdecea; --amber: #9a5b00; --amber-bg: #fdf3e2; --green: #1f7a3d; --green-bg: #e8f5ec;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 1px 1px rgba(0,0,0,.03);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --panel: #1e1e1c; --text: #ecebe6; --muted: #a3a29b; --faint: #7a7973; --line: #32312d;
+      --accent: #8aa8f0; --chip: #252a36; --hover: #232321;
+      --red: #f2877b; --red-bg: #3a1f1c; --amber: #e7b15f; --amber-bg: #372b17; --green: #74d295; --green-bg: #1a3324;
+      --shadow: none; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); }
+  button { font: inherit; font-size: 12.5px; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button:hover { background: var(--hover); }
+  button:disabled { opacity: .5; cursor: default; }
+  header { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .bar { max-width: 1240px; margin: 0 auto; padding: 10px 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .bar h1 { font-size: 15px; margin: 0; letter-spacing: -.01em; }
+  .meta { color: var(--muted); font-size: 12.5px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); margin-right: 6px; vertical-align: 1px; }
+  .dot.live { background: var(--green); }
+  .spacer { flex: 1; }
+  main { max-width: 1240px; margin: 0 auto; padding: 16px 20px 48px; }
+
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; box-shadow: var(--shadow); }
+  .stat .n { font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
+  .stat .l { color: var(--muted); font-size: 12.5px; }
+  .stat.red .n { color: var(--red); } .stat.amber .n { color: var(--amber); }
+  .notice { padding: 9px 12px; border: 1px solid var(--line); border-left: 3px solid var(--amber); background: var(--panel);
+    border-radius: 8px; margin: 0 0 10px; font-size: 13px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin: 6px 0 12px; flex-wrap: wrap; }
+  .toolbar label { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
+  .card { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px 12px 18px;
+    cursor: pointer; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; min-height: 150px; }
+  .card:hover { border-color: var(--faint); }
+  .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .card .stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; border-radius: 10px 0 0 10px; background: var(--line); }
+  .card .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+  .card .name { font-weight: 600; font-size: 14.5px; word-break: break-word; }
+  .card .title { color: var(--muted); font-size: 12.5px; margin-top: 1px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .status { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+  .status.red { color: var(--red); background: var(--red-bg); }
+  .status.amber { color: var(--amber); background: var(--amber-bg); }
+  .status.green { color: var(--green); background: var(--green-bg); }
+  .rows { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+  .rows .r { display: flex; justify-content: space-between; gap: 8px; }
+  .rows .r .v { color: var(--muted); white-space: nowrap; }
+  .rows .r.red .k { color: var(--red); }
+  .card .foot { margin-top: auto; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .pill { font-size: 11.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 1px 8px; white-space: nowrap; }
+  .pill.on { color: var(--green); border-color: var(--green); }
+  .pill.err { color: var(--red); border-color: var(--red); }
+  .say { display: inline-block; background: var(--chip); color: var(--accent); border-radius: 10px; padding: 1px 8px; font-size: 12px; white-space: nowrap; }
+  .empty { color: var(--faint); font-size: 13px; }
+
+  .back { margin-bottom: 12px; }
+  .hero { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 14px; }
+  .hero .swatch { width: 8px; align-self: stretch; border-radius: 4px; background: var(--line); }
+  .hero h2 { margin: 0; font-size: 20px; letter-spacing: -.01em; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .hero .sub { color: var(--muted); margin-top: 2px; }
+  .hero .role { color: var(--muted); font-size: 13px; margin-top: 6px; max-width: 760px; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+  @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+  section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; box-shadow: var(--shadow); margin-bottom: 14px; }
+  section.panel > h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  section.panel > h3 .note { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 12.5px; }
+  .line { padding: 8px 0; border-top: 1px solid var(--line); }
+  .line:first-of-type { border-top: 0; padding-top: 0; }
+  .line .head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .line .label { font-weight: 600; }
+  .line.red .label { color: var(--red); }
+  .line .count { color: var(--muted); font-size: 13px; }
+  .detail { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  ul.items { list-style: none; margin: 6px 0 0; padding: 0; }
+  ul.items li { font-size: 13px; padding: 3px 0; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  ul.items .id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  ul.items a.id { color: var(--accent); cursor: pointer; text-decoration: none; }
+  ul.items a.id:hover { text-decoration: underline; }
+  ul.items .who, ul.items .age { color: var(--muted); }
+  .stale { color: var(--amber); font-size: 12px; }
+  .session { padding: 8px 0; border-top: 1px solid var(--line); }
+  .session:first-of-type { border-top: 0; padding-top: 0; }
+  .session .head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .session .what { font-size: 13px; color: var(--muted); }
+  .job { font-size: 13px; padding: 2px 0; display: flex; gap: 8px; align-items: baseline; }
+  .finding { font-size: 13px; padding: 3px 0; display: flex; gap: 8px; }
+  .finding .lvl { font-weight: 700; }
+  .finding.error .lvl { color: var(--red); }
+  .finding.warn .lvl { color: var(--amber); }
+  .fix { color: var(--faint); font-size: 12px; }
+  details.pool { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; }
+  details.pool > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+
+  dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text);
+    width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; }
+  dialog::backdrop { background: rgba(0,0,0,.35); }
+  dialog .head { display: flex; justify-content: space-between; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  dialog .head .path { color: var(--muted); font-size: 12px; word-break: break-all; }
+  dialog pre { margin: 0; padding: 14px 16px; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+    max-height: calc(100vh - 170px); overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Mesh console</h1>
+    <span class="meta"><span id="dot" class="dot"></span><span id="status">connecting…</span></span>
+    <span class="meta" id="updated"></span>
+    <span class="spacer"></span>
+    <span class="meta" id="pool"></span>
+    <span class="meta" id="version"></span>
+  </div>
+</header>
+<main id="main"></main>
+<dialog id="item">
+  <div class="head"><div><div id="item-title"></div><div class="path" id="item-path"></div></div><button id="item-close">Close</button></div>
+  <pre id="item-text"></pre>
+</dialog>
+<script>
+"use strict";
+// Every value from the pool is set with textContent, never as HTML.
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+let snap = null;
+let attentionOnly = false;
+try { attentionOnly = localStorage.getItem("attentionOnly") === "1"; } catch (e) {}
+
+const ago = (iso) => {
+  if (!iso) return "";
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.round(s / 60) + "m ago";
+  if (s < 172800) return Math.round(s / 3600) + "h ago";
+  return Math.round(s / 86400) + "d ago";
+};
+const idleText = (secs) => secs < 90 ? "active now" : secs < 3600 ? "idle " + Math.round(secs / 60) + "m" : "idle " + Math.round(secs / 3600) + "h";
+const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
+
+const drillable = { "intake": true, "read-back": true, "kb-branches": true };
+const redKinds = { "kb-branches": true, "conflicts": true };
+
+// One view model per agent: its pending block, sessions, findings and status.
+function model() {
+  const pending = new Map(snap.pending.agents.map(a => [a.agent, a]));
+  const sessions = new Map();
+  for (const s of snap.sessions || []) { if (!sessions.has(s.agent)) sessions.set(s.agent, []); sessions.get(s.agent).push(s); }
+  const findings = new Map();
+  const poolFindings = [];
+  const names = new Set((snap.agents || []).map(a => a.name));
+  for (const f of (snap.doctor ? snap.doctor.findings : [])) {
+    if (names.has(f.agent)) { if (!findings.has(f.agent)) findings.set(f.agent, []); findings.get(f.agent).push(f); }
+    else poolFindings.push(f);
+  }
+  const agents = (snap.agents || []).map(info => {
+    const p = pending.get(info.name) || { total: 0, lines: [] };
+    const ss = sessions.get(info.name) || [];
+    const fs = findings.get(info.name) || [];
+    const errors = fs.filter(f => f.level === "error").length;
+    const blocking = p.lines.some(l => redKinds[l.kind]);
+    const waiting = p.lines.some(l => l.say.length > 0 || l.kind === "read-back");
+    const status = blocking ? { cls: "red", word: "Needs you", rank: 0 }
+      : waiting ? { cls: "amber", word: "Waiting", rank: 1 }
+      : errors ? { cls: "red", word: "Doctor error", rank: 2 }
+      : { cls: "green", word: "Clear", rank: 3 };
+    return { info, pending: p, sessions: ss, findings: fs, errors, warns: fs.length - errors, status,
+      jobs: ss.reduce((n, s) => n + s.jobs.length, 0) };
+  });
+  agents.sort((a, b) => a.status.rank - b.status.rank || b.pending.total - a.pending.total || a.info.name.localeCompare(b.info.name));
+  return { agents, poolFindings };
+}
+
+function lineSummary(l) {
+  if (l.kind === "kb-health") {
+    const parts = [];
+    const drafts = l.count - (l.unconfirmed || 0);
+    if (l.unconfirmed) parts.push(l.unconfirmed + " unconfirmed");
+    if (l.aged) parts.push(l.aged + " overdue");
+    else if (drafts > 0) parts.push(plural(drafts, "draft"));
+    return parts.join(" · ");
+  }
+  return (l.noun || l.count) + (l.oldest_days ? " · " + l.oldest_days + "d" : "");
+}
+
+// --- grid ---
+
+function renderGrid(m) {
+  const root = $("main");
+  root.replaceChildren();
+
+  for (const n of snap.notices || []) root.append(el("div", "notice", n.message));
+
+  const need = m.agents.filter(a => a.status.rank === 0).length;
+  const waiting = m.agents.filter(a => a.status.rank === 1).length;
+  const sessions = (snap.sessions || []).length;
+  const jobs = (snap.sessions || []).reduce((n, s) => n + s.jobs.length, 0);
+  const errors = snap.doctor ? snap.doctor.findings.filter(f => f.level === "error").length : 0;
+  const summary = el("div", "summary");
+  const stat = (n, l, cls) => { const s = el("div", "stat" + (cls ? " " + cls : "")); s.append(el("div", "n", String(n)), el("div", "l", l)); return s; };
+  summary.append(
+    stat(need, need === 1 ? "agent needs you" : "agents need you", need ? "red" : ""),
+    stat(waiting, "with work waiting", waiting ? "amber" : ""),
+    stat(sessions, sessions === 1 ? "open session" : "open sessions"),
+    stat(jobs, jobs === 1 ? "scheduled job" : "scheduled jobs"),
+    stat(snap.doctor ? errors : "…", errors === 1 ? "doctor error" : "doctor errors", errors ? "red" : ""));
+  root.append(summary);
+
+  if (m.poolFindings.length) {
+    const d = el("details", "pool");
+    d.append(el("summary", null, "Pool-level findings (" + m.poolFindings.length + ")"));
+    for (const f of m.poolFindings) d.append(finding(f, true));
+    root.append(d);
+  }
+
+  const bar = el("div", "toolbar");
+  const lab = el("label");
+  const cb = el("input"); cb.type = "checkbox"; cb.checked = attentionOnly;
+  cb.addEventListener("change", () => { attentionOnly = cb.checked; try { localStorage.setItem("attentionOnly", cb.checked ? "1" : "0"); } catch (e) {} render(); });
+  lab.append(cb, document.createTextNode("Only agents that need attention"));
+  const recheck = el("button", null, "Re-check doctor");
+  recheck.addEventListener("click", () => doRecheck(recheck));
+  bar.append(lab, el("span", "spacer"), el("span", "meta", snap.doctor ? "doctor checked " + ago(snap.doctor.generated) : "doctor running…"), recheck);
+  root.append(bar);
+
+  const grid = el("div", "grid");
+  const shown = attentionOnly ? m.agents.filter(a => a.status.rank < 3 || a.sessions.length) : m.agents;
+  for (const a of shown) grid.append(card(a));
+  if (!shown.length) grid.append(el("div", "empty", "Nothing needs your attention."));
+  root.append(grid);
+}
+
+function card(a) {
+  const c = el("div", "card");
+  c.tabIndex = 0;
+  c.setAttribute("role", "button");
+  c.setAttribute("aria-label", a.info.name + ", " + a.status.word);
+  const stripe = el("div", "stripe");
+  if (a.info.color) stripe.style.background = a.info.color;
+  c.append(stripe);
+
+  const top = el("div", "top");
+  const id = el("div");
+  id.append(el("div", "name", a.info.name));
+  if (a.info.title && a.info.title !== a.info.name) id.append(el("div", "title", a.info.title));
+  top.append(id, el("span", "status " + a.status.cls, a.status.word));
+  c.append(top);
+
+  const rows = el("div", "rows");
+  for (const l of a.pending.lines.slice(0, 3)) {
+    const r = el("div", "r" + (redKinds[l.kind] ? " red" : ""));
+    r.append(el("span", "k", l.label), el("span", "v", lineSummary(l)));
+    rows.append(r);
+  }
+  if (a.pending.lines.length > 3) rows.append(el("div", "empty", "+ " + (a.pending.lines.length - 3) + " more"));
+  if (!a.pending.lines.length) rows.append(el("div", "empty", "Nothing waiting."));
+  c.append(rows);
+
+  const foot = el("div", "foot");
+  const says = [...new Set(a.pending.lines.flatMap(l => l.say))];
+  for (const s of says.slice(0, 2)) foot.append(el("span", "say", "“" + s + "”"));
+  if (a.sessions.length) {
+    const idle = Math.min(...a.sessions.map(s => s.idle_seconds));
+    foot.append(el("span", "pill on", plural(a.sessions.length, "session") + " · " + idleText(idle)));
+  }
+  if (a.jobs) foot.append(el("span", "pill on", plural(a.jobs, "job")));
+  if (a.errors) foot.append(el("span", "pill err", plural(a.errors, "error")));
+  else if (a.warns) foot.append(el("span", "pill", plural(a.warns, "warning")));
+  c.append(foot);
+
+  const open = () => { location.hash = "#/agent/" + encodeURIComponent(a.info.name); };
+  c.addEventListener("click", open);
+  c.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+  return c;
+}
+
+// --- detail ---
+
+function renderDetail(m, name) {
+  const a = m.agents.find(x => x.info.name === name);
+  const root = $("main");
+  root.replaceChildren();
+  const back = el("button", "back", "← All agents");
+  back.addEventListener("click", () => { location.hash = ""; });
+  root.append(back);
+  if (!a) { root.append(el("div", "empty", "No agent named " + name + " in this pool.")); return; }
+
+  const hero = el("div", "hero");
+  const sw = el("div", "swatch");
+  if (a.info.color) sw.style.background = a.info.color;
+  const txt = el("div");
+  const h = el("h2", null, a.info.name);
+  h.append(el("span", "status " + a.status.cls, a.status.word));
+  txt.append(h);
+  const sub = [a.info.title, a.info.harness === "opencode" ? "opencode" : "Claude Code"].filter(Boolean).join(" · ");
+  txt.append(el("div", "sub", sub));
+  if (a.info.role) txt.append(el("div", "role", a.info.role));
+  hero.append(sw, txt);
+  root.append(hero);
+
+  const cols = el("div", "cols");
+  const left = el("div"), right = el("div");
+
+  const wp = panel("Waiting on you", a.pending.total ? plural(a.pending.total, "item") : "");
+  if (!a.pending.lines.length) wp.append(el("div", "empty", "Nothing is waiting on you here."));
+  for (const l of a.pending.lines) {
+    const line = el("div", "line" + (redKinds[l.kind] ? " red" : ""));
+    const head = el("div", "head");
+    head.append(el("span", "label", l.label));
+    if (!l.detail) head.append(el("span", "count", lineSummary(l)));
+    for (const s of l.say) head.append(el("span", "say", "say “" + s + "”"));
+    line.append(head);
+    if (l.detail) line.append(el("div", "detail", l.detail));
+    if (l.items.length) {
+      const ul = el("ul", "items");
+      for (const it of l.items) {
+        const li = el("li");
+        if (drillable[l.kind]) {
+          const link = el("a", "id", it.id);
+          link.addEventListener("click", () => openItem(a.info.name, l.kind, it.id));
+          li.append(link);
+        } else li.append(el("span", "id", it.id));
+        li.append(el("span", "who", it.who), el("span", "age", it.age_days + "d"));
+        if (it.age_days >= snap.pending.stale_days) li.append(el("span", "stale", "⚠ stale"));
+        ul.append(li);
+      }
+      if (l.count > l.items.length && l.list_command) ul.append(el("li", "detail", (l.count - l.items.length) + " more: " + l.list_command));
+      line.append(ul);
+    }
+    wp.append(line);
+  }
+  left.append(wp);
+
+  const sp = panel("Sessions and scheduled jobs", a.sessions.length ? plural(a.sessions.length, "open") : "");
+  if (!a.sessions.length) sp.append(el("div", "empty", "No open session."));
+  for (const s of a.sessions) {
+    const box = el("div", "session");
+    const head = el("div", "head");
+    const what = el("div");
+    what.append(el("div", null, idleText(s.idle_seconds)));
+    what.append(el("div", "what", [s.tty ? s.tty.replace("/dev/", "") : "", "session " + s.id.slice(0, 8), "started " + ago(s.started)].filter(Boolean).join(" · ")));
+    head.append(what);
+    if (s.focusable) {
+      const b = el("button", null, "Bring to front");
+      b.addEventListener("click", () => focusSession(a.info.name, s.id, b));
+      head.append(b);
+    }
+    box.append(head);
+    if (s.claim) box.append(el("div", "detail", "working on " + s.claim));
+    if (s.kb_branch) box.append(el("div", "detail", "KB branch " + s.kb_branch));
+    for (const j of s.jobs) {
+      const row = el("div", "job");
+      row.append(el("span", "say", j.recurring ? "every " + j.schedule : "once " + j.schedule), el("span", null, j.prompt));
+      box.append(row);
+    }
+    if (s.jobs.length && s.jobs_at) box.append(el("div", "detail", "jobs as of " + ago(s.jobs_at)));
+    sp.append(box);
+  }
+  right.append(sp);
+
+  const dp = panel("Doctor", snap.doctor ? "checked " + ago(snap.doctor.generated) : "running…");
+  if (snap.doctor && !a.findings.length) dp.append(el("div", "empty", "No findings."));
+  // Errors first and always; warnings past the first few behind a toggle.
+  const errs = a.findings.filter(f => f.level === "error"), warns = a.findings.filter(f => f.level !== "error");
+  for (const f of errs) dp.append(finding(f, false));
+  for (const f of warns.slice(0, 5)) dp.append(finding(f, false));
+  if (warns.length > 5) {
+    const rest = el("div");
+    rest.hidden = true;
+    for (const f of warns.slice(5)) rest.append(finding(f, false));
+    const more = el("button", null, "Show all " + warns.length + " warnings");
+    more.addEventListener("click", () => { rest.hidden = false; more.remove(); });
+    dp.append(rest, more);
+  }
+  right.append(dp);
+
+  cols.append(left, right);
+  root.append(cols);
+}
+
+function panel(title, note) {
+  const s = el("section", "panel");
+  const h = el("h3", null, title);
+  if (note) h.append(el("span", "note", note));
+  s.append(h);
+  return s;
+}
+
+function finding(f, withAgent) {
+  const row = el("div", "finding " + f.level);
+  row.append(el("span", "lvl", f.level === "error" ? "✗" : "⚠"));
+  const body = el("span", null, (withAgent ? "[" + f.agent + "] " : "") + f.message);
+  if (f.fixable) body.append(el("span", "fix", " (fixable by doctor --fix)"));
+  row.append(body);
+  return row;
+}
+
+// --- actions ---
+
+async function openItem(agent, kind, id) {
+  const q = new URLSearchParams({ agent, kind, id });
+  const r = await fetch("/api/item?" + q.toString());
+  $("item-title").textContent = r.ok ? "" : "Not available";
+  $("item-path").textContent = "";
+  $("item-text").textContent = r.ok ? "" : await r.text();
+  if (r.ok) {
+    const it = await r.json();
+    $("item-title").textContent = it.title;
+    $("item-path").textContent = it.path;
+    $("item-text").textContent = it.text;
+  }
+  $("item").showModal();
+}
+$("item-close").addEventListener("click", () => $("item").close());
+
+async function focusSession(agent, session, button) {
+  const r = await fetch("/api/focus", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent, session }) });
+  if (!r.ok) {
+    button.title = await r.text();
+    button.textContent = "Not found";
+    setTimeout(() => { button.textContent = "Bring to front"; }, 4000);
+  }
+}
+
+async function doRecheck(b) {
+  b.disabled = true;
+  b.textContent = "Checking…";
+  try { await fetch("/api/doctor/recheck", { method: "POST" }); } finally {
+    setTimeout(() => { b.disabled = false; b.textContent = "Re-check doctor"; }, 4000);
+  }
+}
+
+// --- render loop ---
+
+function route() {
+  const m = /^#\/agent\/(.+)$/.exec(location.hash);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function render() {
+  if (!snap) return;
+  $("pool").textContent = snap.pool;
+  $("version").textContent = "meshctl " + snap.version;
+  $("updated").textContent = "updated " + ago(snap.pending.generated);
+  const m = model();
+  const name = route();
+  if (name) renderDetail(m, name); else renderGrid(m);
+}
+
+window.addEventListener("hashchange", () => { render(); window.scrollTo(0, 0); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && route() && !$("item").open) location.hash = ""; });
+setInterval(() => { if (snap) $("updated").textContent = "updated " + ago(snap.pending.generated); }, 1000);
+
+function setLive(live, text) {
+  $("dot").classList.toggle("live", live);
+  $("status").textContent = text;
+}
+
+function connect() {
+  const es = new EventSource("/api/events");
+  es.addEventListener("snapshot", (ev) => {
+    const next = JSON.parse(ev.data);
+    if (!next.pending || !next.pending.agents) return; // the empty frame before the first compute
+    snap = next;
+    setLive(true, "live");
+    // Re-rendering replaces the page; keep the reader's place.
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+  });
+  es.onerror = () => {
+    setLive(false, "reconnecting…");
+    fetch("/api/snapshot").then(r => { if (r.status === 401) { es.close(); setLive(false, "signed out: open the URL meshctl console prints"); } }).catch(() => {});
+  };
+}
+connect();
+</script>
+</body>
+</html>

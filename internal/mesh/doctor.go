@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -224,6 +225,8 @@ type DoctorFinding struct {
 	Agent   string
 	Level   string // "error" | "warn"
 	Message string
+	// Fixable marks a hygiene item `doctor --fix` repairs.
+	Fixable bool
 }
 
 // reservedOwnerFindings errors on a workspace at the pool root whose name is
@@ -305,157 +308,27 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 	byColor := map[string][]string{}
 
 	for _, a := range agents {
-		for _, p := range a.Validate() {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: p})
-		}
 		byLabel[strings.ToUpper(a.Badge.Label)] = append(byLabel[strings.ToUpper(a.Badge.Label)], a.Name)
 		ckey := fmt.Sprintf("%.3f,%.3f,%.3f", a.Badge.R, a.Badge.G, a.Badge.B)
 		byColor[ckey] = append(byColor[ckey], a.Name)
-
-		// CLAUDE.md intake section.
-		claude := filepath.Join(a.Dir(), "CLAUDE.md")
-		if b, err := os.ReadFile(claude); err == nil {
-			if !hasCommsSection(string(b)) {
-				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md missing the Agent Communication (intake) section — run `meshctl agent onboard " + a.Name + "`"})
-			}
-		} else {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no CLAUDE.md"})
-		}
-
-		// Peer glossaries retire (ADR-0066): leftover file, `owns` coupling.
-		findings = append(findings, glossaryFindings(a, poolTerms, poolGlossary)...)
-
-		// Inbox exists?
-		if !dirExists(a.InboxPath()) {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: "inbox " + a.InboxPath() + " does not exist"})
-		}
-
-		// Intake statuses outside the canonical vocabulary (warn).
-		for _, msg := range InboxStatusFindings(a) {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
-		}
-		// Intake triage age (ADR-0072): reports, never closes.
-		if msg := TriageDoctorFinding(a, time.Now()); msg != "" {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
-		}
-
-		// Is the role file the harness will actually read? (Not gated on a
-		// knowledge/ tree: an agent with no KB still needs its doctrine loaded.)
-		findings = append(findings, opencodeInstructionsFindings(a)...)
-
-		// Fail-closed enforcement gate present + current? (Not gated on a
-		// knowledge/ tree: EVERY claude agent must enforce doctrine, KB or not.)
-		findings = append(findings, gateWiringFindings(a)...)
-
-		// ADR-0014 knowledge-base areas (tiered: warn on missing/empty, never error;
-		// a fresh agent legitimately has empty Experience). Only checked if the
-		// agent keeps a knowledge/ tree at all.
-		kbRoot := filepath.Join(a.Dir(), KnowledgeDir)
-		if dirExists(kbRoot) {
-			for _, area := range []string{"playbooks", "experience", "candidates"} {
-				ap := filepath.Join(kbRoot, area)
-				switch {
-				case !dirExists(ap):
-					findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + area + "/ missing — run `meshctl agent onboard " + a.Name + "`"})
-				case dirEmptyish(ap):
-					findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + area + "/ has no entries yet"})
-				}
-			}
-			// The one structurally-enforceable KB defect (ADR-0014): a decision marked
-			// "superseded by NNNN" where NNNN is missing or doesn't back-reference it.
-			for _, msg := range supersededDefects(filepath.Join(kbRoot, "decisions")) {
-				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: msg})
-			}
-			// KB consistency drift (README parity, broken ADR refs, stale "pending ADR"
-			// markers) — all warn-level, advisory.
-			findings = append(findings, kbConsistencyFindings(a.Name, kbRoot)...)
-			// ADR-0019: reference notes must carry an `effective:` date (warn).
-			for _, msg := range referenceMissingEffective(kbRoot) {
-				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
-			}
-			// S1 — the KB's two tiers stay consistent: an accepted decision must
-			// land in the state docs it names (error: the doc is stale by the
-			// decision's own account); the state digest must not predate accepted
-			// decisions (warn); candidates must not age unjudged (warn).
-			for _, debt := range adrLandingDebt(a.Dir()) {
-				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: fmt.Sprintf(
-					"decisions/%s (accepted) updates %s, but that doc is older than the decision — fold the decision in (`meshctl kb consolidate`)",
-					debt.ADR.File, strings.Join(debt.Targets, ", "))})
-			}
-			if dirExists(filepath.Join(kbRoot, "decisions")) || dirExists(filepath.Join(kbRoot, "architecture")) {
-				if st, _ := os.ReadFile(filepath.Join(kbRoot, StateFile)); strings.TrimSpace(string(st)) == "" {
-					findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no knowledge/" + StateFile + " digest — sessions start without a current-state view; write one (`meshctl state template`, then `meshctl state set --summary-file <summary>`)"})
-				} else {
-					if w := StateLint(string(st)); len(w) > 0 {
-						findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + StateFile + ": " + strings.Join(w, "; ") + " — rewrite with `meshctl state set --summary-file <summary>`"})
-					}
-					if debt := stateDigestDebt(a.Dir()); len(debt) > 0 {
-						nums := make([]string, 0, len(debt))
-						for _, d := range debt {
-							nums = append(nums, "ADR-"+d.Num)
-						}
-						findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: fmt.Sprintf(
-							"knowledge/%s predates %d accepted decision(s): %s — run `meshctl kb consolidate`", StateFile, len(debt), groupList(nums, 6))})
-					}
-				}
-			}
-			// ADR-0067: confirmation ledger drift and unconfirmed knowledge.
-			findings = append(findings, ledgerFindings(a)...)
-			// ADR-0070: the latest reconcile report's age and open conflicts.
-			findings = append(findings, reconcileFindings(a, time.Now())...)
-			if aged := agedCandidates(a.Dir(), time.Now()); len(aged) > 0 {
-				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: fmt.Sprintf(
-					"%d candidate(s) older than 14 days, unconsolidated: %s — judge them (`meshctl kb consolidate`)", len(aged), groupList(aged, 4))})
-			}
-			if h, _ := HandoffShow(a); strings.TrimSpace(h) != "" {
-				if w := HandoffLint(h); len(w) > 0 {
-					findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + HandoffFile + ": " + strings.Join(w, "; ") + " — rewrite with `meshctl handoff set`"})
-				}
-			}
-			// (ADR-0033) The persisted memory index is off the routing path — recall
-			// reads live — so its staleness is no longer a doctor warning.
-			// ADR-0026 cognition wiring: the mesh-cognition skill + the always-present
-			// "## Cognition" standing-order stanza in CLAUDE.md. An agent with a knowledge/
-			// tree must have both, else the learn loop has no trigger (warn only).
-			// Skill location is harness-specific (ADR-0032): .claude/skills vs .opencode/skills.
-			skillDir := ".claude"
-			if a.HarnessName() == HarnessOpencode {
-				skillDir = ".opencode"
-			}
-			if !fileExists(filepath.Join(a.Dir(), skillDir, "skills", "mesh-cognition", "SKILL.md")) {
-				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "mesh-cognition skill not installed (" + skillDir + "/skills/mesh-cognition/) — run `meshctl agent onboard " + a.Name + "`"})
-			}
-			if b, err := os.ReadFile(claude); err == nil && !hasCognitionSection(string(b)) {
-				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md missing the Cognition standing-order stanza (ADR-0026) — run `meshctl agent onboard " + a.Name + "`"})
-			}
-			// Harness wiring present? (ADR-0032)
-			if a.HarnessName() == HarnessOpencode && !fileExists(filepath.Join(a.Dir(), "opencode.json")) {
-				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "harness=opencode but no opencode.json — run `meshctl agent onboard " + a.Name + "`"})
-			}
-			// Will cognition actually fire, and will it have anything to mine?
-			// Both fail silently otherwise — see doctor_wiring.go.
-			findings = append(findings, cognitionTriggerFindings(a)...)
-			findings = append(findings, sessionSignalFindings(a)...)
-			// Repo hygiene (ADR-0039): knowledge is only safe once pushed to a remote.
-			if h := AgentRepoHygiene(a.Dir()); !h.IsRepo {
-				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "workspace is not a git repo — `git init` + commit (knowledge/ unsafe until versioned + pushed)"})
-			} else if !h.HasRemote {
-				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no git remote — create one and push (knowledge/ lives only on this machine)"})
-			}
-			// Tool reference (ADR-0042): referenced tools should be installed; an
-			// `avoid` tool being present is a nudge, not an error.
-			for _, tr := range EffectiveTools(poolCfg, a) {
-				if tr.Avoid != "" {
-					if ToolOnPath(tr.Cmd) {
-						findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "`" + tr.Cmd + "` is on PATH but this mesh says avoid it — " + tr.Avoid})
-					}
-					continue
-				}
-				if !ToolOnPath(tr.Cmd) {
-					findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "referenced tool `" + tr.Cmd + "` not found on $PATH (install it or fix the tool reference)"})
-				}
-			}
-		}
+	}
+	// Per-peer checks run concurrently, results kept in roster order: each
+	// reads only its own peer's files and runs git in its own repo, and git
+	// process start-up is most of doctor's time.
+	perAgent := make([][]DoctorFinding, len(agents))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, doctorParallel)
+	for i, a := range agents {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, a *Agent) {
+			defer func() { <-sem; wg.Done() }()
+			perAgent[i] = doctorAgentFindings(a, poolCfg, poolTerms, poolGlossary)
+		}(i, a)
+	}
+	wg.Wait()
+	for _, fs := range perAgent {
+		findings = append(findings, fs...)
 	}
 
 	// `owns` uniqueness across canonical peers (ADR-0065, ADR-0069).
@@ -501,11 +374,169 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 			ok = false
 		}
 	}
-	sort.Slice(findings, func(i, j int) bool {
+	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Level != findings[j].Level {
 			return findings[i].Level == "error"
 		}
 		return findings[i].Agent < findings[j].Agent
 	})
 	return findings, ok
+}
+
+// doctorParallel bounds how many peers Doctor checks at once.
+const doctorParallel = 8
+
+// doctorAgentFindings runs every per-peer check for one agent. It must stay
+// safe to run for several peers at once: it reads only this peer's files and
+// shared read-only config.
+func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool, poolGlossary bool) (findings []DoctorFinding) {
+	for _, p := range a.Validate() {
+		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: p})
+	}
+
+	// CLAUDE.md intake section.
+	claude := filepath.Join(a.Dir(), "CLAUDE.md")
+	if b, err := os.ReadFile(claude); err == nil {
+		if !hasCommsSection(string(b)) {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md missing the Agent Communication (intake) section — run `meshctl agent onboard " + a.Name + "`"})
+		}
+	} else {
+		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no CLAUDE.md"})
+	}
+
+	// Peer glossaries retire (ADR-0066): leftover file, `owns` coupling.
+	findings = append(findings, glossaryFindings(a, poolTerms, poolGlossary)...)
+
+	// Inbox exists?
+	if !dirExists(a.InboxPath()) {
+		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: "inbox " + a.InboxPath() + " does not exist"})
+	}
+
+	// Intake statuses outside the canonical vocabulary (warn).
+	for _, msg := range InboxStatusFindings(a) {
+		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
+	}
+	// Intake triage age (ADR-0072): reports, never closes.
+	if msg := TriageDoctorFinding(a, time.Now()); msg != "" {
+		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
+	}
+
+	// Is the role file the harness will actually read? (Not gated on a
+	// knowledge/ tree: an agent with no KB still needs its doctrine loaded.)
+	findings = append(findings, opencodeInstructionsFindings(a)...)
+
+	// Fail-closed enforcement gate present + current? (Not gated on a
+	// knowledge/ tree: EVERY claude agent must enforce doctrine, KB or not.)
+	findings = append(findings, gateWiringFindings(a)...)
+
+	// ADR-0014 knowledge-base areas (tiered: warn on missing/empty, never error;
+	// a fresh agent legitimately has empty Experience). Only checked if the
+	// agent keeps a knowledge/ tree at all.
+	kbRoot := filepath.Join(a.Dir(), KnowledgeDir)
+	if dirExists(kbRoot) {
+		for _, area := range []string{"playbooks", "experience", "candidates"} {
+			ap := filepath.Join(kbRoot, area)
+			switch {
+			case !dirExists(ap):
+				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + area + "/ missing — run `meshctl agent onboard " + a.Name + "`"})
+			case dirEmptyish(ap):
+				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + area + "/ has no entries yet"})
+			}
+		}
+		// The one structurally-enforceable KB defect (ADR-0014): a decision marked
+		// "superseded by NNNN" where NNNN is missing or doesn't back-reference it.
+		for _, msg := range supersededDefects(filepath.Join(kbRoot, "decisions")) {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: msg})
+		}
+		// KB consistency drift (README parity, broken ADR refs, stale "pending ADR"
+		// markers) — all warn-level, advisory.
+		findings = append(findings, kbConsistencyFindings(a.Name, kbRoot)...)
+		// ADR-0019: reference notes must carry an `effective:` date (warn).
+		for _, msg := range referenceMissingEffective(kbRoot) {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
+		}
+		// S1 — the KB's two tiers stay consistent: an accepted decision must
+		// land in the state docs it names (error: the doc is stale by the
+		// decision's own account); the state digest must not predate accepted
+		// decisions (warn); candidates must not age unjudged (warn).
+		for _, debt := range adrLandingDebt(a.Dir()) {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: fmt.Sprintf(
+				"decisions/%s (accepted) updates %s, but that doc is older than the decision — fold the decision in (`meshctl kb consolidate`)",
+				debt.ADR.File, strings.Join(debt.Targets, ", "))})
+		}
+		if dirExists(filepath.Join(kbRoot, "decisions")) || dirExists(filepath.Join(kbRoot, "architecture")) {
+			if st, _ := os.ReadFile(filepath.Join(kbRoot, StateFile)); strings.TrimSpace(string(st)) == "" {
+				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no knowledge/" + StateFile + " digest — sessions start without a current-state view; write one (`meshctl state template`, then `meshctl state set --summary-file <summary>`)"})
+			} else {
+				if w := StateLint(string(st)); len(w) > 0 {
+					findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + StateFile + ": " + strings.Join(w, "; ") + " — rewrite with `meshctl state set --summary-file <summary>`"})
+				}
+				if debt := stateDigestDebt(a.Dir()); len(debt) > 0 {
+					nums := make([]string, 0, len(debt))
+					for _, d := range debt {
+						nums = append(nums, "ADR-"+d.Num)
+					}
+					findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: fmt.Sprintf(
+						"knowledge/%s predates %d accepted decision(s): %s — run `meshctl kb consolidate`", StateFile, len(debt), groupList(nums, 6))})
+				}
+			}
+		}
+		// ADR-0067: confirmation ledger drift and unconfirmed knowledge.
+		findings = append(findings, ledgerFindings(a)...)
+		// ADR-0070: the latest reconcile report's age and open conflicts.
+		findings = append(findings, reconcileFindings(a, time.Now())...)
+		if aged := agedCandidates(a.Dir(), time.Now()); len(aged) > 0 {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: fmt.Sprintf(
+				"%d candidate(s) older than 14 days, unconsolidated: %s — judge them (`meshctl kb consolidate`)", len(aged), groupList(aged, 4))})
+		}
+		if h, _ := HandoffShow(a); strings.TrimSpace(h) != "" {
+			if w := HandoffLint(h); len(w) > 0 {
+				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + HandoffFile + ": " + strings.Join(w, "; ") + " — rewrite with `meshctl handoff set`"})
+			}
+		}
+		// (ADR-0033) The persisted memory index is off the routing path — recall
+		// reads live — so its staleness is no longer a doctor warning.
+		// ADR-0026 cognition wiring: the mesh-cognition skill + the always-present
+		// "## Cognition" standing-order stanza in CLAUDE.md. An agent with a knowledge/
+		// tree must have both, else the learn loop has no trigger (warn only).
+		// Skill location is harness-specific (ADR-0032): .claude/skills vs .opencode/skills.
+		skillDir := ".claude"
+		if a.HarnessName() == HarnessOpencode {
+			skillDir = ".opencode"
+		}
+		if !fileExists(filepath.Join(a.Dir(), skillDir, "skills", "mesh-cognition", "SKILL.md")) {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "mesh-cognition skill not installed (" + skillDir + "/skills/mesh-cognition/) — run `meshctl agent onboard " + a.Name + "`"})
+		}
+		if b, err := os.ReadFile(claude); err == nil && !hasCognitionSection(string(b)) {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md missing the Cognition standing-order stanza (ADR-0026) — run `meshctl agent onboard " + a.Name + "`"})
+		}
+		// Harness wiring present? (ADR-0032)
+		if a.HarnessName() == HarnessOpencode && !fileExists(filepath.Join(a.Dir(), "opencode.json")) {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "harness=opencode but no opencode.json — run `meshctl agent onboard " + a.Name + "`"})
+		}
+		// Will cognition actually fire, and will it have anything to mine?
+		// Both fail silently otherwise — see doctor_wiring.go.
+		findings = append(findings, cognitionTriggerFindings(a)...)
+		findings = append(findings, sessionSignalFindings(a)...)
+		// Repo hygiene (ADR-0039): knowledge is only safe once pushed to a remote.
+		if h := AgentRepoHygiene(a.Dir()); !h.IsRepo {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "workspace is not a git repo — `git init` + commit (knowledge/ unsafe until versioned + pushed)"})
+		} else if !h.HasRemote {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no git remote — create one and push (knowledge/ lives only on this machine)"})
+		}
+		// Tool reference (ADR-0042): referenced tools should be installed; an
+		// `avoid` tool being present is a nudge, not an error.
+		for _, tr := range EffectiveTools(poolCfg, a) {
+			if tr.Avoid != "" {
+				if ToolOnPath(tr.Cmd) {
+					findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "`" + tr.Cmd + "` is on PATH but this mesh says avoid it — " + tr.Avoid})
+				}
+				continue
+			}
+			if !ToolOnPath(tr.Cmd) {
+				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "referenced tool `" + tr.Cmd + "` not found on $PATH (install it or fix the tool reference)"})
+			}
+		}
+	}
+	return findings
 }

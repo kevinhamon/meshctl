@@ -449,7 +449,7 @@ var meshctlBoolFlags = map[string]bool{
 	"claim": true, "closed": true, "current": true, "detach": true,
 	"dispatchable": true, "doctrine-only": true, "dry-run": true, "fix": true,
 	"force": true, "headless": true, "help": true, "h": true, "in-session": true,
-	"iterm2": true, "json": true, "md": true, "no-steward": true, "purge": true,
+	"iterm2": true, "json": true, "md": true, "no-steward": true, "open": true, "print-url": true, "purge": true,
 	"work": true, "yes": true,
 }
 
