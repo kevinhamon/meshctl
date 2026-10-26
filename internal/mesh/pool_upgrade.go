@@ -207,6 +207,12 @@ func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
 		} else if !opencodeAskWired(dir, false) {
 			p.Actions = append(p.Actions, "add opencode ask rules for promotions to opencode.json")
 		}
+		p.Actions = append(p.Actions, PlanPeerAgents(filepath.Dir(dir), dir).Actions()...)
+		if major >= 2 {
+			if miss := missingSubagentAsk(dir, false); len(miss) > 0 {
+				p.Actions = append(p.Actions, "add opencode subagent ask rules to opencode.json: "+strings.Join(miss, ", "))
+			}
+		}
 	} else {
 		if v := WiringVersion(dir); v < MeshWiringVersion {
 			p.Actions = append(p.Actions, fmt.Sprintf("refresh .claude/settings.json mesh hooks (v%d → v%d)", v, MeshWiringVersion))

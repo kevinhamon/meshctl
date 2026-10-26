@@ -277,6 +277,14 @@ func opencodeGateFindings(a *Agent) []DoctorFinding {
 			out = append(out, f("error", "opencode.json lacks the ask rules for promotions (ADR-0075), so `kb finish`, `kb confirm` "+
 				"and `state set` are refused; "+onboard))
 		}
+		if plan := PlanPeerAgents(filepath.Dir(a.Dir()), a.Dir()); !plan.Empty() {
+			n := len(plan.Write) + len(plan.Update) + len(plan.Remove)
+			out = append(out, f("warn", fmt.Sprintf("in-session peer subagents out of date (%d to write/refresh/remove) — run `meshctl pool upgrade`", n)))
+		}
+		if miss := missingSubagentAsk(a.Dir(), false); len(miss) > 0 {
+			out = append(out, f("warn", "opencode.json lacks the subagent ask rules for state-mutating peers ("+strings.Join(miss, ", ")+
+				"), so delegating work to them is refused; "+onboard))
+		}
 		return out
 	}
 

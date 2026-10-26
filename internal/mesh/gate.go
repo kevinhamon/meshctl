@@ -73,7 +73,7 @@ func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 	// 1. A delegation (Agent/Task call) from the caller's session. Delegating
 	//    work to a state-mutating peer (ADR-0063) is the human's call, every
 	//    time: ask. Nothing else about a delegation is the gate's business.
-	if p.ToolName == "Agent" || p.ToolName == "Task" {
+	if delegationTools[p.ToolName] {
 		if p.InSession {
 			return GateDecision{Deny: true, Check: GateCheckDelegation, Reason: peerWorkDenyDispatch}
 		}
@@ -383,16 +383,22 @@ func gatePoolPathAsk(agentsDir string, p HookPayload) GateDecision {
 	return GateDecision{Ask: true, Check: GateCheckPoolPath, Reason: text}
 }
 
+// delegationTools launch a subagent: Claude Code's Agent (formerly Task) and
+// opencode V2's subagent.
+var delegationTools = map[string]bool{"Agent": true, "Task": true, "subagent": true}
+
 // gateDelegation asks the human before work is delegated in-session to a
-// state-mutating peer; any other Agent call is allowed.
+// state-mutating peer; any other delegation is allowed. On opencode V2 the
+// ask is opencode's own, on the subagent call (ADR-0076).
 func gateDelegation(agentsDir string, p HookPayload) GateDecision {
 	var in struct {
 		SubagentType string `json:"subagent_type"`
+		Agent        string `json:"agent"`
 	}
 	if len(p.ToolInput) == 0 || json.Unmarshal(p.ToolInput, &in) != nil {
 		return GateDecision{}
 	}
-	st := in.SubagentType
+	st := firstNonEmpty(in.SubagentType, in.Agent)
 	if !strings.HasPrefix(st, PeerAgentPrefix) || !strings.HasSuffix(st, PeerWorkSuffix) {
 		return GateDecision{}
 	}
@@ -400,8 +406,8 @@ func gateDelegation(agentsDir string, p HookPayload) GateDecision {
 	if err != nil || len(peer.Mutates) == 0 {
 		return GateDecision{}
 	}
-	return GateDecision{Ask: true, Check: GateCheckDelegation, Reason: "mesh: `" + peer.Name + "` is a state-mutating peer (mutates: " +
-		strings.Join(peer.Mutates, ", ") + ") — approve this delegated work before it runs in this session."}
+	return opencodeDelegationAsk(p, GateDecision{Ask: true, Check: GateCheckDelegation, Reason: "mesh: `" + peer.Name + "` is a state-mutating peer (mutates: " +
+		strings.Join(peer.Mutates, ", ") + ") — approve this delegated work before it runs in this session."}, st)
 }
 
 // shellTools name the tools whose input is a shell command line.

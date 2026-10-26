@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// insession.go — `meshctl msg ask --in-session` and `meshctl agent brief`
-//. The headless path (dispatch.go) spawns a second harness process
+// insession.go — `meshctl msg ask --in-session` and `meshctl agent brief`.
+// The headless path (dispatch.go) spawns a second harness process
 // in the peer's workspace; the in-session path keeps one process and delegates
 // to the peer's subagent definition (peers.go). Both write the same intake file,
 // log to the same dispatch.log and count against the same hourly cap; only the
@@ -66,24 +66,27 @@ func AskInSession(agentsDir string, target *Agent, o InSessionOptions) (*Request
 		return nil, 1, fmt.Errorf("refusing to dispatch %q: %s. Use `meshctl send %s %s \"…\"` and let the human trigger it",
 			target.Name, reason, target.Name, o.Type)
 	}
-	// The caller must be a Claude Code workspace carrying the peer's subagent
-	// definition; otherwise the delegation line names something that does
-	// not exist. An opencode caller has no Agent tool at all.
+	// The caller must be a workspace whose harness runs subagents (Claude
+	// Code, opencode V2) and that carries the peer's definition; otherwise the
+	// delegation line names something that does not exist. opencode V1 has
+	// no subagent tool and no pre-tool hook for the peer gate.
 	callerAgent, err := FindAgent(agentsDir, caller)
 	if err != nil {
 		return nil, 1, fmt.Errorf("in-session dispatch needs a caller workspace in this pool: %w (run from your workspace, or set --from)", err)
 	}
-	if callerAgent.HarnessName() != HarnessClaude {
-		return nil, 1, fmt.Errorf("in-session dispatch runs the peer as a Claude Code subagent; %q runs on %s — use `meshctl ask %s %s \"…\"` (headless) instead",
-			caller, callerAgent.HarnessName(), target.Name, o.Type)
+	if !PeersSupported(callerAgent.Dir()) {
+		return nil, 1, fmt.Errorf("in-session dispatch runs the peer as a subagent, which needs Claude Code or opencode V2; %q runs on opencode V1 — use `meshctl ask %s %s \"…\"` (headless) instead",
+			caller, target.Name, o.Type)
 	}
+	opencode := callerAgent.HarnessName() == HarnessOpencode
 	defFile, subagent, mode := PeerAgentFile(callerAgent.Dir(), target.Name), PeerAgentName(target.Name), "in-session"
 	if o.Work {
 		defFile, subagent, mode = PeerWorkAgentFile(callerAgent.Dir(), target.Name), PeerWorkAgentName(target.Name), "in-session-work"
 	}
 	if !fileExists(defFile) {
-		return nil, 1, fmt.Errorf("no in-session definition %s in %s/.claude/agents/ — run `meshctl agent onboard %s` (or `meshctl pool upgrade`) to render the peer subagents, then retry",
-			filepath.Base(defFile), caller, caller)
+		rel, _ := filepath.Rel(filepath.Dir(callerAgent.Dir()), filepath.Dir(defFile))
+		return nil, 1, fmt.Errorf("no in-session definition %s in %s/ — run `meshctl agent onboard %s` (or `meshctl pool upgrade`) to render the peer subagents, then retry",
+			filepath.Base(defFile), filepath.ToSlash(rel), caller)
 	}
 
 	depth := envInt("AGENT_DISPATCH_DEPTH", 0)
@@ -126,12 +129,13 @@ func AskInSession(agentsDir string, target *Agent, o InSessionOptions) (*Request
 	}
 	_ = recordDispatch(agentsDir, now)
 
-	// The subagent's `meshctl inbox respond` runs in the same harness session,
-	// so a claim under the harness session id is one it can release. Without
-	// an exported id the claim would be unreleasable by anyone but this
-	// process, so mark the request in-progress instead — `inbox next` skips it
-	// either way.
-	if sid := harnessSessionID(); sid != "" {
+	// On Claude Code the subagent's `meshctl inbox respond` runs in the same
+	// harness session, so a claim under the harness session id is one it can
+	// release. An opencode V2 subagent runs in a child session with an id of
+	// its own (ADR-0076), and without an exported id the claim would be
+	// unreleasable by anyone but this process: both only mark the request
+	// in-progress — `inbox next` skips it either way.
+	if sid := harnessSessionID(); sid != "" && !opencode {
 		_, _ = ClaimRequest(req.Path(), sid, os.Getpid(), now)
 	}
 	_ = setFrontmatterFields(req.Path(), fields)
@@ -139,8 +143,14 @@ func AskInSession(agentsDir string, target *Agent, o InSessionOptions) (*Request
 	dispatchLog(agentsDir, caller, target.Name, depth, now, "DISPATCH mode=%s id=%s", mode, req.ID)
 
 	fmt.Fprintf(o.Stdout, "wrote intake %s → %s (%s)\n", req.ID, target.Name, req.Path())
-	fmt.Fprintf(o.Stdout, "in-session dispatch recorded (%d/%d this hour). Now delegate with the Agent tool:\n", recent+1, hourlyMax())
-	fmt.Fprintf(o.Stdout, "  subagent_type: %s\n", subagent)
+	if opencode {
+		fmt.Fprintf(o.Stdout, "in-session dispatch recorded (%d/%d this hour). Now delegate with the subagent tool:\n", recent+1, hourlyMax())
+		fmt.Fprintf(o.Stdout, "  agent: %s\n", subagent)
+		fmt.Fprintf(o.Stdout, "  description: %s %s\n", target.Name, req.ID)
+	} else {
+		fmt.Fprintf(o.Stdout, "in-session dispatch recorded (%d/%d this hour). Now delegate with the Agent tool:\n", recent+1, hourlyMax())
+		fmt.Fprintf(o.Stdout, "  subagent_type: %s\n", subagent)
+	}
 	fmt.Fprintf(o.Stdout, "  prompt: %s\n", DelegationPrompt(target.Name, req.ID))
 	if o.Work && len(target.Mutates) > 0 {
 		fmt.Fprintf(o.Stdout, "%s mutates %v — the harness will ask the human to approve this delegation.\n", target.Name, target.Mutates)

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -136,22 +137,101 @@ func ocGlob(pattern, s string) bool {
 	return err == nil && re.MatchString(s)
 }
 
-// shellEffect is the effect opencode applies to one simple shell command: the
+// shellEffect is the effect opencode applies to one simple shell command.
+func (ps ocPerms) shellEffect(command string) string { return ps.effect("shell", command) }
+
+// effect is the effect opencode applies to one action on one resource: the
 // last matching V2 rule, else allow. A matching V1-form allow wins whatever
 // the order, since its place among the V2 rules is unknown.
-func (ps ocPerms) shellEffect(command string) string {
+func (ps ocPerms) effect(action, resource string) string {
 	eff := "allow"
 	for _, r := range ps.rules {
-		if ocGlob(r.Action, "shell") && ocGlob(r.Resource, command) {
+		if ocGlob(r.Action, action) && ocGlob(r.Resource, resource) {
 			eff = r.Effect
 		}
 	}
 	for _, r := range ps.v1 {
-		if r.Effect == "allow" && ocGlob(r.Action, "shell") && ocGlob(r.Resource, command) {
+		if r.Effect == "allow" && ocGlob(r.Action, action) && ocGlob(r.Resource, resource) {
 			return "allow"
 		}
 	}
 	return eff
+}
+
+// mutatingWorkPeers are the in-session work definitions a caller holds for
+// state-mutating peers: each delegation to one is the human's call (ADR-0063),
+// which on opencode V2 is opencode's own ask on the subagent call (ADR-0076).
+func mutatingWorkPeers(callerDir string) []string {
+	var out []string
+	agents, _, err := ScanAgents(filepath.Dir(callerDir))
+	if err != nil {
+		return nil
+	}
+	for stem, d := range wantedPeerDefs(agents, callerDir) {
+		if d.work && len(d.peer.Mutates) > 0 {
+			out = append(out, PeerAgentPrefix+stem)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// missingSubagentAsk lists the mutating work definitions opencode would launch
+// without asking: the project rules and, when withEnv, OPENCODE_CONFIG_CONTENT.
+func missingSubagentAsk(callerDir string, withEnv bool) []string {
+	ps := readOcPerms(callerDir, withEnv)
+	var out []string
+	for _, name := range mutatingWorkPeers(callerDir) {
+		if ps.effect("subagent", name) != "ask" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// ensureOpencodeSubagentAsk appends a subagent ask rule to the caller's
+// opencode.json for each mutating work definition opencode would not ask on.
+// Add-only; appended last, since the last matching rule wins.
+func ensureOpencodeSubagentAsk(callerDir string) ([]string, error) {
+	missing := missingSubagentAsk(callerDir, false)
+	if len(missing) == 0 {
+		return nil, nil
+	}
+	path := filepath.Join(callerDir, "opencode.json")
+	root := map[string]any{"$schema": "https://opencode.ai/config.json"}
+	if b, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(b))) > 0 {
+		if json.Unmarshal(b, &root) != nil {
+			return []string{"opencode.json is not valid JSON — add subagent ask rules for " + strings.Join(missing, ", ") + " by hand"}, nil
+		}
+	}
+	arr, _ := root["permissions"].([]any)
+	for _, name := range missing {
+		arr = append(arr, map[string]any{"action": "subagent", "resource": name, "effect": "ask"})
+	}
+	root["permissions"] = arr
+	b, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
+		return nil, err
+	}
+	return []string{"opencode.json: subagent ask rules for " + strings.Join(missing, ", ")}, nil
+}
+
+// opencodeDelegationAsk hands the gate's ask on a delegation to a mutating
+// peer to opencode's own ask: through when opencode will ask on that
+// subagent, refused otherwise.
+func opencodeDelegationAsk(p HookPayload, d GateDecision, subagent string) GateDecision {
+	if !d.Ask || p.Harness != HarnessOpencode {
+		return d
+	}
+	if readOcPerms(p.Cwd, true).effect("subagent", subagent) == "ask" {
+		return GateDecision{Check: d.Check}
+	}
+	return GateDecision{Deny: true, Check: d.Check, Reason: "mesh: delegating to `" + subagent + "` needs your approval, and opencode " +
+		"will not ask you before it runs: its subagent ask rule is missing from opencode.json or overridden. Run `meshctl agent onboard` " +
+		"in this workspace, then retry."}
 }
 
 // opencodeAskWired reports whether opencode asks the human on every

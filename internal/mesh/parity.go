@@ -38,7 +38,7 @@ var HarnessParity = []ParityRow{
 		[]string{"hook post-tool-use"}},
 	{"Headless dispatch", "✅ `claude -p`", "✅ `opencode run --standalone`, locked-down permissions", "✅ `opencode run --pure`",
 		[]string{"ask", "msg ask"}},
-	{"In-session peers, consult and work (`ask --in-session [--work]`)", "✅", "✗ refused", "✗ refused",
+	{"In-session peers, consult and work (`ask --in-session [--work]`)", "✅ Agent tool", "✅ `subagent` tool; mutating peers asked by opencode", "✗ refused",
 		[]string{"agent brief"}},
 	{"Distillation at a boundary", "✅ distiller subagent", "✅ at session end", "✅ at session end",
 		nil},

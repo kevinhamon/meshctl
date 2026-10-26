@@ -192,7 +192,7 @@ release workflow runs it before building.
 | Outbound-write gate | ✅ asked once per summary | ✗ refused, no ask path | ✗ |
 | After-call record: pool commits, outbound acks | ✅ PostToolUse | ✗ not called | ✗ |
 | Headless dispatch | ✅ `claude -p` | ✅ `opencode run --standalone`, locked-down permissions | ✅ `opencode run --pure` |
-| In-session peers, consult and work (`ask --in-session [--work]`) | ✅ | ✗ refused | ✗ refused |
+| In-session peers, consult and work (`ask --in-session [--work]`) | ✅ Agent tool | ✅ `subagent` tool; mutating peers asked by opencode | ✗ refused |
 | Distillation at a boundary | ✅ distiller subagent | ✅ at session end | ✅ at session end |
 | Status line | ✅ every 10s | ✗ none | ✗ none |
 <!-- parity:end -->
@@ -227,7 +227,23 @@ and its frontmatter hooks run the mesh gate in peer mode, which denies dispatch,
 writes, git and KB writes — so a consulted peer cannot chain or drift. The pool root is
 added to the caller's `.claude/settings.local.json` `additionalDirectories` (machine-local,
 git-ignored) so the peer can read its own workspace. Session start lists the installed
-peers. opencode callers keep the headless `ask`.
+peers.
+
+**In-session dispatch (opencode V2) ([ADR-0076](docs/decisions/0076-opencode-in-session-peers.md)).**
+The same command works from an opencode 2.x caller. Peers are rendered into
+`.opencode/agents/mesh-<peer>[-work].md` (`mode: subagent`; no nested subagents, and no
+edit tools in a consult) and `ask --in-session` prints the `subagent` tool call (`agent:
+mesh-<peer>`). V2 has no per-agent hooks, so the caller's mesh plugin looks each session
+up once: a child session running a `mesh-` agent sends its calls to the gate with the
+caller's session, the child id and the agent, and meshctl maps the agent back to the
+rendered definition — peer gate, work gate and the peer's session record, as on Claude
+Code. A `mesh-` agent without a meshctl-rendered definition, or a child whose agent
+cannot be told, is refused. Other subagents (`general`, `explore`) run under the caller's
+full gate. The child has its own session id, so the request is marked in-progress
+without a claim. Delegating work to a `mutates` peer goes through opencode's own ask: a
+`subagent` ask rule per such peer in the caller's `opencode.json`. No pool-access grant
+is needed (V2 lets a session reach outside its project; the gates draw the line). opencode
+V1 keeps the headless `ask`.
 
 **Delegated work — the hub session ([ADR-0063](docs/decisions/0063-hub-session-delegated-peer-work.md)).** Add `--work` and the peer does the work
 instead of advising: `meshctl ask <peer> <type> "…" --in-session --work` prints

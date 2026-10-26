@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -12,9 +13,10 @@ import (
 )
 
 // peers.go — in-session dispatch: every dispatchable peer is rendered
-// as a Claude Code subagent definition in each Claude-harness agent's
-// `.claude/agents/mesh-<peer>.md`, computed from the pool's manifests exactly
-// like the roster. A caller then consults an advisory peer with the Agent tool
+// as a subagent definition in each caller whose harness can run one — Claude
+// Code's `.claude/agents/mesh-<peer>.md`, opencode V2's
+// `.opencode/agents/mesh-<peer>.md` (ADR-0076) — computed from the pool's
+// manifests exactly like the roster. A caller then consults an advisory peer with the Agent tool
 // instead of spawning a second `claude` process in a second terminal: same
 // intake file, same audit trail, same cap — one process.
 //
@@ -39,7 +41,33 @@ type peerFrontmatter struct {
 
 // PeerAgentFile is the path of a peer's subagent definition inside a caller.
 func PeerAgentFile(callerDir, peer string) string {
-	return filepath.Join(callerDir, ".claude", "agents", PeerAgentPrefix+peer+".md")
+	return filepath.Join(peerDefsDir(callerDir), PeerAgentPrefix+peer+".md")
+}
+
+// peerDefsDir is where the caller's harness reads subagent definitions:
+// .claude/agents (Claude Code) or .opencode/agents (opencode V2).
+func peerDefsDir(callerDir string) string {
+	if callerHarness(callerDir) == HarnessOpencode {
+		return filepath.Join(callerDir, ".opencode", "agents")
+	}
+	return filepath.Join(callerDir, ".claude", "agents")
+}
+
+// callerHarness is the harness the manifest in callerDir names, else the one
+// the workspace's files show (wiring can run before the manifest exists).
+func callerHarness(callerDir string) string {
+	a, err := LoadAgent(filepath.Join(callerDir, ManifestName))
+	if err != nil {
+		return DetectHarness(callerDir)
+	}
+	return a.HarnessName()
+}
+
+// PeersSupported reports whether a caller's harness can run in-session
+// peers: Claude Code, and opencode from V2 (its `subagent` tool and the
+// plugin's pre-tool hook carry the peer gate). V1 has neither.
+func PeersSupported(callerDir string) bool {
+	return callerHarness(callerDir) != HarnessOpencode || opencodeExpectedMajor(callerDir) >= 2
 }
 
 // PeerAgentName is the `subagent_type` a caller passes to the Agent tool.
@@ -51,7 +79,7 @@ const PeerWorkSuffix = "-work"
 
 // PeerWorkAgentFile is the path of a peer's delegated-work definition.
 func PeerWorkAgentFile(callerDir, peer string) string {
-	return filepath.Join(callerDir, ".claude", "agents", PeerAgentPrefix+peer+PeerWorkSuffix+".md")
+	return filepath.Join(peerDefsDir(callerDir), PeerAgentPrefix+peer+PeerWorkSuffix+".md")
 }
 
 // PeerWorkAgentName is the work-mode `subagent_type`.
@@ -61,6 +89,10 @@ func PeerWorkAgentName(peer string) string { return PeerAgentPrefix + peer + Pee
 // work-mode one; also how an installed file's mode is read back without
 // guessing from a name (an agent may itself be called "<x>-work").
 const peerWorkHookFlag = "--in-session --work"
+
+// rePeerHookFlags reads the peer and mode back out of a rendered definition:
+// the hook commands of a Claude Code one, the flags comment of an opencode one.
+var rePeerHookFlags = regexp.MustCompile(`--agent (\S+) --in-session( --work)?`)
 
 // RenderPeerAgent renders the read-only consult definition for `peer` as
 // installed into `caller`'s workspace.
@@ -75,16 +107,11 @@ func RenderPeerWorkAgent(caller string, peer *Agent) (string, error) {
 	return renderPeer(caller, peer, true)
 }
 
-func renderPeer(caller string, peer *Agent, work bool) (string, error) {
-	name, tplPath, flags := PeerAgentName(peer.Name), "templates/claude/mesh-peer.md", "--in-session"
-	// No Agent tool in either mode: a peer cannot spawn subagents (depth
-	// guard). Bash is scoped by the in-session gate, not by this list (the
-	// `tools` field takes tool names only).
-	// Consult: no Write/Edit — it answers through `meshctl inbox respond`.
-	tools := "Read, Grep, Glob, Bash"
+// peerBody renders the definition's prompt body, shared by every harness.
+func peerBody(caller string, peer *Agent, work bool) (string, error) {
+	tplPath := "templates/claude/mesh-peer.md"
 	if work {
-		name, tplPath, flags = PeerWorkAgentName(peer.Name), "templates/claude/mesh-peer-work.md", peerWorkHookFlag
-		tools = "Read, Grep, Glob, Bash, Edit, Write, MultiEdit"
+		tplPath = "templates/claude/mesh-peer-work.md"
 	}
 	tpl, err := templatesFS.ReadFile(tplPath)
 	if err != nil {
@@ -94,8 +121,25 @@ func renderPeer(caller string, peer *Agent, work bool) (string, error) {
 	if len(peer.Workdirs) > 0 {
 		workdirs = "`" + strings.Join(peer.Workdirs, "`, `") + "`"
 	}
-	body := strings.NewReplacer("__PEER__", peer.Name, "__CALLER__", caller,
-		"__TITLE__", firstNonEmpty(peer.Title, peer.Name), "__WORKDIRS__", workdirs).Replace(string(tpl))
+	return strings.NewReplacer("__PEER__", peer.Name, "__CALLER__", caller,
+		"__TITLE__", firstNonEmpty(peer.Title, peer.Name), "__WORKDIRS__", workdirs).Replace(string(tpl)), nil
+}
+
+func renderPeer(caller string, peer *Agent, work bool) (string, error) {
+	name, flags := PeerAgentName(peer.Name), "--in-session"
+	// No Agent tool in either mode: a peer cannot spawn subagents (depth
+	// guard). Bash is scoped by the in-session gate, not by this list (the
+	// `tools` field takes tool names only).
+	// Consult: no Write/Edit — it answers through `meshctl inbox respond`.
+	tools := "Read, Grep, Glob, Bash"
+	if work {
+		name, flags = PeerWorkAgentName(peer.Name), peerWorkHookFlag
+		tools = "Read, Grep, Glob, Bash, Edit, Write, MultiEdit"
+	}
+	body, err := peerBody(caller, peer, work)
+	if err != nil {
+		return "", err
+	}
 
 	model := strings.TrimSpace(peer.Model)
 	if model == "" || model == "default" {
@@ -127,6 +171,47 @@ func renderPeer(caller string, peer *Agent, work bool) (string, error) {
 		return "", err
 	}
 	return "---\n" + string(head) + "---\n\n" + body, nil
+}
+
+// opencodePeerFrontmatter is an opencode V2 agent definition
+// (.opencode/agents/<name>.md); the file name is the agent id.
+type opencodePeerFrontmatter struct {
+	Description string             `yaml:"description"`
+	Mode        string             `yaml:"mode"`
+	Permissions []opencodePermRule `yaml:"permissions"`
+}
+
+type opencodePermRule struct {
+	Action   string `yaml:"action"`
+	Resource string `yaml:"resource"`
+	Effect   string `yaml:"effect"`
+}
+
+// renderOpencodePeer renders the opencode V2 form (ADR-0076). V2 has no
+// per-agent hooks: the caller's mesh plugin sees the child session's agent id
+// on every tool call and the hook maps it back to this file's flags comment
+// (ResolvePeerSubagent), so the peer gate and the capture fire as on Claude
+// Code. The permissions are a second line behind the gate: no nested
+// subagents, and no edit tools in a consult. No model: a subagent without one
+// inherits the caller's, and a Claude model name would not resolve here.
+func renderOpencodePeer(caller string, peer *Agent, work bool) (string, error) {
+	flags := "--in-session"
+	perms := []opencodePermRule{{"subagent", "*", "deny"}}
+	if work {
+		flags = peerWorkHookFlag
+	} else {
+		perms = append(perms, opencodePermRule{"edit", "*", "deny"})
+	}
+	body, err := peerBody(caller, peer, work)
+	if err != nil {
+		return "", err
+	}
+	body = strings.ReplaceAll(body, "Agent calls", "subagent calls")
+	head, err := yaml.Marshal(opencodePeerFrontmatter{Description: peerDescription(peer, work), Mode: "subagent", Permissions: perms})
+	if err != nil {
+		return "", err
+	}
+	return "---\n" + string(head) + "---\n\n<!-- meshctl peer hook flags: --agent " + peer.Name + " " + flags + " -->\n" + body, nil
 }
 
 // peerDescription is what makes the caller's model delegate correctly: title,
@@ -172,7 +257,7 @@ type InstalledPeer struct {
 // workspace: definition stem (file name minus prefix and .md) → work mode.
 // The mode comes from the rendered hook flag, not the file name.
 func managedPeerDefs(callerDir string) map[string]bool {
-	dir := filepath.Join(callerDir, ".claude", "agents")
+	dir := peerDefsDir(callerDir)
 	entries, _ := os.ReadDir(dir)
 	out := map[string]bool{}
 	for _, e := range entries {
@@ -222,7 +307,7 @@ func InstalledPeers(callerDir string) []InstalledPeer {
 // agents learn the verb without a CLAUDE.md edit. "" when the agent has no
 // peer definitions.
 func PeerLine(a *Agent) string {
-	if a.HarnessName() != HarnessClaude {
+	if !PeersSupported(a.Dir()) {
 		return ""
 	}
 	peers := InstalledPeers(a.Dir())
@@ -242,9 +327,25 @@ func PeerLine(a *Agent) string {
 	}
 	return "# In-session peers\nPeers you can use without leaving this session: " + strings.Join(names, ", ") + ". " +
 		"Consult: `meshctl ask <peer> <type> \"…\" --in-session`. Work the peer owns (edits and commits in its own repos, " +
-		"its KB learns from it): add `--work`. Then make the Agent-tool call it prints (`subagent_type: " + PeerAgentPrefix +
+		"its KB learns from it): add `--work`. Then make the " + peerCallLabel(a.HarnessName()) + " call it prints (" + peerCallField(a.HarnessName()) + ": " + PeerAgentPrefix +
 		"<peer>` or `" + PeerAgentPrefix + "<peer>" + PeerWorkSuffix + "`); read the outcome with `meshctl sent`. " +
 		"Plain `meshctl ask` (headless, second process) still works; delegating to a state-mutating peer asks the human first."
+}
+
+// peerCallLabel names the caller harness's delegation tool; peerCallField
+// opens the backticked field that takes the definition's name.
+func peerCallLabel(harness string) string {
+	if harness == HarnessOpencode {
+		return "subagent-tool"
+	}
+	return "Agent-tool"
+}
+
+func peerCallField(harness string) string {
+	if harness == HarnessOpencode {
+		return "`agent"
+	}
+	return "`subagent_type"
 }
 
 // PeerPlan is what ensurePeerAgents would do to one caller workspace.
@@ -283,9 +384,14 @@ func prefixed(names []string) []string {
 
 // wantedPeerDefs is the set of definitions a caller should hold: stem →
 // (peer, work mode). Consult for dispatchable peers, work for work-delegable
-// ones; a state-mutating peer gets the work definition only.
-func wantedPeerDefs(agents []*Agent, caller string) map[string]peerDef {
+// ones; a state-mutating peer gets the work definition only. None when the
+// caller's harness cannot run in-session peers (opencode V1).
+func wantedPeerDefs(agents []*Agent, callerDir string) map[string]peerDef {
 	want := map[string]peerDef{}
+	if !PeersSupported(callerDir) {
+		return want
+	}
+	caller := filepath.Base(callerDir)
 	for _, a := range agents {
 		if a.Name == caller {
 			continue
@@ -305,12 +411,17 @@ type peerDef struct {
 	work bool
 }
 
-func (d peerDef) render(caller string) (string, error) {
+// render renders the definition in the form the caller's harness reads.
+func (d peerDef) render(callerDir string) (string, error) {
+	caller := filepath.Base(callerDir)
+	if callerHarness(callerDir) == HarnessOpencode {
+		return renderOpencodePeer(caller, d.peer, d.work)
+	}
 	return renderPeer(caller, d.peer, d.work)
 }
 
 func peerDefFile(callerDir, stem string) string {
-	return filepath.Join(callerDir, ".claude", "agents", PeerAgentPrefix+stem+".md")
+	return filepath.Join(peerDefsDir(callerDir), PeerAgentPrefix+stem+".md")
 }
 
 // PlanPeerAgents compares the peers of the pool with the managed definitions
@@ -319,12 +430,11 @@ func peerDefFile(callerDir, stem string) string {
 // yields an empty plan.
 func PlanPeerAgents(poolRoot, callerDir string) PeerPlan {
 	var plan PeerPlan
-	caller := filepath.Base(callerDir)
 	agents, _, err := ScanAgents(poolRoot)
 	if err != nil {
 		return plan
 	}
-	want := wantedPeerDefs(agents, caller)
+	want := wantedPeerDefs(agents, callerDir)
 	for stem, d := range want {
 		cur, err := os.ReadFile(peerDefFile(callerDir, stem))
 		if err != nil {
@@ -335,7 +445,7 @@ func PlanPeerAgents(poolRoot, callerDir string) PeerPlan {
 			plan.Hand = append(plan.Hand, stem)
 			continue
 		}
-		body, err := d.render(caller)
+		body, err := d.render(callerDir)
 		if err != nil || string(cur) != body {
 			plan.Update = append(plan.Update, stem)
 		}
@@ -360,15 +470,14 @@ func ensurePeerAgents(poolRoot, callerDir string) ([]string, error) {
 	if plan.Empty() {
 		return nil, nil
 	}
-	caller := filepath.Base(callerDir)
 	agents, _, err := ScanAgents(poolRoot)
 	if err != nil {
 		return nil, err
 	}
-	want := wantedPeerDefs(agents, caller)
+	want := wantedPeerDefs(agents, callerDir)
 	write := func(stems []string) error {
 		for _, stem := range stems {
-			body, err := want[stem].render(caller)
+			body, err := want[stem].render(callerDir)
 			if err != nil {
 				return err
 			}
@@ -395,8 +504,9 @@ func ensurePeerAgents(poolRoot, callerDir string) ([]string, error) {
 	}
 	var notes []string
 	if len(plan.Write) > 0 {
-		notes = append(notes, fmt.Sprintf("wrote %d in-session peer subagent(s) (.claude/agents/%s<peer>[%s].md): %s",
-			len(plan.Write), PeerAgentPrefix, PeerWorkSuffix, strings.Join(plan.Write, ", ")))
+		rel, _ := filepath.Rel(callerDir, peerDefsDir(callerDir))
+		notes = append(notes, fmt.Sprintf("wrote %d in-session peer subagent(s) (%s/%s<peer>[%s].md): %s",
+			len(plan.Write), filepath.ToSlash(rel), PeerAgentPrefix, PeerWorkSuffix, strings.Join(plan.Write, ", ")))
 	}
 	if len(plan.Update) > 0 {
 		notes = append(notes, fmt.Sprintf("refreshed %d in-session peer subagent(s): %s", len(plan.Update), strings.Join(plan.Update, ", ")))

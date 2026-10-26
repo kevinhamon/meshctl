@@ -979,11 +979,12 @@ func askCmd() *cobra.Command {
 		Short: "Write intake + dispatch an advisory peer (headless process, or --in-session as a subagent of this session)",
 		Long: "Writes the intake request, runs the anti-cascade guards, then either runs the peer headlessly in its own\n" +
 			"workspace and blocks for the answer (default), or — with --in-session — records the dispatch and prints\n" +
-			"the Agent-tool delegation to make next (subagent_type mesh-<peer>), so the peer runs inside this\n" +
-			"Claude Code session instead of a second terminal. Either way the answer lands in the request file\n" +
-			"(`meshctl sent`). --in-session needs the peer's subagent definition in this workspace\n" +
-			"(.claude/agents/mesh-<peer>.md, rendered by `agent onboard` / `pool upgrade`).\n\n" +
-			"--in-session --work delegates write-capable work instead (subagent_type mesh-<peer>-work): the peer\n" +
+			"the delegation to make next — Claude Code's Agent tool (subagent_type mesh-<peer>) or opencode V2's\n" +
+			"subagent tool (agent mesh-<peer>) — so the peer runs inside this session instead of a second\n" +
+			"terminal. Either way the answer lands in the request file (`meshctl sent`). --in-session needs the\n" +
+			"peer's subagent definition in this workspace (.claude/agents/ or .opencode/agents/mesh-<peer>.md,\n" +
+			"rendered by `agent onboard` / `pool upgrade`).\n\n" +
+			"--in-session --work delegates write-capable work instead (mesh-<peer>-work): the peer\n" +
 			"edits and commits as itself in its own workspace and declared workdirs, and ends with a receipt.\n" +
 			"If the peer has a live session, the work goes to a mesh/work/<id> worktree that the peer lands with\n" +
 			"`meshctl work merge <id>`. Delegating to a state-mutating peer asks the human for approval.",
@@ -1032,7 +1033,7 @@ func askCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.BoolVar(&detach, "detach", false, "write-only + return the id to poll later (no blocking dispatch)")
-	f.BoolVar(&inSession, "in-session", false, "record the dispatch and print the Agent-tool delegation (peer runs as a subagent of this Claude Code session)")
+	f.BoolVar(&inSession, "in-session", false, "record the dispatch and print the subagent delegation (peer runs as a subagent of this Claude Code or opencode V2 session)")
 	f.BoolVar(&work, "work", false, "with --in-session: delegate write-capable work (mesh-<peer>-work) instead of a read-only consult")
 	f.StringVar(&priority, "priority", "P2", "P1|P2|P3")
 	f.StringVar(&from, "from", "", "requester name (default: $AGENT_NAME or cwd)")
@@ -1888,7 +1889,11 @@ func hookCmd() *cobra.Command {
 			if err != nil {
 				return nil
 			}
-			mesh.HookSessionEnd(dir, stamp(mesh.ParseHookPayload(b)), os.Getpid(), time.Now())
+			p, err := mesh.ResolvePeerSubagent(dir, stamp(mesh.ParseHookPayload(b)))
+			if err != nil {
+				return nil // an unresolvable peer was never let run; nothing to capture
+			}
+			mesh.HookSessionEnd(dir, p, os.Getpid(), time.Now())
 			return nil
 		},
 	}
@@ -1914,6 +1919,12 @@ func hookCmd() *cobra.Command {
 				_ = mesh.HarnessForPayload(dir, p, harness).EmitGate(os.Stdout, mesh.GateUnavailable(perr.Error()))
 				return nil
 			}
+			// An opencode child session is mapped to its peer here (ADR-0076);
+			// a mesh- subagent that cannot be mapped is refused.
+			if p, perr = mesh.ResolvePeerSubagent(dir, p); perr != nil {
+				_ = mesh.HarnessForPayload(dir, p, harness).EmitGate(os.Stdout, mesh.GateUnavailable(perr.Error()))
+				return nil
+			}
 			_ = mesh.HarnessForPayload(dir, p, harness).EmitGate(os.Stdout, mesh.HookPreToolUse(dir, p, time.Now()))
 			return nil
 		},
@@ -1931,7 +1942,11 @@ func hookCmd() *cobra.Command {
 				return nil
 			}
 			dir, _ := agentsDir()
-			mesh.HookPostToolUse(dir, stamp(mesh.ParseHookPayload(b)), time.Now())
+			p, err := mesh.ResolvePeerSubagent(dir, stamp(mesh.ParseHookPayload(b)))
+			if err != nil {
+				return nil // the gate refused this subagent's calls; nothing ran
+			}
+			mesh.HookPostToolUse(dir, p, time.Now())
 			return nil
 		},
 	}

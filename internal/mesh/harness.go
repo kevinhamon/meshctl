@@ -261,7 +261,11 @@ func RunningHarness() string {
 //   - writes the local mesh plugin for the installed major: V1 →
 //     .opencode/plugin/meshctl.js (validated against 1.18), V2 →
 //     .opencode/plugins/meshctl.js (validated against 2.0.28) — and removes the
-//     other major's meshctl plugin, so an upgrade re-wires cleanly.
+//     other major's meshctl plugin, so an upgrade re-wires cleanly;
+//   - V2: the in-session peer definitions in .opencode/agents/ (ADR-0076);
+//     on V1 any managed ones are removed. No pool-access grant: V2 lets a
+//     session read and write outside its project by default, and the peer
+//     and work gates draw the line, as on Claude Code.
 //
 // Idempotent.
 func (h opencodeHarness) WireAgent(dest string) ([]string, error) {
@@ -285,7 +289,13 @@ func (h opencodeHarness) WireAgent(dest string) ([]string, error) {
 		}
 		notes = append(notes, n...)
 	}
-	return notes, nil
+	n, err := ensurePeerAgents(filepath.Dir(dest), dest)
+	notes = append(notes, n...)
+	if err != nil || h.Major() < 2 {
+		return notes, err
+	}
+	n, err = ensureOpencodeSubagentAsk(dest)
+	return append(notes, n...), err
 }
 
 // ensureOpencodeConfig add-only merges opencode.json: instructions ⊇ CLAUDE.md,

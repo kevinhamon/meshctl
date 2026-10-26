@@ -70,6 +70,37 @@ func payloadAgent(agentsDir string, p HookPayload) *Agent {
 	return hookAgent(agentsDir, p.Cwd)
 }
 
+// ResolvePeerSubagent stamps the in-session peer flags onto a payload from an
+// opencode V2 child session (ADR-0076). V2 has no per-agent hooks, so the one
+// project plugin forwards every tool call with the child's agent id as
+// agent_type, the caller's session as session_id and the child's as agent_id
+// (the shape Claude Code's subagent hooks have). An agent id with the mesh-
+// prefix must resolve to a meshctl-rendered peer definition in the caller,
+// whose flags comment names the peer and the mode; anything else is an error,
+// so the gate refuses rather than run the peer under the caller's rules.
+// Payloads with no mesh- agent, from Claude Code (its peer definitions carry
+// the flags themselves) or already flagged pass through unchanged.
+func ResolvePeerSubagent(agentsDir string, p HookPayload) (HookPayload, error) {
+	if p.Harness != HarnessOpencode || p.PeerAgent != "" || !strings.HasPrefix(p.AgentType, PeerAgentPrefix) {
+		return p, nil
+	}
+	caller := hookAgent(agentsDir, p.Cwd)
+	if caller == nil {
+		return p, fmt.Errorf("subagent %q runs outside a mesh workspace, so its peer cannot be resolved", p.AgentType)
+	}
+	def := filepath.Join(peerDefsDir(caller.Dir()), p.AgentType+".md")
+	b, err := os.ReadFile(def)
+	if err != nil || !strings.Contains(string(b), distillerAgentMarker) {
+		return p, fmt.Errorf("subagent %q has no meshctl-rendered peer definition in %s — the mesh gate cannot tell which peer it is; run `meshctl pool upgrade`", p.AgentType, caller.Name)
+	}
+	m := rePeerHookFlags.FindStringSubmatch(string(b))
+	if m == nil {
+		return p, fmt.Errorf("peer definition %s names no peer — run `meshctl pool upgrade`", def)
+	}
+	p.PeerAgent, p.InSession, p.Work = m[1], true, m[2] != ""
+	return p, nil
+}
+
 // ParseHookPayload decodes a hook payload, tolerating an empty/invalid stdin.
 // For the advisory hooks only; the gate uses ParseHookPayloadStrict.
 func ParseHookPayload(b []byte) HookPayload {

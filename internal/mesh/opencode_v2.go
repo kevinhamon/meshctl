@@ -129,6 +129,15 @@ func removeManagedPlugin(dest, rel string) ([]string, error) {
 //   - tool execute.before: the fail-closed gate (`meshctl hook pre-tool-use`);
 //     a non-empty reason is thrown, which blocks the call.
 //   - event stream: a finished turn captures a session-record (session-end).
+//   - subagent child sessions (ADR-0076): looked up once (parentID, agent).
+//     Their calls reach the hooks in the shape of Claude Code's subagent
+//     hooks — session_id the caller's, agent_id the child's, agent_type its
+//     agent — so meshctl maps a mesh-<peer> child to that peer's gate; any
+//     other child runs under the caller's full gate (no agent_id, so it does
+//     not step aside as a Claude Code hub hook does for its subagents). A child
+//     has no lifecycle of its own; a peer child's finished run is captured
+//     as the peer's record (Claude Code's SubagentStop). A child whose agent
+//     cannot be told is refused.
 //
 // In a headless run (dispatch or distill, flagged by the env meshctl sets) only
 // the doctrine and the gate are registered: the lifecycle hooks would recurse
@@ -177,10 +186,35 @@ export default {
     const prompts = new Map()
     const idle = new Map()
 
+    // Session lookup, cached: {parentID, agent}; null when it failed (not
+    // cached, so the next call retries). A parentID marks a subagent's child.
+    const sessions = new Map()
+    const sessionInfo = async (sid) => {
+      if (!sid) return null
+      if (sessions.has(sid)) return sessions.get(sid)
+      try {
+        const s = await ctx.session.get({ sessionID: sid })
+        const info = { parentID: (s && s.parentID) || "", agent: (s && s.agent) || "" }
+        sessions.set(sid, info)
+        return info
+      } catch { return null }
+    }
+    const isPeer = (agent) => typeof agent === "string" && agent.startsWith("mesh-")
+
     // The gate is the mesh's one fail-CLOSED hook: if meshctl cannot be run
     // or does not answer, the call is refused with the reason, not waved through.
     await ctx.tool.hook("execute.before", async (e) => {
-      const r = await exec(cwd, "pre-tool-use", { cwd, session_id: e.sessionID || "", tool_name: e.tool, tool_input: e.input }, 30000)
+      const info = await sessionInfo(e.sessionID)
+      const agent = e.agent || (info && info.agent) || ""
+      if (!agent && (!info || info.parentID)) throw new Error("mesh gate cannot tell which agent runs this session and refuses rather than run a peer under the wrong rules; retry, or run meshctl doctor")
+      const payload = { cwd, session_id: (info && info.parentID) || e.sessionID || "", tool_name: e.tool, tool_input: e.input }
+      // Only a peer is flagged: any other subagent (general, explore) runs
+      // under this agent's full gate — the plugin is the only hook it has.
+      if (isPeer(agent)) {
+        payload.agent_type = agent
+        if (info && info.parentID) payload.agent_id = e.sessionID
+      }
+      const r = await exec(cwd, "pre-tool-use", payload, 30000)
       if (r.err) throw new Error("mesh gate could not evaluate this tool call (" + r.err + ") and refuses rather than fail open; install meshctl on PATH or remove .opencode/plugins/meshctl.js")
       if (r.out) throw new Error(r.out)
     })
@@ -219,6 +253,15 @@ export default {
     })
     await ctx.session.hook("context", async (e) => {
       const sid = e.sessionID || ""
+      const info = await sessionInfo(sid)
+      if (info && info.parentID) {
+        // A subagent: no session of its own to start or recall for. A mesh
+        // peer takes its role from its definition and "agent brief", not
+        // this agent's CLAUDE.md; any other subagent keeps the doctrine.
+        const role = isPeer(e.agent || info.agent) ? "" : doctrine(cwd)
+        if (role) e.system.push({ type: "text", text: role })
+        return
+      }
       const parts = []
       const role = doctrine(cwd)
       if (role) parts.push(role)
@@ -243,6 +286,11 @@ export default {
           const turnDone = ev.type === "session.execution.succeeded" || ev.type === "session.idle" ||
             (ev.type === "session.status" && data.status && data.status.type === "idle")
           if (!turnDone || !sid) continue
+          const info = await sessionInfo(sid)
+          if (info && info.parentID) {
+            if (isPeer(info.agent)) await run(cwd, "session-end", { cwd, session_id: info.parentID, agent_id: sid, agent_type: info.agent, prompt: "" })
+            continue
+          }
           await run(cwd, "session-beat", { cwd, session_id: sid, prompt: "" })
           armIdle(sid)
         }
