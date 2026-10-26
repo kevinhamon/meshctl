@@ -817,6 +817,9 @@ Run the **` + "`mesh-cognition`" + ` skill** for the full procedure; its short f
   "check intake": the intake order above. "review work": ` + "`meshctl work list`" + `,
   review each, then ` + "`meshctl work merge <id>`" + ` or ` + "`--abort`" + ` as the human says.
   "consolidate": ` + "`meshctl kb consolidate`" + `, then the Consolidate step below.
+  "reconcile": ` + "`meshctl kb reconcile --peer <you>`" + ` writes your worksheet; write the
+  reconcile report from it, then read the clean entries as confirmation rounds, at most
+  five paths per ` + "`meshctl kb confirm <path>... --report <report>`" + `.
 - **Distill as you learn.** When a session yields a recurring pattern, a reusable
   procedure, a failure mode, or a consequential decision: ` + "`meshctl kb begin`" + ` →
   write ` + "`knowledge/candidates/<slug>.md`" + ` → consolidate into ` + "`playbooks/`" + ` /

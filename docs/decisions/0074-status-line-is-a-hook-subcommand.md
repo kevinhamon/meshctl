@@ -50,3 +50,9 @@ Verified facts:
 Each pending group ends in a dimmed `say "<phrase>"`: `confirm kb` (needs-confirm), `resolve conflicts` (conflicts), `check intake` (intake), `review work` (dispatched), `consolidate` (kb overdue). `[agent: …]` and `[pending: none]` carry none.
 
 A hint is only as good as the agent's reading of it, so each phrase is defined in the standing orders: the managed Cognition section of `CLAUDE.md`, the new-agent template and the mesh-cognition skill. Every definition starts from a fresh `meshctl pending`, because the pending block is injected only at session start. A phrase starts a review; it never acts without the human. A test fails if the line shows a phrase that the standing orders do not define.
+
+## Amendment (2026-10-26): unconfirmed entries show, with "reconcile"
+
+The line counted candidates only, so the unconfirmed current-tier entries that `meshctl pending` reports never reached it, however long they waited, and nothing named the review that works them off. A new group `[unconfirmed: N, say "reconcile"]` shows whenever the KB health line counts unconfirmed entries, in the terminal's own color (red stays for what blocks). It is the same count as `meshctl pending`, which keeps its rule: the KB health line appears only once the agent has candidates or a reconcile report. The candidate rule is unchanged: `[kb: N overdue, say "consolidate"]` only past the 14-day threshold, since a fresh candidate is not yet debt.
+
+"reconcile" is defined in the standing orders: `meshctl kb reconcile --peer <you>` writes the worksheet, the agent writes the reconcile report from it, then reads the clean entries to the human as confirmation rounds, at most five paths per `meshctl kb confirm` (ADR-0070). Conflicts go to "resolve conflicts". The count is a visible nudge, not a schedule; the pass still runs only when the human says so. Phrases are now keyed by the group's label, since one pending line feeds two groups.

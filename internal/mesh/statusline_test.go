@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -48,6 +49,31 @@ func TestStatusLine_OverdueCandidatesCueConsolidate(t *testing.T) {
 	got := plainStatusLine(dir, cwdPayload(arch.Dir()))
 	if want := `[kb: 2 overdue, say "consolidate"]`; !regexp.MustCompile(regexp.QuoteMeta(want)).MatchString(got) {
 		t.Fatalf("missing %q in %q", want, got)
+	}
+}
+
+// Unconfirmed entries show whenever the KB health line counts any, with the
+// reconcile phrase; fresh candidates alone stay off the line.
+func TestStatusLine_UnconfirmedEntriesCueReconcile(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	for rel, body := range map[string]string{
+		"reference/netting.md": "# Netting\n\nWe net daily.\n",
+		"candidates/fresh.md":  "# Fresh\n",
+	} {
+		p := filepath.Join(a.Dir(), KnowledgeDir, filepath.FromSlash(rel))
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n := len(UnconfirmedCurrentEntries(a.Dir()))
+	if n == 0 {
+		t.Fatal("fixture: want unconfirmed entries")
+	}
+	got := plainStatusLine(dir, cwdPayload(a.Dir()))
+	if want := fmt.Sprintf(`[agent: architect] * [unconfirmed: %d, say "reconcile"]`, n); got != want {
+		t.Fatalf("status line:\n got %q\nwant %q", got, want)
 	}
 }
 

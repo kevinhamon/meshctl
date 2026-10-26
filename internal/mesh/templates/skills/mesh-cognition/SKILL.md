@@ -52,6 +52,11 @@ Recognize → Recall → Retrieve → Reconcile → Verify → **Align** → Act
    - "review work": `meshctl work list`, review each branch with the human, then
      `meshctl work merge <id>` or `--abort` as the human says.
    - "consolidate": `meshctl kb consolidate`, then work the debt as in Consolidation below.
+   - "reconcile": `meshctl kb reconcile --peer <you>` writes your worksheet under
+     `.memory/reconcile/`; write the reconcile report from it (one verdict and a quoted
+     grounding per entry), then read the clean entries to the human as confirmation
+     rounds, at most five paths per `meshctl kb confirm <path>... --report <report>`.
+     Conflicts go to "resolve conflicts".
 1. **Recall.** `meshctl memory recall "<topic>"` returns tiered pointers — current
    tier outranks log, superseded decisions never appear. Add `--budget 4000` to inline
    the top current-tier bodies so the knowledge is in view. Your `state.md` digest and
