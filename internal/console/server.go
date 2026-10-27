@@ -90,14 +90,30 @@ func (s Settings) URL() string {
 	return fmt.Sprintf("http://127.0.0.1:%d/?token=%s", s.Port, s.Token)
 }
 
-// Server serves an engine's snapshot. Every request must name this console
-// in its Host header (a website that resolves its own name to 127.0.0.1
-// cannot) and carry the token; a request that changes something (the
-// re-check) must also come from the console's own page.
+// Server serves the hub's pools, or one engine's when Hub is nil. Every
+// request must name this console in its Host header (a website that
+// resolves its own name to 127.0.0.1 cannot) and carry the token; a request
+// that changes something (the re-check) must also come from the console's
+// own page. With a hub, ?pool=<key> picks the pool; none means the default.
 type Server struct {
+	Hub      *Hub
 	Engine   *Engine
 	Settings Settings
 	UI       http.Handler // the page (ticket 04); nil serves a placeholder
+}
+
+// engine is the request's pool's engine; false (and a 404 written) when
+// ?pool= names no pool served.
+func (s *Server) engine(w http.ResponseWriter, r *http.Request) (*Engine, bool) {
+	if s.Hub == nil {
+		return s.Engine, true
+	}
+	e, _, err := s.Hub.Engine(r.URL.Query().Get("pool"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return nil, false
+	}
+	return e, true
 }
 
 // Handler is the console's HTTP handler.
@@ -181,9 +197,20 @@ func (s *Server) authorized(r *http.Request) bool {
 }
 
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
+	var v any
+	if s.Hub != nil {
+		f, err := s.Hub.Frame(r.URL.Query().Get("pool"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		v = f
+	} else {
+		v = s.Engine.Snapshot()
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(s.Engine.Snapshot())
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // events streams snapshots as server-sent events: the current one at once,
@@ -194,10 +221,22 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+	var (
+		ch     <-chan []byte
+		cancel func()
+	)
+	if s.Hub != nil {
+		var err error
+		if ch, cancel, err = s.Hub.Subscribe(r.URL.Query().Get("pool")); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+	} else {
+		ch, cancel = s.Engine.Subscribe()
+	}
+	defer cancel()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
-	ch, cancel := s.Engine.Subscribe()
-	defer cancel()
 	keep := time.NewTicker(25 * time.Second)
 	defer keep.Stop()
 	for {
@@ -218,7 +257,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) recheck(w http.ResponseWriter, r *http.Request) {
-	s.Engine.Recheck()
+	e, ok := s.engine(w, r)
+	if !ok {
+		return
+	}
+	e.Recheck()
 	w.WriteHeader(http.StatusAccepted)
 }
 

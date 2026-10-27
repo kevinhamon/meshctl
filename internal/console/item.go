@@ -71,8 +71,12 @@ func readItem(title, path string) (Item, error) {
 }
 
 func (s *Server) item(w http.ResponseWriter, r *http.Request) {
+	e, ok := s.engine(w, r)
+	if !ok {
+		return
+	}
 	q := r.URL.Query()
-	it, err := ItemFor(s.Engine.dir, q.Get("agent"), q.Get("kind"), q.Get("id"), time.Now())
+	it, err := ItemFor(e.dir, q.Get("agent"), q.Get("kind"), q.Get("id"), time.Now())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return

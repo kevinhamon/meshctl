@@ -48,13 +48,20 @@ func LoginItemLog() (string, error) {
 	return filepath.Join(home, "Library", "Logs", "meshctl-console.log"), nil
 }
 
-// LoginItemPlist renders the LaunchAgent: run exe `console` for the pool at
-// poolRoot, at login and again if it exits, with a PATH that finds git.
+// LoginItemPlist renders the LaunchAgent: run exe `console`, opening on the
+// pool at poolRoot ("" for the first registered pool, run from home), at
+// login and again if it exits, with a PATH that finds git.
 func LoginItemPlist(exe, poolRoot, path, logFile string) string {
 	esc := func(s string) string {
 		var b strings.Builder
 		_ = xml.EscapeText(&b, []byte(s))
 		return b.String()
+	}
+	wd, agentsDir := poolRoot, ""
+	if poolRoot == "" {
+		wd, _ = os.UserHomeDir()
+	} else {
+		agentsDir = "\n\t\t<key>AGENTS_DIR</key><string>" + esc(poolRoot) + "</string>"
 	}
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -63,10 +70,9 @@ func LoginItemPlist(exe, poolRoot, path, logFile string) string {
 	<key>Label</key><string>` + LoginItemLabel + `</string>
 	<key>ProgramArguments</key>
 	<array><string>` + esc(exe) + `</string><string>console</string></array>
-	<key>WorkingDirectory</key><string>` + esc(poolRoot) + `</string>
+	<key>WorkingDirectory</key><string>` + esc(wd) + `</string>
 	<key>EnvironmentVariables</key>
-	<dict>
-		<key>AGENTS_DIR</key><string>` + esc(poolRoot) + `</string>
+	<dict>` + agentsDir + `
 		<key>PATH</key><string>` + esc(path) + `</string>
 	</dict>
 	<key>RunAtLoad</key><true/>
@@ -81,8 +87,8 @@ func LoginItemPlist(exe, poolRoot, path, logFile string) string {
 
 func guiDomain() string { return "gui/" + strconv.Itoa(os.Getuid()) }
 
-// InstallLoginItem writes the LaunchAgent for exe and poolRoot and starts it
-// (replacing one already loaded).
+// InstallLoginItem writes the LaunchAgent for exe, opening on poolRoot, and
+// starts it (replacing one already loaded).
 func InstallLoginItem(exe, poolRoot string) (string, error) {
 	if runtime.GOOS != "darwin" {
 		return "", ErrNotMacOS

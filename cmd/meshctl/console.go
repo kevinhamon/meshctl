@@ -18,10 +18,12 @@ func consoleCmd() *cobra.Command {
 	var open, printURL bool
 	c := &cobra.Command{
 		Use:   "console",
-		Short: "Serve a live, read-only view of the pool on localhost (pending work, doctor, notices)",
-		Long: "Runs until stopped, serving the pool's pending work, doctor findings and pool notices at\n" +
+		Short: "Serve a live, read-only view of this machine's pools on localhost (pending work, doctor, notices)",
+		Long: "Runs until stopped, serving each pool's pending work, doctor findings and pool notices at\n" +
 			"http://127.0.0.1:<port>/, updated within moments of the pool's files changing. It never changes\n" +
-			"the pool. Settings (port, the secret token every request carries) live in the user config\n" +
+			"a pool. It serves every live pool in the registry (`meshctl pool list`) and the pool it is\n" +
+			"started from, opening on that one (or the first registered pool outside any pool); the page\n" +
+			"switches between them. Settings (port, the secret token every request carries) live in the user config\n" +
 			"directory (meshctl/console.json), created on first run. --print-url prints the address with\n" +
 			"its token and exits; --open also opens it in the browser.",
 		Args: cobra.NoArgs,
@@ -37,17 +39,23 @@ func consoleCmd() *cobra.Command {
 				fmt.Println(s.URL())
 				return nil
 			}
-			dir, err := agentsDir()
-			if err != nil {
-				return err
+			dir, _ := agentsDir() // outside a pool: open on the first registered one
+			hub := console.NewHub(dir, resolveVersion())
+			hub.Sync()
+			pools := hub.Pools()
+			if len(pools) == 0 {
+				return fmt.Errorf("no pools to show: run from a pool, or register one (`meshctl pool register`)")
 			}
-			eng := console.NewEngine(dir, resolveVersion())
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			errc := make(chan error, 1)
-			go func() { errc <- eng.Run(ctx) }()
-			srv := &console.Server{Engine: eng, Settings: s, UI: console.UI()}
-			fmt.Printf("meshctl console for %s\n  %s\n", dir, s.URL())
+			go func() { errc <- hub.Run(ctx) }()
+			srv := &console.Server{Hub: hub, Settings: s, UI: console.UI()}
+			fmt.Printf("meshctl console for %d pool(s), opening on %s\n", len(pools), hub.DefaultKey())
+			for _, p := range pools {
+				fmt.Printf("  %-16s %s\n", p.Key, p.Path)
+			}
+			fmt.Printf("  %s\n", s.URL())
 			if open {
 				openBrowser(s.URL())
 			}
@@ -57,13 +65,10 @@ func consoleCmd() *cobra.Command {
 	}
 	install := &cobra.Command{
 		Use:   "install",
-		Short: "Start the console at login (macOS LaunchAgent) for this pool, and start it now",
+		Short: "Start the console at login (macOS LaunchAgent), opening on this pool, and start it now",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dir, err := agentsDir()
-			if err != nil {
-				return err
-			}
+			dir, _ := agentsDir() // outside a pool: open on the first registered one
 			exe, err := selfupdate.Executable()
 			if err != nil {
 				return err
@@ -77,7 +82,11 @@ func consoleCmd() *cobra.Command {
 				return err
 			}
 			log, _ := console.LoginItemLog()
-			fmt.Printf("installed %s\n  runs %s console for %s at login (log: %s)\n  open: %s\n", p, exe, dir, log, s.URL())
+			opens := dir
+			if opens == "" {
+				opens = "the first registered pool"
+			}
+			fmt.Printf("installed %s\n  runs %s console at login, opening on %s (log: %s)\n  open: %s\n", p, exe, opens, log, s.URL())
 			return nil
 		},
 	}

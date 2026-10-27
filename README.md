@@ -125,7 +125,7 @@ meshctl state   show | template | set --summary-file <summary>   (the ≤40-line
 meshctl intuition recall "<q>"
 meshctl hook    session-start | user-prompt | session-beat | session-end | pre-tool-use | post-tool-use | status-line   (wired per-agent; not run by hand)
 meshctl doctor  [--fix] [--json]     # manifests, wiring, KB consistency, pool hygiene
-meshctl console [--open] [--print-url] | install | uninstall   # live read-only view of the pool on localhost
+meshctl console [--open] [--print-url] | install | uninstall   # live read-only view of this machine's pools on localhost
 meshctl ask … | send …               (top-level aliases for msg ask|send)
 ```
 
@@ -155,7 +155,10 @@ live, read-only view of the whole pool at `http://127.0.0.1:7717/`: every peer's
 work with the phrase to say and to which agent, doctor findings (with a re-check button),
 pool notices such as a pending upgrade, and the open agent sessions with their scheduled
 jobs (Claude Code reports them at the end of every turn). A link beside each session
-brings its iTerm2 tab to the front. It watches the pool's state files, so the view moves
+brings its iTerm2 tab to the front. One console serves every pool on the machine: the
+live pools in the registry (`meshctl pool list`) and the pool it was started from, which
+it opens on. A switcher in the header moves between them and shows which other pools
+need attention; each pool has its own address (`#/pool/<name>`). It watches the pool's state files, so the view moves
 within a moment of a change; nothing in it changes the pool. Pin the page as a browser
 app window to keep it beside your terminals. `meshctl console install` starts it at login
 (macOS LaunchAgent; `meshctl update` restarts it on the new binary); `--print-url` prints

@@ -128,12 +128,16 @@ func FocusTTY(tty string) error {
 }
 
 func (s *Server) focus(w http.ResponseWriter, r *http.Request) {
+	e, ok := s.engine(w, r)
+	if !ok {
+		return
+	}
 	var req struct{ Agent, Session string }
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	for _, sr := range Sessions(s.Engine.dir, time.Now()) {
+	for _, sr := range Sessions(e.dir, time.Now()) {
 		if sr.Agent == req.Agent && sr.ID == req.Session {
 			if err := FocusTTY(sr.TTY); err != nil {
 				http.Error(w, err.Error(), http.StatusConflict)

@@ -106,6 +106,24 @@
   details.pool { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; }
   details.pool > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
 
+  .switch { position: relative; }
+  .switch > button { display: flex; gap: 8px; align-items: center; font-size: 13.5px; font-weight: 600; padding: 4px 10px; }
+  .switch .caret { color: var(--muted); font-size: 11px; }
+  .sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+  .sdot.red { background: var(--red); } .sdot.amber { background: var(--amber); } .sdot.green { background: var(--green); }
+  .elsewhere { font-size: 12.5px; color: var(--red); cursor: pointer; }
+  .menu { position: absolute; left: 0; top: calc(100% + 6px); z-index: 5; width: min(440px, calc(100vw - 32px)); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 4px; }
+  @media (max-width: 600px) { .menu { position: fixed; left: 16px; right: 16px; width: auto; max-height: 70vh; overflow: auto; } }
+  .opt { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 7px; cursor: pointer; }
+  .opt:hover, .opt.active { background: var(--hover); }
+  .opt .sdot { margin-top: 6px; }
+  .opt .body { flex: 1; min-width: 0; }
+  .opt .nm { font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+  .opt .nm .cur { color: var(--accent); font-size: 12px; font-weight: 400; }
+  .opt .path { color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .opt .facts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+
   dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text);
     width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; }
   dialog::backdrop { background: rgba(0,0,0,.35); }
@@ -119,6 +137,11 @@
 <header>
   <div class="bar">
     <h1>Mesh console</h1>
+    <div class="switch" id="switch">
+      <button id="pool-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="pool-menu"><span id="pool-dot" class="sdot"></span><span id="pool-name">…</span><span class="caret">▾</span></button>
+      <div class="menu" id="pool-menu" role="listbox" aria-label="Pools" hidden></div>
+    </div>
+    <span class="elsewhere" id="elsewhere" hidden></span>
     <span class="meta"><span id="dot" class="dot"></span><span id="status">connecting…</span></span>
     <span class="meta" id="updated"></span>
     <span class="spacer"></span>
@@ -137,6 +160,9 @@
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 let snap = null;
+let pools = [];      // every pool's summary, from the latest frame
+let poolKey = null;  // the pool on screen
+let es = null;
 let attentionOnly = false;
 try { attentionOnly = localStorage.getItem("attentionOnly") === "1"; } catch (e) {}
 
@@ -281,7 +307,7 @@ function card(a) {
   else if (a.warns) foot.append(el("span", "pill", plural(a.warns, "warning")));
   c.append(foot);
 
-  const open = () => { location.hash = "#/agent/" + encodeURIComponent(a.info.name); };
+  const open = () => { location.hash = poolHash() + "/agent/" + encodeURIComponent(a.info.name); };
   c.addEventListener("click", open);
   c.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
   return c;
@@ -294,7 +320,7 @@ function renderDetail(m, name) {
   const root = $("main");
   root.replaceChildren();
   const back = el("button", "back", "← All agents");
-  back.addEventListener("click", () => { location.hash = ""; });
+  back.addEventListener("click", () => { location.hash = poolHash(); });
   root.append(back);
   if (!a) { root.append(el("div", "empty", "No agent named " + name + " in this pool.")); return; }
 
@@ -411,7 +437,7 @@ function finding(f, withAgent) {
 // --- actions ---
 
 async function openItem(agent, kind, id) {
-  const q = new URLSearchParams({ agent, kind, id });
+  const q = new URLSearchParams({ pool: poolKey, agent, kind, id });
   const r = await fetch("/api/item?" + q.toString());
   $("item-title").textContent = r.ok ? "" : "Not available";
   $("item-path").textContent = "";
@@ -427,7 +453,7 @@ async function openItem(agent, kind, id) {
 $("item-close").addEventListener("click", () => $("item").close());
 
 async function focusSession(agent, session, button) {
-  const r = await fetch("/api/focus", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent, session }) });
+  const r = await fetch("/api/focus?" + new URLSearchParams({ pool: poolKey }), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent, session }) });
   if (!r.ok) {
     button.title = await r.text();
     button.textContent = "Not found";
@@ -438,30 +464,142 @@ async function focusSession(agent, session, button) {
 async function doRecheck(b) {
   b.disabled = true;
   b.textContent = "Checking…";
-  try { await fetch("/api/doctor/recheck", { method: "POST" }); } finally {
+  try { await fetch("/api/doctor/recheck?" + new URLSearchParams({ pool: poolKey }), { method: "POST" }); } finally {
     setTimeout(() => { b.disabled = false; b.textContent = "Re-check doctor"; }, 4000);
   }
 }
 
-// --- render loop ---
+// --- pools ---
 
-function route() {
-  const m = /^#\/agent\/(.+)$/.exec(location.hash);
-  return m ? decodeURIComponent(m[1]) : null;
+// Summary of a pool for its dot: red when a peer needs you or doctor has an
+// error, amber when work waits, green when clear, grey until computed.
+function poolState(p) {
+  if (!p.ready) return { cls: "", word: "starting" };
+  if (p.needs_you || p.errors) return { cls: "red", word: p.needs_you ? plural(p.needs_you, "agent") + (p.needs_you === 1 ? " needs you" : " need you") : plural(p.errors, "doctor error") };
+  if (p.pending) return { cls: "amber", word: p.pending + " waiting" };
+  return { cls: "green", word: "clear" };
 }
 
+const poolHash = () => "#/pool/" + encodeURIComponent(poolKey || "");
+
+function renderSwitcher() {
+  const cur = pools.find(p => p.key === poolKey);
+  $("pool-name").textContent = cur ? cur.name : (poolKey || "…");
+  $("pool-dot").className = "sdot " + (cur ? poolState(cur).cls : "");
+  $("pool-btn").title = cur ? cur.path : "";
+  document.title = (cur ? cur.name + " · " : "") + "Mesh console";
+  const others = pools.filter(p => p.key !== poolKey && p.ready && (p.needs_you || p.errors));
+  const elsewhere = $("elsewhere");
+  elsewhere.hidden = !others.length;
+  elsewhere.textContent = others.length === 1 ? others[0].name + " needs attention" : others.length + " other pools need attention";
+  if (!$("pool-menu").hidden) renderMenu();
+}
+
+function renderMenu() {
+  const menu = $("pool-menu");
+  const active = menu.querySelector(".opt.active");
+  const activeKey = active ? active.dataset.key : poolKey;
+  menu.replaceChildren();
+  for (const p of pools) {
+    const st = poolState(p);
+    const o = el("div", "opt" + (p.key === activeKey ? " active" : ""));
+    o.dataset.key = p.key;
+    o.setAttribute("role", "option");
+    o.setAttribute("aria-selected", String(p.key === poolKey));
+    o.append(el("span", "sdot " + st.cls));
+    const body = el("div", "body");
+    const nm = el("div", "nm", p.name);
+    if (p.key === poolKey) nm.append(el("span", "cur", "showing"));
+    body.append(nm, el("div", "path", p.path));
+    const facts = el("div", "facts");
+    facts.append(el("span", "pill" + (st.cls === "red" ? " err" : ""), st.word));
+    if (p.ready && p.pending && st.cls === "red") facts.append(el("span", "pill", p.pending + " waiting"));
+    if (p.sessions) facts.append(el("span", "pill on", plural(p.sessions, "session")));
+    if (p.warnings && !p.errors) facts.append(el("span", "pill", plural(p.warnings, "warning")));
+    if (p.upgrade) facts.append(el("span", "pill", "upgrade available"));
+    body.append(facts);
+    o.append(body);
+    o.addEventListener("click", () => choosePool(p.key));
+    menu.append(o);
+  }
+}
+
+function openMenu(open) {
+  $("pool-menu").hidden = !open;
+  $("pool-btn").setAttribute("aria-expanded", String(open));
+  if (open) {
+    // On a phone the menu is fixed to the gutters, just below the button.
+    $("pool-menu").style.top = matchMedia("(max-width: 600px)").matches ? ($("pool-btn").getBoundingClientRect().bottom + 6) + "px" : "";
+    renderMenu();
+  }
+}
+
+function choosePool(key) {
+  openMenu(false);
+  location.hash = "#/pool/" + encodeURIComponent(key);
+}
+
+$("pool-btn").addEventListener("click", (e) => { e.stopPropagation(); openMenu($("pool-menu").hidden); });
+$("elsewhere").addEventListener("click", (e) => { e.stopPropagation(); openMenu(true); });
+document.addEventListener("click", (e) => { if (!$("switch").contains(e.target)) openMenu(false); });
+document.addEventListener("keydown", (e) => {
+  if ($("pool-menu").hidden) return;
+  const opts = [...$("pool-menu").querySelectorAll(".opt")];
+  let i = opts.findIndex(o => o.classList.contains("active"));
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    i = (i + (e.key === "ArrowDown" ? 1 : opts.length - 1)) % opts.length;
+    opts.forEach((o, j) => o.classList.toggle("active", j === i));
+  } else if (e.key === "Enter" && i >= 0) {
+    e.preventDefault();
+    choosePool(opts[i].dataset.key);
+  } else if (e.key === "Escape") {
+    e.stopImmediatePropagation();
+    openMenu(false);
+    $("pool-btn").focus();
+  }
+}, true);
+
+// --- render loop ---
+
+// Routes: #/pool/<key>, #/pool/<key>/agent/<name>; #/agent/<name> (before
+// pools had keys) means the pool on screen. No pool: the last one viewed,
+// else the console's default.
+function route() {
+  let m = /^#\/pool\/([^/]+)(?:\/agent\/(.+))?$/.exec(location.hash);
+  if (m) return { pool: decodeURIComponent(m[1]), agent: m[2] ? decodeURIComponent(m[2]) : null };
+  m = /^#\/agent\/(.+)$/.exec(location.hash);
+  return { pool: null, agent: m ? decodeURIComponent(m[1]) : null };
+}
+
+function remembered() { try { return localStorage.getItem("pool"); } catch (e) { return null; } }
+function remember(key) { try { if (key) localStorage.setItem("pool", key); else localStorage.removeItem("pool"); } catch (e) {} }
+
 function render() {
+  renderSwitcher();
   if (!snap) return;
   $("pool").textContent = snap.pool;
   $("version").textContent = "meshctl " + snap.version;
   $("updated").textContent = "updated " + ago(snap.pending.generated);
   const m = model();
-  const name = route();
+  const name = route().agent;
   if (name) renderDetail(m, name); else renderGrid(m);
 }
 
-window.addEventListener("hashchange", () => { render(); window.scrollTo(0, 0); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && route() && !$("item").open) location.hash = ""; });
+function onRoute() {
+  const want = route().pool || poolKey || remembered();
+  if (want !== poolKey || !es) {
+    poolKey = want;
+    snap = null;
+    $("main").replaceChildren(el("div", "empty", "Loading…"));
+    connect();
+  }
+  render();
+  window.scrollTo(0, 0);
+}
+
+window.addEventListener("hashchange", onRoute);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && route().agent && !$("item").open) location.hash = poolHash(); });
 setInterval(() => { if (snap) $("updated").textContent = "updated " + ago(snap.pending.generated); }, 1000);
 
 function setLive(live, text) {
@@ -469,11 +607,26 @@ function setLive(live, text) {
   $("status").textContent = text;
 }
 
+// The pool on screen is gone (forgotten, or a stale bookmark): show the
+// console's default instead.
+function poolGone() {
+  if (es) { es.close(); es = null; }
+  remember(null);
+  poolKey = null;
+  if (location.hash.startsWith("#/pool/")) location.hash = ""; else onRoute();
+}
+
 function connect() {
-  const es = new EventSource("/api/events");
-  es.addEventListener("snapshot", (ev) => {
+  if (es) es.close();
+  const src = es = new EventSource("/api/events" + (poolKey ? "?" + new URLSearchParams({ pool: poolKey }) : ""));
+  src.addEventListener("snapshot", (ev) => {
+    if (src !== es) return;
     const next = JSON.parse(ev.data);
-    if (!next.pending || !next.pending.agents) return; // the empty frame before the first compute
+    pools = next.pools || [];
+    if (!poolKey) poolKey = next.pool_key;
+    if (!pools.some(p => p.key === next.pool_key)) { poolGone(); return; }
+    remember(poolKey);
+    if (!next.pending || !next.pending.agents) { renderSwitcher(); return; } // the empty frame before the first compute
     snap = next;
     setLive(true, "live");
     // Re-rendering replaces the page; keep the reader's place.
@@ -481,12 +634,17 @@ function connect() {
     render();
     window.scrollTo(0, y);
   });
-  es.onerror = () => {
+  src.onerror = () => {
+    if (src !== es) return;
     setLive(false, "reconnecting…");
-    fetch("/api/snapshot").then(r => { if (r.status === 401) { es.close(); setLive(false, "signed out: open the URL meshctl console prints"); } }).catch(() => {});
+    fetch("/api/snapshot" + (poolKey ? "?" + new URLSearchParams({ pool: poolKey }) : "")).then(r => {
+      if (src !== es) return;
+      if (r.status === 401) { src.close(); setLive(false, "signed out: open the URL meshctl console prints"); }
+      else if (r.status === 404) poolGone();
+    }).catch(() => {});
   };
 }
-connect();
+onRoute();
 </script>
 </body>
 </html>

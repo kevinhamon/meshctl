@@ -62,6 +62,11 @@ type Engine struct {
 	subs map[chan []byte]struct{}
 
 	recheck chan struct{}
+
+	// OnUpdate, when set before Run, is called after each new snapshot is
+	// published (outside the engine's lock): the hub's cue to tell every
+	// page that the pool summaries moved.
+	OnUpdate func()
 }
 
 // NewEngine prepares an engine for the pool at dir; Run starts it.
@@ -69,6 +74,9 @@ func NewEngine(dir, version string) *Engine {
 	return &Engine{dir: dir, version: version, now: time.Now, subs: map[chan []byte]struct{}{},
 		recheck: make(chan struct{}, 1)}
 }
+
+// Dir is the pool root the engine watches.
+func (e *Engine) Dir() string { return e.dir }
 
 // Snapshot returns the current snapshot.
 func (e *Engine) Snapshot() Snapshot {
@@ -139,6 +147,9 @@ func (e *Engine) update(f func(*Snapshot)) {
 		}
 	}
 	e.mu.Unlock()
+	if e.OnUpdate != nil {
+		e.OnUpdate()
+	}
 }
 
 // RefreshPending recomputes every peer's pending work.
