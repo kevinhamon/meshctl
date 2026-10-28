@@ -419,6 +419,14 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
 - A change to what a harness can do updates `internal/mesh/parity.go` in the same commit:
   every command is classified there, and the README table above is generated from it.
 
+## Versioning
+
+Releases follow semantic versioning against meshctl's contract: the CLI and its flags,
+`--json` output, on-disk formats, the wiring version and console URLs. Major breaks something
+`pool upgrade` cannot migrate. Minor adds a capability, and any wiring change is at least
+minor. Patch only fixes what already exists. See
+[ADR-0080](docs/decisions/0080-semantic-versioning.md).
+
 ## License
 
 Apache-2.0. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).

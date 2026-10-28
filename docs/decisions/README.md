@@ -58,3 +58,4 @@ CLI's earlier name, `agentmesh` (renamed `meshctl` in [0034](0034-rename-meshctl
 | [0077](0077-mesh-console.md) | The mesh console: a live, read-only view of the pool served by meshctl | accepted |
 | [0078](0078-agent-documents.md) | Agent documents live in the workspace's `docs/` and are shown sandboxed in the console | accepted |
 | [0079](0079-console-runs-doctor-repairs.md) | The console can run doctor's automatic repairs | accepted |
+| [0080](0080-semantic-versioning.md) | Semantic versioning: what counts as major, minor and patch | accepted |
