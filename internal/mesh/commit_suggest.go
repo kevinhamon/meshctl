@@ -173,12 +173,14 @@ func wiringChange(dir, code, rel string) (names []string, ok bool) {
 	if rel == ".gitignore" {
 		return nil, code != "??" && gitignoreManagedOnly(dir)
 	}
-	if code != " D" && code != "D " {
-		if b, err := os.ReadFile(filepath.Join(dir, rel)); err == nil && strings.Contains(string(b), distillerAgentMarker) {
-			return nil, true
-		}
+	// A deleted file is judged by its committed copy.
+	var body string
+	if code == " D" || code == "D " {
+		body, _ = git(dir, "show", "HEAD:"+rel)
+	} else if b, err := os.ReadFile(filepath.Join(dir, rel)); err == nil {
+		body = string(b)
 	}
-	return nil, false
+	return nil, strings.Contains(body, distillerAgentMarker)
 }
 
 // addedHeadings are the level-2 and level-3 headings rel's diff adds.

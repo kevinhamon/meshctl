@@ -909,7 +909,7 @@ function poolOverview(m) {
     const name = el("a", "label", titleOf(s.agent));
     name.href = agentHash(s.agent, "sessions");
     what.append(name, " ", el("span", "meta", idleText(s.idle_seconds)));
-    what.append(el("div", "what", [s.tty ? s.tty.replace("/dev/", "") : "", "started " + ago(s.started), s.claim ? "working on " + s.claim : ""].filter(Boolean).join(" · ")));
+    what.append(el("div", "what", [sessionWhere(s), "started " + ago(s.started), s.claim ? "working on " + s.claim : ""].filter(Boolean).join(" · ")));
     head.append(what);
     if (s.focusable) {
       const b = el("button", null, "Bring to front");
@@ -1228,7 +1228,7 @@ function sessionsBody(a, body) {
     const head = el("div", "head");
     const what = el("div");
     what.append(el("div", null, idleText(s.idle_seconds)));
-    what.append(el("div", "what", [s.tty ? s.tty.replace("/dev/", "") : "", "session " + s.id.slice(0, 8), "started " + ago(s.started)].filter(Boolean).join(" · ")));
+    what.append(el("div", "what", [sessionWhere(s), "session " + s.id.slice(0, 8), "started " + ago(s.started)].filter(Boolean).join(" · ")));
     head.append(what);
     if (s.focusable) {
       const b = el("button", null, "Bring to front");
@@ -1467,6 +1467,14 @@ async function openItem(agent, kind, id) {
 }
 $("item-close").addEventListener("click", () => $("item").close());
 
+// sessionWhere names where a session runs: its terminal, or that it has no
+// window (its harness keeps running after the window closed), which is also
+// why it has no Bring to front button.
+function sessionWhere(s) {
+  if (s.background) return "in the background, no window";
+  return s.tty ? s.tty.replace("/dev/", "") : "";
+}
+
 async function focusSession(agent, session, button) {
   const r = await fetch("/api/focus?" + new URLSearchParams({ pool: poolKey }), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ agent, session }) });
   if (!r.ok) {
@@ -1558,7 +1566,7 @@ async function runUpgrade(key, name, b) {
       body.append(el("div", null, "Restart these open sessions so they pick up the new wiring:"));
       for (const s of open) {
         const row = el("div", "job");
-        row.append(el("span", null, titleOf(s.agent) + " · " + idleText(s.idle_seconds)));
+        row.append(el("span", null, [titleOf(s.agent), idleText(s.idle_seconds), s.background ? sessionWhere(s) : ""].filter(Boolean).join(" · ")));
         if (s.focusable) {
           const f = el("button", null, "Bring to front");
           f.addEventListener("click", () => focusSession(s.agent, s.id, f));

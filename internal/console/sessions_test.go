@@ -2,10 +2,13 @@ package console
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +33,32 @@ func TestSessions_ReportOpenSessionsAndJobs(t *testing.T) {
 	_ = os.RemoveAll(a.Dir() + "/" + mesh.SessionsDir)
 	if got := Sessions(dir, now); len(got) != 0 {
 		t.Fatalf("no presence ⇒ no sessions: %+v", got)
+	}
+}
+
+func TestSessions_BackgroundSessionHasNoBringToFront(t *testing.T) {
+	dir, a := testPool(t)
+	now := time.Now()
+	// A live harness (this test process) with no window: listed, never focusable.
+	rec := fmt.Sprintf(`{"id":"bg-1","pid":1,"started":%d,"last_beat":%d,"harness_pid":%d,"tty":"/dev/ttys007","background":true}`,
+		now.Unix(), now.Unix(), os.Getpid())
+	os.MkdirAll(filepath.Join(a.Dir(), mesh.SessionsDir), 0o755)
+	if err := os.WriteFile(filepath.Join(a.Dir(), mesh.SessionsDir, "bg-1"), []byte(rec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Sessions(dir, now)
+	if len(got) != 1 || !got[0].Background || got[0].Focusable {
+		t.Fatalf("a background session is listed but not focusable: %+v", got)
+	}
+	h := (&Server{Engine: NewEngine(dir, "test"), Settings: Settings{Port: 7717, Token: "secret"}}).Handler()
+	r := httptest.NewRequest("POST", "/api/focus", strings.NewReader(`{"Agent":"architect","Session":"bg-1"}`))
+	r.Host = "127.0.0.1:7717"
+	r.Header.Set("Origin", "http://127.0.0.1:7717")
+	r.Header.Set("Authorization", "Bearer secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "no window") {
+		t.Fatalf("focus on a background session: %d %s", w.Code, w.Body)
 	}
 }
 

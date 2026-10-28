@@ -26,6 +26,10 @@ type Session struct {
 	// is open but idle, and to bring its terminal to the front.
 	HarnessPID int    `json:"harness_pid,omitempty"`
 	TTY        string `json:"tty,omitempty"`
+	// Background is set when the harness runs without a terminal window
+	// (harnessInBackground): its TTY is a pseudo-terminal no window shows, so
+	// there is nothing to bring to the front.
+	Background bool   `json:"background,omitempty"`
 	path       string `json:"-"`
 }
 
@@ -139,6 +143,7 @@ func SessionStart(agent *Agent, id string, pid int, now time.Time) (warning stri
 
 	s := &Session{ID: id, PID: pid, Started: now.Unix(), LastBeat: now.Unix(), path: sessionPath(agent.Dir(), id)}
 	s.HarnessPID, s.TTY = harnessTerminal(os.Getpid())
+	s.Background = harnessInBackground(s.HarnessPID)
 	if err := writeSession(s); err != nil {
 		return "", err
 	}
@@ -193,6 +198,7 @@ func TouchSession(agent *Agent, id string, pid int, now time.Time) error {
 		}
 		s = &Session{ID: id, PID: pid, Started: now.Unix(), path: p}
 		s.HarnessPID, s.TTY = harnessTerminal(os.Getpid())
+		s.Background = harnessInBackground(s.HarnessPID)
 	}
 	s.LastBeat = now.Unix()
 	return writeSession(s)

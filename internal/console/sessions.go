@@ -21,6 +21,7 @@ type SessionReport struct {
 	LastActive  string      `json:"last_active"`
 	IdleSeconds int64       `json:"idle_seconds"`
 	TTY         string      `json:"tty,omitempty"`
+	Background  bool        `json:"background,omitempty"` // running with no terminal window
 	Focusable   bool        `json:"focusable"`
 	Claim       string      `json:"claim,omitempty"`
 	KBBranch    string      `json:"kb_branch,omitempty"`
@@ -55,7 +56,7 @@ func Sessions(dir string, now time.Time) []SessionReport {
 	for _, a := range agents {
 		for _, s := range mesh.OpenSessions(a, now) {
 			r := SessionReport{Agent: a.Name, ID: s.ID, Started: unix(s.Started), LastActive: unix(s.LastBeat),
-				IdleSeconds: now.Unix() - s.LastBeat, TTY: s.TTY, Focusable: s.TTY != "" && focusSupported(),
+				IdleSeconds: now.Unix() - s.LastBeat, TTY: s.TTY, Background: s.Background, Focusable: s.TTY != "" && !s.Background && focusSupported(),
 				Claim: s.CurrentClaim, KBBranch: s.KBBranch, Jobs: []JobReport{}}
 			// Jobs belong to the harness process, so a session started by
 			// /clear shows the jobs its process kept.
@@ -108,6 +109,7 @@ var (
 	errFocusUnsupported = errors.New("bringing a terminal to the front works with iTerm2 on macOS only; the session's terminal is shown instead")
 	errNoITerm          = errors.New("iTerm2 is not running")
 	errTTYNotFound      = errors.New("no iTerm2 session is on that terminal (another terminal app, or the tab was closed)")
+	errNoWindow         = errors.New("this session runs in the background with no window; reopen it from its harness")
 )
 
 // FocusTTY brings the iTerm2 tab on tty to the front.
@@ -143,6 +145,10 @@ func (s *Server) focus(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, sr := range Sessions(e.dir, time.Now()) {
 		if sr.Agent == req.Agent && sr.ID == req.Session {
+			if sr.Background {
+				http.Error(w, errNoWindow.Error(), http.StatusConflict)
+				return
+			}
 			if err := FocusTTY(sr.TTY); err != nil {
 				http.Error(w, err.Error(), http.StatusConflict)
 				return

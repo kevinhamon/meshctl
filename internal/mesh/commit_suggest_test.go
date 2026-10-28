@@ -103,6 +103,20 @@ func TestSuggestCommitMessage_LongSubjectCutWithFullListInBody(t *testing.T) {
 	}
 }
 
+func TestSuggestCommitMessage_DeletedManagedFileIsWiring(t *testing.T) {
+	dir := suggestRepo(t)
+	marked := distillerAgentMarker + " peer -->\n# peer\n"
+	appendTo(t, dir, ".claude/agents/mesh-a.md", marked)
+	appendTo(t, dir, ".claude/agents/mesh-b.md", marked)
+	gitOut(t, dir, "add", "-A")
+	gitOut(t, dir, "commit", "-q", "-m", "peers")
+	os.Remove(filepath.Join(dir, ".claude/agents/mesh-a.md"))
+	appendTo(t, dir, ".claude/agents/mesh-b.md", "more\n")
+	if got := SuggestCommitMessage(dir, "v1.11.4"); got != "meshctl wiring: v1.11.4" {
+		t.Fatalf("a deleted and a changed managed file are one wiring change, got %q", got)
+	}
+}
+
 func TestSuggestCommitMessage_CleanTree(t *testing.T) {
 	if got := SuggestCommitMessage(suggestRepo(t), "v1"); got != "" {
 		t.Fatalf("clean tree: got %q", got)

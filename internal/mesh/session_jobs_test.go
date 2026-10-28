@@ -32,6 +32,33 @@ func TestHarnessTerminal_WalksToTheFirstTTY(t *testing.T) {
 	}
 }
 
+func TestHarnessInBackground_ParentWithoutTerminal(t *testing.T) {
+	tree := map[int]struct {
+		ppid int
+		tty  string
+	}{
+		300: {200, "ttys010"}, // a harness started from a shell in a window
+		200: {100, "ttys010"}, // the shell has the window's terminal
+		700: {600, "ttys007"}, // a harness on a host's pseudo-terminal
+		600: {1, ""},          // the host has no terminal of its own
+	}
+	old := psParentTTY
+	psParentTTY = func(pid int) (int, string, bool) {
+		n, ok := tree[pid]
+		return n.ppid, n.tty, ok
+	}
+	defer func() { psParentTTY = old }()
+	if harnessInBackground(300) {
+		t.Fatal("a harness under a shell in a window is not in the background")
+	}
+	if !harnessInBackground(700) {
+		t.Fatal("a harness whose parent has no terminal runs in the background")
+	}
+	if harnessInBackground(0) || harnessInBackground(999) {
+		t.Fatal("no harness or an unreadable tree is not in the background")
+	}
+}
+
 func TestHookSessionBeat_RecordsScheduledJobs(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)

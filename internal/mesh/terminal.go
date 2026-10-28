@@ -50,3 +50,20 @@ func harnessTerminal(pid int) (int, string) {
 	}
 	return 0, ""
 }
+
+// harnessInBackground reports whether the harness at pid runs without a
+// terminal window: its parent has no terminal of its own, as with a host that
+// keeps sessions running after their window closes. A harness started from a
+// shell in a terminal window has that shell, which has the terminal, as its
+// parent. False when the process tree cannot be read.
+func harnessInBackground(pid int) bool {
+	if pid <= 1 {
+		return false
+	}
+	ppid, _, ok := psParentTTY(pid)
+	if !ok || ppid <= 1 {
+		return false
+	}
+	_, tty, ok := psParentTTY(ppid)
+	return ok && tty == ""
+}
