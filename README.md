@@ -161,10 +161,16 @@ switcher in the header moves between them and shows which other pools need atten
 pool has its own address (`#/pool/<name>`). An agent's page also shows its documents
 (designs, reports and mockups it keeps in `docs/` or folders its manifest lists under
 `docs:`, rendered with mermaid diagrams, sandboxed), its knowledge base and its recent
-history ([ADR-0078](docs/decisions/0078-agent-documents.md)). It watches the pool's state
+history ([ADR-0078](docs/decisions/0078-agent-documents.md)). Home (`#/`) shows a card per
+pool with what needs attention. Two layouts share one frame: **Classic**, a grid of agent
+cards, and **Workspace**, the agent list beside the selected agent so the pool stays in view;
+an agent's page is a content area with a sidebar of sections, and scheduled jobs read in plain
+words. Settings (layout, agent order, attention filter) are saved per pool in
+`pool/console.yaml`, committed by the console and never pushed. It watches the pool's state
 files, so the view moves within a moment of a change. Cards sort by activity (open
-sessions first, then agents that need you) or by name. The one thing it changes in the pool
-is doctor's automatic repairs, run from a button after you confirm the list
+sessions first, then agents that need you) or by name. The things it changes in the pool
+are its own settings, doctor's automatic repairs, and `pool upgrade` for a pool that needs
+one, each run from a button after you see what it will do
 ([ADR-0079](docs/decisions/0079-console-runs-doctor-repairs.md)). Pin
 the page as a browser app window to keep it beside your terminals. `meshctl console install`
 starts it at login (macOS LaunchAgent; `meshctl update` restarts it on the new binary);

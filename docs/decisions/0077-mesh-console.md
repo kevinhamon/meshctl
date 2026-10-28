@@ -68,3 +68,15 @@ Two paths are exempt from the token, never from the Host check: `/c/...`, where 
 
 - **Sort.** The pool page sorts by **Activity** (default) or **Name**, remembered per browser. Activity puts agents with an open session first, most recently active first by the session badge's idle time; then agents that need the person (Needs you, Waiting, Doctor error, most pending first); then the rest by name.
 - **Repairs.** The console can run doctor's automatic repairs, confirmed first. See ADR-0079.
+
+## Amendment (2026-10-28, v1.10.0): layouts, one frame, and Home
+
+The page grew panel by panel, and opening an agent hid the pool. The console now has a written design language and one frame around every page. What the console may change is unchanged here; its settings and the Upgrade button are ADR-0079's amendments.
+
+- **Design language.** `internal/console/ui/DESIGN.md` fixes the tokens (type sizes, spacing, radii, colours) and the components; a test rejects raw sizes outside the token block. Icons are drawn inline SVG.
+- **One frame.** A header ("Agent Mesh" and the version, linking Home; live state; settings), a breadcrumb bar under it (Home › pool › agent › section), and a pool footer (a "Pool:" selector, the summary numbers as filters, Re-check, Repair, Upgrade). Sidebars collapse from their own edge. Under ~900px they become overlays and the footer wraps.
+- **Two layouts.** **Classic**, the card grid, and **Workspace**, the agent list on the left with the pool overview or the selected agent in the centre, so the pool stays in view. Classic is the default.
+- **The agent page** is a content area and a sidebar of section cards (Overview, Waiting on you, Sessions & jobs, Doctor, Documents, Knowledge base, Recent history). The section is in the address: `#/pool/<key>/agent/<name>/<section>`. Agents are shown by their manifest title, with the folder name beneath.
+- **Home** at `#/` (`GET /api/home`): totals over every pool and a card per pool with what needs attention and whether it needs an upgrade. It has no pool footer.
+- **Plain-language schedules.** Each scheduled job gains an additive `schedule_text` (computed in Go, tested); the cron expression stays in a tooltip, and one it cannot describe is shown raw.
+- **API.** Additions only: `/api/home`, `schedule_text`, and each snapshot's pool settings.

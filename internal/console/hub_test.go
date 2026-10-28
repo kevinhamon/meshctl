@@ -113,6 +113,10 @@ func TestHub_FramesCarryThePoolAndEverySummary(t *testing.T) {
 	if _, _, err := h.Subscribe("nope"); err != ErrNoPool {
 		t.Errorf("unknown pool: %v", err)
 	}
+	// Each console process has its own boot id, so a page can tell a restart.
+	if f.Boot == "" || f.Boot == NewHub("", "test").boot {
+		t.Errorf("boot id %q must be set and new per hub", f.Boot)
+	}
 }
 
 func TestHub_SyncDropsAForgottenPool(t *testing.T) {
@@ -213,5 +217,110 @@ func TestHub_RunStartsEveryPool(t *testing.T) {
 			t.Fatalf("pools never computed: %+v %v", f.Pools, err)
 		case <-time.After(50 * time.Millisecond):
 		}
+	}
+}
+
+func TestSummarize_CountsAgentsThatNeedThePerson(t *testing.T) {
+	h, a1, _ := twoPoolHub(t)
+	if _, err := mesh.WriteRequest(a1, "guidance", "Split the service?", "user", "P2", nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	e, _, _ := h.Engine("one")
+	e.RefreshPending()
+	f, err := h.Frame("two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	one, two := f.Pools[0], f.Pools[1]
+	if one.Key != "one" || one.Waiting != 1 || one.NeedsYou != 0 || one.Agents != 1 || two.Waiting != 0 {
+		t.Fatalf("summaries: %+v", f.Pools)
+	}
+}
+
+func TestServer_SettingsSavedInOneOrEveryPool(t *testing.T) {
+	h, a1, a2 := twoPoolHub(t)
+	srv := (&Server{Hub: h, Settings: Settings{Port: 7717, Token: "secret"}}).Handler()
+	post := func(target, body, origin string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", target, strings.NewReader(body))
+		r.Host = "127.0.0.1:7717"
+		r.Header.Set("Authorization", "Bearer secret")
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, r)
+		return w
+	}
+	const self = "http://127.0.0.1:7717"
+	root := func(a *mesh.Agent) string { return filepath.Dir(a.Dir()) }
+	if w := post("/api/settings?pool=one", `{"layout":"workspace","agent_order":"name"}`, "https://evil.example"); w.Code != http.StatusForbidden {
+		t.Errorf("foreign origin: %d", w.Code)
+	}
+	if w := post("/api/settings?pool=one", `{"layout":"grid","agent_order":"name"}`, self); w.Code != http.StatusBadRequest {
+		t.Errorf("unknown layout: %d", w.Code)
+	}
+	if w := post("/api/settings?pool=one", `{"layout":"workspace","agent_order":"name"}`, self); w.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", w.Code, w.Body)
+	}
+	if mesh.ReadConsoleSettings(root(a1)).Layout != "workspace" || mesh.ReadConsoleSettings(root(a2)).Layout != "classic" {
+		t.Error("only pool one changes")
+	}
+	if f, _ := h.Frame("one"); f.Console.Layout != "workspace" {
+		t.Errorf("the snapshot carries the pool's settings: %+v", f.Console)
+	}
+	if w := post("/api/settings?pool=one", `{"layout":"workspace","agent_order":"activity","attention_only":true,"all_pools":true}`, self); w.Code != http.StatusOK {
+		t.Fatalf("save all: %d %s", w.Code, w.Body)
+	}
+	if s := mesh.ReadConsoleSettings(root(a2)); s.Layout != "workspace" || !s.AttentionOnly {
+		t.Errorf("every pool: %+v", s)
+	}
+}
+
+func TestServer_UpgradeRunsMeshctlForThePoolAfterAPreview(t *testing.T) {
+	h, a1, _ := twoPoolHub(t)
+	type call struct{ dir, args string }
+	var calls []call
+	fake := func(ctx context.Context, dir string, args ...string) (string, int, error) {
+		calls = append(calls, call{dir, strings.Join(args, " ")})
+		if strings.HasSuffix(strings.Join(args, " "), "--check") {
+			return "doctrine:\n  · update agent-comms.md\nmeshctl: upgrade pending — run `meshctl pool upgrade` to apply\n", 1, nil
+		}
+		return "  ✗ pool/doctrine/agent-comms.md has local edits — left untouched\nmeshctl: 1 item(s) need a human; the pool is upgraded but not yet clean\n", 1, nil
+	}
+	srv := (&Server{Hub: h, Run: fake, Settings: Settings{Port: 7717, Token: "secret"}}).Handler()
+	post := func(target, origin string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", target, nil)
+		r.Host = "127.0.0.1:7717"
+		r.Header.Set("Authorization", "Bearer secret")
+		r.Header.Set("Origin", origin)
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, r)
+		return w
+	}
+	const self = "http://127.0.0.1:7717"
+	if w := post("/api/pool/upgrade?pool=one", "https://evil.example"); w.Code != http.StatusForbidden || len(calls) != 0 {
+		t.Fatalf("foreign origin: %d, %d runs", w.Code, len(calls))
+	}
+	var res UpgradeResult
+	w := post("/api/pool/upgrade/check?pool=one", self)
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &res) != nil || !res.Pending || !strings.Contains(res.Output, "agent-comms") {
+		t.Fatalf("check: %d %s", w.Code, w.Body)
+	}
+	if root := filepath.Dir(a1.Dir()); calls[0].dir != root || calls[0].args != "pool upgrade --check" {
+		t.Errorf("check ran %+v, want pool upgrade --check in %s", calls[0], root)
+	}
+	e, _, _ := h.Engine("one")
+	e.upgrading.Lock()
+	if w := post("/api/pool/upgrade?pool=one", self); w.Code != http.StatusConflict {
+		t.Errorf("a second upgrade while one runs: %d", w.Code)
+	}
+	e.upgrading.Unlock()
+	w = post("/api/pool/upgrade?pool=one", self)
+	res = UpgradeResult{}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &res) != nil || res.Outcome != "needs-person" {
+		t.Fatalf("upgrade: %d %s", w.Code, w.Body)
+	}
+	if last := calls[len(calls)-1]; last.args != "pool upgrade" {
+		t.Errorf("upgrade ran %q: never --force", last.args)
 	}
 }

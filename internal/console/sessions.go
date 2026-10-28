@@ -30,10 +30,13 @@ type SessionReport struct {
 
 // JobReport is one scheduled job.
 type JobReport struct {
-	ID        string `json:"id"`
-	Schedule  string `json:"schedule"`
-	Recurring bool   `json:"recurring"`
-	Prompt    string `json:"prompt"`
+	ID       string `json:"id"`
+	Schedule string `json:"schedule"`
+	// ScheduleText is the schedule in plain words; empty when DescribeCron
+	// cannot phrase it, so the page shows the expression.
+	ScheduleText string `json:"schedule_text,omitempty"`
+	Recurring    bool   `json:"recurring"`
+	Prompt       string `json:"prompt"`
 }
 
 // Sessions lists every peer's open sessions, in roster order.
@@ -59,7 +62,8 @@ func Sessions(dir string, now time.Time) []SessionReport {
 			if js, ok := mesh.SessionJobs(a, s); ok {
 				r.JobsAt = unix(js.At)
 				for _, j := range js.Jobs {
-					r.Jobs = append(r.Jobs, JobReport{ID: j.ID, Schedule: j.Schedule, Recurring: j.Recurring, Prompt: j.Prompt})
+					text, _ := DescribeCron(j.Schedule, j.Recurring)
+					r.Jobs = append(r.Jobs, JobReport{ID: j.ID, Schedule: j.Schedule, ScheduleText: text, Recurring: j.Recurring, Prompt: j.Prompt})
 				}
 			}
 			out = append(out, r)

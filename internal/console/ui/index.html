@@ -3,193 +3,368 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mesh console</title>
+<title>Agent Mesh</title>
 <style>
+  /* Design language (ui/DESIGN.md). Every size, space and radius below comes
+     from these tokens; console_test.go keeps raw values out of the rest. */
   :root {
-    --bg: #f6f6f3; --panel: #ffffff; --text: #1c1c1a; --muted: #6d6c66; --faint: #9a9993; --line: #e4e3dd;
-    --accent: #2f5fd0; --chip: #eef1f8; --hover: #fbfbf9;
+    --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 20px;
+    --fw-b: 600;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+    --r-sm: 6px; --r-md: 10px; --r-pill: 999px;
+    --bg: #f6f6f3; --surface: #ffffff; --surface-2: #efefeb; --line: #e4e3dd; --hover: #f3f3ef;
+    --text: #1c1c1a; --muted: #6d6c66; --faint: #9a9993;
+    --accent: #2f5fd0; --accent-bg: #eef1f8;
     --red: #b42318; --red-bg: #fdecea; --amber: #9a5b00; --amber-bg: #fdf3e2; --green: #1f7a3d; --green-bg: #e8f5ec;
     --shadow: 0 1px 2px rgba(0,0,0,.04), 0 1px 1px rgba(0,0,0,.03);
-    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --shadow-pop: 0 8px 24px rgba(0,0,0,.12);
+    --focus: 0 0 0 2px var(--accent);
+    --t-fast: 120ms;
+    font: var(--fs-md)/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #151514; --panel: #1e1e1c; --text: #ecebe6; --muted: #a3a29b; --faint: #7a7973; --line: #32312d;
-      --accent: #8aa8f0; --chip: #252a36; --hover: #232321;
+    :root { --bg: #151514; --surface: #1e1e1c; --surface-2: #191918; --line: #32312d; --hover: #262624;
+      --text: #ecebe6; --muted: #a3a29b; --faint: #7a7973;
+      --accent: #8aa8f0; --accent-bg: #252a36;
       --red: #f2877b; --red-bg: #3a1f1c; --amber: #e7b15f; --amber-bg: #372b17; --green: #74d295; --green-bg: #1a3324;
-      --shadow: none; }
+      --shadow: none; --shadow-pop: 0 8px 24px rgba(0,0,0,.5); }
   }
+  @media (prefers-reduced-motion: reduce) { :root { --t-fast: 0ms; } }
+
+  /* Base */
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); }
-  button { font: inherit; font-size: 12.5px; border: 1px solid var(--line); background: var(--panel); color: var(--text);
-    border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  a { color: var(--accent); }
+  :focus-visible { outline: none; box-shadow: var(--focus); }
+  .mono { font-family: var(--mono); font-size: var(--fs-sm); }
+  .meta { color: var(--muted); font-size: var(--fs-sm); }
+  .faint { color: var(--faint); }
+  .spacer { flex: 1; }
+  .empty { color: var(--faint); font-size: var(--fs-md); }
+  .detail { color: var(--muted); font-size: var(--fs-md); margin-top: 2px; }
+
+  /* Button and segmented control */
+  button { font: inherit; font-size: var(--fs-sm); border: 1px solid var(--line); background: var(--surface); color: var(--text);
+    border-radius: var(--r-sm); padding: var(--s1) var(--s3); cursor: pointer; transition: background var(--t-fast); }
   button:hover { background: var(--hover); }
   button:disabled { opacity: .5; cursor: default; }
-  header { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line); }
-  .bar { max-width: 1240px; margin: 0 auto; padding: 10px 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
-  .bar h1 { font-size: 15px; margin: 0; letter-spacing: -.01em; }
-  .meta { color: var(--muted); font-size: 12.5px; }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); margin-right: 6px; vertical-align: 1px; }
-  .dot.live { background: var(--green); }
-  .spacer { flex: 1; }
-  #pool { max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  main { max-width: 1240px; margin: 0 auto; padding: 16px 20px 48px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: var(--fw-b); }
+  button.primary:hover { filter: brightness(1.08); }
+  button.quiet { border-color: transparent; background: transparent; color: var(--muted); }
+  button.quiet:hover { color: var(--text); background: var(--hover); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+  .seg > button { border: 0; border-radius: 0; }
+  .seg > button + button { border-left: 1px solid var(--line); }
+  .seg > button.on { background: var(--hover); font-weight: var(--fw-b); }
 
-  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
-  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; box-shadow: var(--shadow); }
-  .stat .n { font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
-  .stat .l { color: var(--muted); font-size: 12.5px; }
-  .stat.red .n { color: var(--red); } .stat.amber .n { color: var(--amber); }
-  .notice { padding: 9px 12px; border: 1px solid var(--line); border-left: 3px solid var(--amber); background: var(--panel);
-    border-radius: 8px; margin: 0 0 10px; font-size: 13px; }
-  .toolbar { display: flex; gap: 10px; align-items: center; margin: 6px 0 12px; flex-wrap: wrap; }
-  .toolbar label { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
-
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
-  .card { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px 12px 18px;
-    cursor: pointer; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; min-height: 150px; }
-  .card:hover { border-color: var(--faint); }
-  .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .card .stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; border-radius: 10px 0 0 10px; background: var(--line); }
-  .card .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
-  .card .name { font-weight: 600; font-size: 14.5px; word-break: break-word; }
-  .card .title { color: var(--muted); font-size: 12.5px; margin-top: 1px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
-  .status { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+  /* Badge (status), pill (count), say chip (phrase), dots */
+  .status { font-size: var(--fs-xs); font-weight: var(--fw-b); padding: 2px var(--s2); border-radius: var(--r-pill); white-space: nowrap; }
   .status.red { color: var(--red); background: var(--red-bg); }
   .status.amber { color: var(--amber); background: var(--amber-bg); }
   .status.green { color: var(--green); background: var(--green-bg); }
-  .rows { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
-  .rows .r { display: flex; justify-content: space-between; gap: 8px; }
-  .rows .r .v { color: var(--muted); white-space: nowrap; }
-  .rows .r.red .k { color: var(--red); }
-  .card .foot { margin-top: auto; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  .pill { font-size: 11.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 1px 8px; white-space: nowrap; }
+  .pill { font-size: var(--fs-xs); color: var(--muted); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 1px var(--s2); white-space: nowrap; }
   .pill.on { color: var(--green); border-color: var(--green); }
   .pill.err { color: var(--red); border-color: var(--red); }
-  .say { display: inline-block; background: var(--chip); color: var(--accent); border-radius: 10px; padding: 1px 8px; font-size: 12px; white-space: nowrap; }
-  .empty { color: var(--faint); font-size: 13px; }
+  .say { display: inline-block; background: var(--accent-bg); color: var(--accent); border-radius: var(--r-pill); padding: 1px var(--s2); font-size: var(--fs-sm); white-space: nowrap; }
+  .dot, .sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+  .dot { margin-right: var(--s1); vertical-align: 1px; }
+  .dot.live, .sdot.green { background: var(--green); }
+  .sdot.red { background: var(--red); } .sdot.amber { background: var(--amber); }
 
-  .back { margin-bottom: 12px; }
-  .hero { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 14px; }
-  .hero .swatch { width: 8px; align-self: stretch; border-radius: 4px; background: var(--line); }
-  .hero h2 { margin: 0; font-size: 20px; letter-spacing: -.01em; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .hero .sub { color: var(--muted); margin-top: 2px; }
-  .hero .role { color: var(--muted); font-size: 13px; margin-top: 6px; max-width: 760px; }
-  .cols { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 14px; align-items: start; }
-  @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
-  section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; box-shadow: var(--shadow); margin-bottom: 14px; }
-  section.panel > h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px;
-    display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  section.panel > h3 .note { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 12.5px; }
-  .line { padding: 8px 0; border-top: 1px solid var(--line); }
-  .line:first-of-type { border-top: 0; padding-top: 0; }
-  .line .head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-  .line .label { font-weight: 600; }
+  /* Stat: a number and its label */
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s2) var(--s3); box-shadow: var(--shadow); }
+  .stat .n { font-size: var(--fs-xl); font-weight: var(--fw-b); letter-spacing: -.02em; }
+  .stat .l { color: var(--muted); font-size: var(--fs-sm); }
+  .stat.red .n { color: var(--red); } .stat.amber .n { color: var(--amber); }
+  .st { white-space: nowrap; }
+  .st b { font-weight: var(--fw-b); }
+  .st.red { color: var(--red); } .st.amber { color: var(--amber); } .st.green { color: var(--green); } .st.quiet { color: var(--faint); }
+
+  /* Frame: header, main (sidebars and centre), footer; the window never scrolls */
+  body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  header { flex: none; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .bar { padding: var(--s2) var(--s4); display: flex; gap: var(--s3); align-items: center; min-width: 0; }
+  .brand { display: flex; gap: var(--s2); align-items: center; text-decoration: none; color: var(--text); flex: none; }
+  .brand .mark { width: 26px; height: 26px; fill: var(--accent); stroke: var(--accent); stroke-width: 1.6; }
+  .brand .bt { display: flex; flex-direction: column; line-height: 1.15; }
+  .brand .pn { font-size: var(--fs-lg); font-weight: var(--fw-b); letter-spacing: -.01em; }
+  .brand .ver { font-size: var(--fs-xs); color: var(--muted); }
+  .crumbbar { display: flex; gap: var(--s2); align-items: center; padding: var(--s1) var(--s4); border-top: 1px solid var(--line); background: var(--surface-2); min-height: 32px; }
+  .crumbs { display: flex; gap: var(--s2); align-items: baseline; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: var(--fs-md); scrollbar-width: none; }
+  .crumbs .crumb { color: var(--muted); text-decoration: none; overflow: hidden; text-overflow: ellipsis; }
+  .crumbs a.crumb:hover { color: var(--accent); text-decoration: underline; }
+  .crumbs .crumb.here { color: var(--text); font-weight: var(--fw-b); }
+  .crumbs .sep { color: var(--faint); }
+  .livest { white-space: nowrap; }
+  .icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .icon-btn { display: inline-grid; place-items: center; padding: var(--s1); color: var(--muted); border-radius: var(--r-sm); }
+  .icon-btn:hover { color: var(--text); background: var(--hover); }
+  .gear .icon { width: 20px; height: 20px; }
+  .gear .teeth { stroke-width: 2.6; stroke-linecap: butt; }
+  #menu-btn { display: none; }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  body.ws main { grid-template-columns: 280px minmax(0, 1fr); }
+  .center { min-width: 0; min-height: 0; overflow-y: auto; padding: var(--s4) var(--s5); }
+  .center.has-page { overflow: hidden; padding: 0; }
+  #foot { flex: none; display: flex; gap: var(--s2) var(--s3); align-items: center; flex-wrap: wrap; padding: var(--s2) var(--s4);
+    border-top: 1px solid var(--line); background: var(--surface-2); }
+  #foot .path { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fstats { flex: 1; display: flex; gap: var(--s1) var(--s2); align-items: center; flex-wrap: wrap; min-width: 0; }
+  .fstat { border-color: transparent; background: transparent; color: var(--muted); }
+  .fstat b { color: var(--text); font-weight: var(--fw-b); }
+  .fstat.red b { color: var(--red); } .fstat.amber b { color: var(--amber); }
+  .fstat.on { background: var(--surface); border-color: var(--line); color: var(--text); }
+  .filter { align-self: flex-start; text-align: left; color: var(--accent); background: var(--accent-bg); border-color: transparent; margin-bottom: var(--s2); }
+
+  /* Pool switcher */
+  .switch { position: relative; }
+  button.select { display: flex; gap: var(--s2); align-items: center; font-size: var(--fs-md); font-weight: var(--fw-b); padding: var(--s1) var(--s2) var(--s1) var(--s3); }
+  button.select .icon { color: var(--muted); }
+  .elsewhere { font-size: var(--fs-sm); color: var(--red); cursor: pointer; }
+  .menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 5; max-height: 70vh; overflow: auto; width: min(440px, calc(100vw - 32px)); background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow-pop); padding: var(--s1); }
+  @media (max-width: 600px) { .menu { position: fixed; left: 16px; right: 16px; width: auto; max-height: 70vh; overflow: auto; } }
+  .opt { display: flex; gap: var(--s2); align-items: flex-start; padding: var(--s2) var(--s3); border-radius: var(--r-sm); cursor: pointer; }
+  .opt:hover, .opt.active { background: var(--hover); }
+  .opt .sdot { margin-top: var(--s2); }
+  .opt .body { flex: 1; min-width: 0; }
+  .opt .nm { font-weight: var(--fw-b); display: flex; gap: var(--s2); align-items: baseline; }
+  .opt .nm .cur { color: var(--accent); font-size: var(--fs-sm); font-weight: 400; }
+  .opt .path { color: var(--faint); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .opt .facts { display: flex; gap: var(--s1); flex-wrap: wrap; margin-top: var(--s1); }
+
+  /* Pool page: summary, notices, toolbar, grid */
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--s2); margin-bottom: var(--s3); }
+  .notice { padding: var(--s2) var(--s3); border: 1px solid var(--line); border-left: 3px solid var(--amber); background: var(--surface);
+    border-radius: var(--r-sm); margin: 0 0 var(--s2); font-size: var(--fs-md); }
+  .strip { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; font-size: var(--fs-md); color: var(--muted);
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s2) var(--s3); margin-bottom: var(--s3); }
+  details.pool { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s2) var(--s3); margin-bottom: var(--s3); }
+  details.pool > summary { cursor: pointer; font-size: var(--fs-md); color: var(--muted); }
+  .toolbar { display: flex; gap: var(--s2); align-items: center; margin: var(--s1) 0 var(--s3); flex-wrap: wrap; }
+  .toolbar label { color: var(--muted); font-size: var(--fs-md); display: flex; gap: var(--s1); align-items: center; cursor: pointer; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: var(--s3); }
+
+  /* Agent card (full) */
+  .card { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s3) var(--s3) var(--s3) var(--s4);
+    cursor: pointer; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: var(--s2); min-height: 150px; transition: border-color var(--t-fast); }
+  .card:hover { border-color: var(--faint); }
+  .stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; border-radius: var(--r-md) 0 0 var(--r-md); background: var(--line); }
+  .card .top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s2); }
+  .card .name { font-weight: var(--fw-b); font-size: var(--fs-lg); word-break: break-word; }
+  .slug { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
+  .card .title { color: var(--muted); font-size: var(--fs-sm); display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .rows { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-md); }
+  .rows .r { display: flex; justify-content: space-between; gap: var(--s2); }
+  .rows .r .v { color: var(--muted); white-space: nowrap; }
+  .rows .r.red .k, .rows .r.red .v { color: var(--red); }
+  .rows .r.amber .k, .rows .r.amber .v { color: var(--amber); }
+  .card .foot { margin-top: auto; display: flex; gap: var(--s1); flex-wrap: wrap; align-items: center; }
+
+  /* Agent page: hero */
+  .hero { display: flex; gap: var(--s3); align-items: stretch; margin-bottom: var(--s3); }
+  .hero .swatch { width: 6px; flex: none; border-radius: var(--r-pill); background: var(--line); }
+  .hero .txt { flex: 1; min-width: 0; }
+  .hero .line1 { display: flex; gap: var(--s2); align-items: baseline; flex-wrap: wrap; }
+  .hero h2 { margin: 0; font-size: var(--fs-xl); letter-spacing: -.01em; }
+  .hero .role { color: var(--muted); margin-top: var(--s1); max-width: 820px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .hero .role.open { display: block; }
+
+  /* Agent page: content and a right sidebar of section cards; each scrolls on its own */
+  .agentpage { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 300px; }
+  .agentpage .content { min-width: 0; height: 100%; overflow-y: auto; padding: var(--s4) var(--s5); display: flex; flex-direction: column; gap: var(--s3); }
+  .sections, .ws-left { min-height: 0; display: flex; flex-direction: column; background: var(--surface-2); }
+  .sections { border-left: 1px solid var(--line); }
+  .ws-left { border-right: 1px solid var(--line); }
+  .shead { display: flex; justify-content: space-between; align-items: center; gap: var(--s2); padding: var(--s2) var(--s2) var(--s1) var(--s3); }
+  .shead .lbl { font-size: var(--fs-sm); font-weight: var(--fw-b); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .slist, .alist { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--s1) var(--s3) var(--s3); display: flex; flex-direction: column; gap: var(--s2); }
+  body.right-off .agentpage { grid-template-columns: minmax(0, 1fr) 44px; }
+  body.right-off .sections .slist, body.right-off .sections .lbl { display: none; }
+  body.right-off .sections .shead { justify-content: center; padding: var(--s2) 0; }
+  .scard { display: block; text-decoration: none; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md);
+    padding: var(--s2) var(--s3); box-shadow: var(--shadow); transition: border-color var(--t-fast); }
+  .scard:hover { border-color: var(--faint); }
+  .scard.on { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+  .scard .ttl { font-size: var(--fs-sm); font-weight: var(--fw-b); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .scard .sums { display: flex; flex-wrap: wrap; gap: 2px var(--s2); margin-top: 2px; }
+  .sl { font-size: var(--fs-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+  .sl .say { font-size: var(--fs-xs); max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+  @media (max-width: 900px) {
+    .agentpage, body.right-off .agentpage { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+    .agentpage .content { padding: var(--s3) var(--s4); }
+    .sections { order: -1; border-left: 0; border-bottom: 1px solid var(--line); }
+    .sections .shead { display: none; }
+    body.right-off .sections .slist { display: flex; }
+    .slist { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: var(--s2) var(--s3); }
+    .scard { flex: none; width: 220px; }
+  }
+  a.stat { text-decoration: none; color: inherit; transition: border-color var(--t-fast); }
+  a.stat:hover { border-color: var(--faint); }
+
+  /* Panel: a titled surface in the content area */
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow); min-width: 0; }
+  .panel .phead { display: flex; gap: var(--s2) var(--s3); align-items: baseline; flex-wrap: wrap; padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
+  .panel .phead h3 { margin: 0; font-size: var(--fs-sm); font-weight: var(--fw-b); text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .panel .phead .sums { flex: 1; display: flex; gap: var(--s1) var(--s3); flex-wrap: wrap; justify-content: flex-end; color: var(--muted); }
+  .panel .pbody { padding: var(--s3) var(--s4); }
+  .panel .cols2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--s2) var(--s5); }
+  a.line { display: block; text-decoration: none; color: inherit; }
+  a.line:hover .label { text-decoration: underline; }
+  h4.sub { font-size: var(--fs-sm); color: var(--muted); font-weight: var(--fw-b); margin: var(--s3) 0 var(--s1); }
+  h4.sub:first-child { margin-top: 0; }
+
+  /* Rows inside panels */
+  .line { padding: var(--s2) 0; border-top: 1px solid var(--line); }
+  .line:first-child { border-top: 0; padding-top: 0; }
+  .line .head { display: flex; gap: var(--s2); align-items: baseline; flex-wrap: wrap; }
+  .line .label { font-weight: var(--fw-b); }
   .line.red .label { color: var(--red); }
-  .line .count { color: var(--muted); font-size: 13px; }
-  .detail { color: var(--muted); font-size: 13px; margin-top: 3px; }
-  ul.items { list-style: none; margin: 6px 0 0; padding: 0; }
-  ul.items li { font-size: 13px; padding: 3px 0; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-  ul.items .id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
-  ul.items a.id { color: var(--accent); cursor: pointer; text-decoration: none; }
+  .line .count { color: var(--muted); }
+  ul.items { list-style: none; margin: var(--s1) 0 0; padding: 0; }
+  ul.items li { padding: 2px 0; display: flex; gap: var(--s2); align-items: baseline; flex-wrap: wrap; }
+  ul.items .id { font-family: var(--mono); font-size: var(--fs-sm); word-break: break-all; }
+  ul.items a.id { cursor: pointer; text-decoration: none; }
   ul.items a.id:hover { text-decoration: underline; }
   ul.items .who, ul.items .age { color: var(--muted); }
-  .stale { color: var(--amber); font-size: 12px; }
-  .session { padding: 8px 0; border-top: 1px solid var(--line); }
-  .session:first-of-type { border-top: 0; padding-top: 0; }
-  .session .head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
-  .session .what { font-size: 13px; color: var(--muted); }
-  .job { font-size: 13px; padding: 2px 0; display: flex; gap: 8px; align-items: baseline; }
-  .finding { font-size: 13px; padding: 3px 0; display: flex; gap: 8px; }
-  .finding .lvl { font-weight: 700; }
+  .stale { color: var(--amber); font-size: var(--fs-sm); }
+  .session { padding: var(--s2) 0; border-top: 1px solid var(--line); }
+  .session:first-child { border-top: 0; padding-top: 0; }
+  .session .head { display: flex; justify-content: space-between; gap: var(--s2); align-items: center; }
+  .session .what { color: var(--muted); }
+  .job { padding: 2px 0; display: flex; gap: var(--s2); align-items: baseline; }
+  .job > :last-child { min-width: 0; overflow-wrap: anywhere; }
+  .finding { padding: 2px 0; display: flex; gap: var(--s2); }
+  .finding > :last-child { min-width: 0; overflow-wrap: anywhere; }
+  .finding .lvl { font-weight: var(--fw-b); }
   .finding.error .lvl { color: var(--red); }
   .finding.warn .lvl { color: var(--amber); }
-  .fix { color: var(--faint); font-size: 12px; }
-  details.pool { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; }
-  details.pool > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
-  .repairbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted);
-    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; }
-  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-  .seg > button { border: 0; border-radius: 0; }
-  .seg > button + button { border-left: 1px solid var(--line); }
-  .seg > button.on { background: var(--hover); font-weight: 600; }
-  dialog .body { padding: 12px 16px; font-size: 13px; max-height: calc(100vh - 220px); overflow: auto; }
-  dialog .body ul { margin: 6px 0 12px; padding-left: 18px; }
-  dialog .body .err { color: var(--red); }
-  dialog .foot { padding: 0 16px 14px; justify-content: flex-end; }
-
-  .switch { position: relative; }
-  .switch > button { display: flex; gap: 8px; align-items: center; font-size: 13.5px; font-weight: 600; padding: 4px 10px; }
-  .switch .caret { color: var(--muted); font-size: 11px; }
-  .sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
-  .sdot.red { background: var(--red); } .sdot.amber { background: var(--amber); } .sdot.green { background: var(--green); }
-  .elsewhere { font-size: 12.5px; color: var(--red); cursor: pointer; }
-  .menu { position: absolute; left: 0; top: calc(100% + 6px); z-index: 5; width: min(440px, calc(100vw - 32px)); background: var(--panel);
-    border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 4px; }
-  @media (max-width: 600px) { .menu { position: fixed; left: 16px; right: 16px; width: auto; max-height: 70vh; overflow: auto; } }
-  .opt { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 7px; cursor: pointer; }
-  .opt:hover, .opt.active { background: var(--hover); }
-  .opt .sdot { margin-top: 6px; }
-  .opt .body { flex: 1; min-width: 0; }
-  .opt .nm { font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
-  .opt .nm .cur { color: var(--accent); font-size: 12px; font-weight: 400; }
-  .opt .path { color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .opt .facts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
-
-  .doc { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px; }
-  .doc:first-of-type { border-top: 0; }
-  .doc .kind { flex: none; width: 38px; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; color: var(--muted); text-align: center;
-    border: 1px solid var(--line); border-radius: 4px; padding: 0 3px; }
-  .doc .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .doc a.nm { color: var(--accent); cursor: pointer; text-decoration: none; }
+  .fix { color: var(--faint); font-size: var(--fs-sm); }
+  .doc, .hist { display: flex; gap: var(--s2); align-items: baseline; padding: var(--s1) 0; border-top: 1px solid var(--line); }
+  .doc:first-child, .hist:first-child, h4.sub + .hist { border-top: 0; }
+  .doc .kind { flex: none; width: 40px; font-size: var(--fs-xs); font-weight: var(--fw-b); letter-spacing: .03em; color: var(--muted); text-align: center;
+    border: 1px solid var(--line); border-radius: var(--r-sm); padding: 0 2px; }
+  .doc .nm, .hist .sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc a.nm { cursor: pointer; text-decoration: none; }
   .doc a.nm:hover { text-decoration: underline; }
-  .doc .age { color: var(--muted); white-space: nowrap; }
-  .folder { color: var(--faint); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; margin: 10px 0 2px; }
+  .doc .age, .hist .age { color: var(--muted); white-space: nowrap; }
+  .hist .hash { font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+  .folder { color: var(--faint); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .05em; margin: var(--s3) 0 2px; }
   .folder:first-child { margin-top: 0; }
-  details.area { border-top: 1px solid var(--line); padding: 5px 0; font-size: 13px; }
-  details.area:first-of-type { border-top: 0; }
-  details.area > summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; list-style: none; }
+  details.area { border-top: 1px solid var(--line); padding: var(--s1) 0; }
+  details.area > summary { cursor: pointer; display: flex; gap: var(--s2); align-items: baseline; list-style: none; }
   details.area > summary::-webkit-details-marker { display: none; }
-  details.area > summary::before { content: "▸"; color: var(--faint); font-size: 11px; width: 10px; }
+  details.area > summary::before { content: "▸"; color: var(--faint); font-size: var(--fs-xs); width: 10px; }
   details.area[open] > summary::before { content: "▾"; }
-  details.area > summary .nm { flex: 1; font-weight: 600; }
-  details.area .doc { padding-left: 18px; }
-  .hist { font-size: 13px; padding: 3px 0; display: flex; gap: 8px; align-items: baseline; }
-  .hist .hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); }
-  .hist .sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .hist .age { color: var(--muted); white-space: nowrap; }
-  h4.sub { font-size: 12px; color: var(--muted); font-weight: 600; margin: 12px 0 4px; }
-  dialog.viewer { width: min(1100px, calc(100vw - 32px)); height: calc(100vh - 48px); max-height: none; display: none; flex-direction: column; }
-  dialog.viewer[open] { display: flex; }
-  dialog.viewer iframe { flex: 1; width: 100%; border: 0; background: var(--panel); }
-  dialog .actions { display: flex; gap: 8px; align-items: center; flex: none; }
-  dialog .actions a { font-size: 12.5px; color: var(--accent); }
+  details.area > summary .nm { flex: 1; font-weight: var(--fw-b); }
+  details.area .doc { padding-left: var(--s4); }
 
-  dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text);
+  /* Home */
+  body.home #foot { display: none; }
+  .flabel { color: var(--muted); font-size: var(--fs-md); }
+  .home-head { display: flex; gap: var(--s3); align-items: baseline; flex-wrap: wrap; margin-bottom: var(--s3); }
+  .home-head h2 { margin: 0; font-size: var(--fs-xl); letter-spacing: -.01em; }
+  .grid.pools { margin: var(--s3) 0 var(--s4); }
+  a.card { text-decoration: none; color: inherit; }
+  .pcard { min-height: 0; padding-left: var(--s3); }
+  .pcard .name { display: flex; align-items: center; gap: var(--s1); }
+  .pcard .title { -webkit-line-clamp: 1; }
+
+  /* Workspace: the agent list on the left */
+  .acard { display: block; position: relative; text-decoration: none; color: inherit; background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-sm); padding: var(--s2) var(--s2) var(--s2) var(--s3); transition: border-color var(--t-fast); }
+  .acard:hover { border-color: var(--faint); }
+  .acard.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .acard .stripe { width: 4px; border-radius: var(--r-sm) 0 0 var(--r-sm); }
+  .acard .top { display: flex; justify-content: space-between; gap: var(--s2); align-items: baseline; }
+  .acard .name { font-weight: var(--fw-b); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .acard .live { color: var(--green); }
+  .acard .rail { display: none; }
+  .ov { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: var(--s3); align-items: start; }
+  .ov .head .st { font-size: var(--fs-sm); }
+  .settings { max-width: 760px; }
+  .srow { display: flex; justify-content: space-between; align-items: center; gap: var(--s4); padding: var(--s3) 0; border-top: 1px solid var(--line); }
+  .srow:first-child { border-top: 0; padding-top: 0; }
+  .srow .label { font-weight: var(--fw-b); }
+  .srow .seg, .srow .check { flex: none; }
+  .check { display: flex; gap: var(--s2); align-items: center; cursor: pointer; }
+  @media (min-width: 901px) {
+    body.ws.left-off main { grid-template-columns: 64px minmax(0, 1fr); }
+    body.left-off .ws-left .shead { justify-content: center; padding: var(--s2) 0; }
+    body.left-off .ws-left .lbl, body.left-off .alist > :not(.acard), body.left-off .acard > :not(.rail) { display: none; }
+    body.left-off .alist { align-items: center; padding: var(--s1) var(--s2) var(--s3); }
+    body.left-off .acard { padding: 0; border: 0; background: transparent; }
+    body.left-off .acard .rail { display: grid; place-items: center; position: relative; width: 40px; height: 40px; border-radius: var(--r-sm);
+      border: 2px solid var(--line); background: var(--surface); font-size: var(--fs-sm); font-weight: var(--fw-b); }
+    body.left-off .acard.on .rail { box-shadow: var(--focus); }
+    body.left-off .rail .sdot { position: absolute; right: -3px; top: -3px; }
+  }
+  @media (max-width: 900px) {
+    body.ws #menu-btn { display: inline-grid; }
+    body.ws main { grid-template-columns: minmax(0, 1fr); }
+    .ws-left { position: fixed; z-index: 4; top: 0; bottom: 0; left: 0; width: min(300px, 85vw); transform: translateX(-100%);
+      transition: transform var(--t-fast); box-shadow: var(--shadow-pop); }
+    .ws-left .shead button { display: none; }
+    body.left-open .ws-left { transform: none; }
+    .center { padding: var(--s3) var(--s4); }
+    .crumbbar { padding: var(--s1) var(--s3); }
+    .crumbs .crumb { flex: none; }
+    #updated, .brand .ver { display: none; }
+    #foot .path, #foot .fstats .meta { display: none; }
+    .fstats { flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; }
+    .fstats > * { flex: none; }
+  }
+
+  /* Dialog */
+  dialog { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); color: var(--text);
     width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; }
   dialog::backdrop { background: rgba(0,0,0,.35); }
-  dialog .head { display: flex; justify-content: space-between; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
-  dialog .head .path { color: var(--muted); font-size: 12px; word-break: break-all; }
-  dialog pre { margin: 0; padding: 14px 16px; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  dialog .head { display: flex; justify-content: space-between; gap: var(--s2); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
+  dialog .head .path { color: var(--muted); font-size: var(--fs-sm); word-break: break-all; }
+  dialog pre { margin: 0; padding: var(--s3) var(--s4); white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: var(--fs-sm); line-height: 1.55;
     max-height: calc(100vh - 170px); overflow: auto; }
+  dialog .body { padding: var(--s3) var(--s4); max-height: calc(100vh - 220px); overflow: auto; }
+  dialog .body ul { margin: var(--s1) 0 var(--s3); padding-left: var(--s4); }
+  dialog .body .err { color: var(--red); }
+  dialog .body pre.out { margin: var(--s2) 0 0; padding: var(--s3); background: var(--surface-2); border-radius: var(--r-sm); max-height: 50vh; }
+  dialog .body > div + div { margin-top: var(--s2); }
+  .pcard .foot { justify-content: space-between; }
+  dialog .actions { display: flex; gap: var(--s2); align-items: center; flex: none; }
+  dialog .actions a { font-size: var(--fs-sm); }
+  dialog .foot { padding: 0 var(--s4) var(--s3); justify-content: flex-end; }
+  dialog.viewer { width: min(1100px, calc(100vw - 32px)); height: calc(100vh - 48px); max-height: none; display: none; flex-direction: column; }
+  dialog.viewer[open] { display: flex; }
+  dialog.viewer iframe { flex: 1; width: 100%; border: 0; background: var(--surface); }
 </style>
 </head>
 <body>
 <header>
   <div class="bar">
-    <h1>Mesh console</h1>
-    <div class="switch" id="switch">
-      <button id="pool-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="pool-menu"><span id="pool-dot" class="sdot"></span><span id="pool-name">…</span><span class="caret">▾</span></button>
-      <div class="menu" id="pool-menu" role="listbox" aria-label="Pools" hidden></div>
-    </div>
-    <span class="elsewhere" id="elsewhere" hidden></span>
-    <span class="meta"><span id="dot" class="dot"></span><span id="status">connecting…</span></span>
-    <span class="meta" id="updated"></span>
+    <a class="brand" href="#/" title="Home">
+      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7l12 0M6 7l6 11M18 7l-6 11"/><circle cx="6" cy="7" r="2.6"/><circle cx="18" cy="7" r="2.6"/><circle cx="12" cy="18" r="2.6"/></svg>
+      <span class="bt"><span class="pn">Agent Mesh</span><span class="ver" id="version"></span></span>
+    </a>
     <span class="spacer"></span>
-    <span class="meta" id="pool"></span>
-    <span class="meta" id="version"></span>
+    <span class="meta livest"><span id="dot" class="dot"></span><span id="status">connecting…</span> <span id="updated"></span></span>
+    <a class="icon-btn gear" id="gear" href="#/settings" aria-label="Settings" title="Settings"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="6.5"/><path class="teeth" d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></a>
+  </div>
+  <div class="crumbbar">
+    <button class="quiet icon-btn" id="menu-btn" aria-label="Agents" title="Agents"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></button>
+    <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
   </div>
 </header>
 <main id="main"></main>
+<footer id="foot">
+  <span class="flabel" id="pool-label">Pool:</span>
+  <div class="switch" id="switch">
+    <button class="select" id="pool-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="pool-menu" aria-labelledby="pool-label pool-name"><span id="pool-dot" class="sdot"></span><span id="pool-name">…</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+    <div class="menu" id="pool-menu" role="listbox" aria-label="Pools" hidden></div>
+  </div>
+  <span class="meta path" id="pool"></span>
+  <span class="elsewhere" id="elsewhere" hidden></span>
+  <div class="fstats" id="foot-stats"></div>
+</footer>
 <dialog id="viewer" class="viewer">
   <div class="head"><div><div id="viewer-title"></div><div class="path" id="viewer-path"></div></div>
     <div class="actions"><a id="viewer-tab" target="_blank" rel="noopener noreferrer">Open in new tab</a><button id="viewer-close">Close</button></div></div>
@@ -198,6 +373,11 @@
   <div class="head"><div><div>Repair with doctor</div><div class="path">Runs meshctl doctor --fix for this pool. Items that need a person are left alone.</div></div><button id="repair-close">Close</button></div>
   <div class="body" id="repair-body"></div>
   <div class="actions foot" id="repair-actions"></div>
+</dialog>
+<dialog id="upgrade">
+  <div class="head"><div><div id="upgrade-title">Upgrade pool</div><div class="path">Runs meshctl pool upgrade for this pool, after you have seen what it changes. Nothing is pushed.</div></div><button id="upgrade-close">Close</button></div>
+  <div class="body" id="upgrade-body"></div>
+  <div class="actions foot" id="upgrade-actions"></div>
 </dialog>
 <dialog id="item">
   <div class="head"><div><div id="item-title"></div><div class="path" id="item-path"></div></div><button id="item-close">Close</button></div>
@@ -212,10 +392,10 @@ let snap = null;
 let pools = [];      // every pool's summary, from the latest frame
 let poolKey = null;  // the pool on screen
 let es = null;
+// The pool's console settings (pool/console.yaml), from its snapshot.
+let layout = "classic";       // or "workspace"
+let sortBy = "activity";      // or "name"
 let attentionOnly = false;
-try { attentionOnly = localStorage.getItem("attentionOnly") === "1"; } catch (e) {}
-let sortBy = "activity"; // or "name"
-try { if (localStorage.getItem("sortBy") === "name") sortBy = "name"; } catch (e) {}
 
 const ago = (iso) => {
   if (!iso) return "";
@@ -232,6 +412,11 @@ const drillable = { "intake": true, "read-back": true, "kb-branches": true };
 const redKinds = { "kb-branches": true, "conflicts": true };
 
 // One view model per agent: its pending block, sessions, findings and status.
+// An agent is shown by its manifest title ("Release PM"), its folder name
+// (the slug, "release-pm") beneath or on hover; no title, the folder name.
+const displayName = (info) => info.title || info.name;
+const titleOf = (name) => { const i = snap && (snap.agents || []).find(x => x.name === name); return i ? displayName(i) : name; };
+
 function model() {
   const pending = new Map(snap.pending.agents.map(a => [a.agent, a]));
   const sessions = new Map();
@@ -257,7 +442,7 @@ function model() {
     return { info, pending: p, sessions: ss, findings: fs, errors, warns: fs.length - errors, status,
       jobs: ss.reduce((n, s) => n + s.jobs.length, 0) };
   });
-  const byName = (a, b) => a.info.name.localeCompare(b.info.name);
+  const byName = (a, b) => displayName(a.info).localeCompare(displayName(b.info));
   // Activity: open sessions first, by their badge's idle time; then what
   // needs the person (status, then most pending); then the rest by name.
   const idle = (a) => a.sessions.length ? Math.min(...a.sessions.map(s => s.idle_seconds)) : Infinity;
@@ -281,82 +466,474 @@ function lineSummary(l) {
 
 // --- grid ---
 
-function renderGrid(m) {
-  const root = $("main");
-  root.replaceChildren();
+// --- Home (#/): every pool on this machine ---
 
-  for (const n of snap.notices || []) root.append(el("div", "notice", n.message));
+function homePage() {
+  const out = [];
+  const h = { pools };
+  const head = el("div", "home-head");
+  head.append(el("h2", null, "Your pools"));
+  out.push(head);
+  if (!h.pools.length) { out.push(el("div", "empty", "loading…")); return out; }
+  const sum = (k) => h.pools.reduce((n, p) => n + (p[k] || 0), 0);
+  head.append(el("div", "meta", plural(h.pools.length, "pool") + " · " + plural(sum("agents"), "agent") + " on this machine"));
 
-  const need = m.agents.filter(a => a.status.rank === 0).length;
-  const waiting = m.agents.filter(a => a.status.rank === 1).length;
-  const sessions = (snap.sessions || []).length;
-  const jobs = (snap.sessions || []).reduce((n, s) => n + s.jobs.length, 0);
-  const errors = snap.doctor ? snap.doctor.findings.filter(f => f.level === "error").length : 0;
-  const summary = el("div", "summary");
-  const stat = (n, l, cls) => { const s = el("div", "stat" + (cls ? " " + cls : "")); s.append(el("div", "n", String(n)), el("div", "l", l)); return s; };
-  summary.append(
-    stat(need, need === 1 ? "agent needs you" : "agents need you", need ? "red" : ""),
-    stat(waiting, "with work waiting", waiting ? "amber" : ""),
-    stat(sessions, sessions === 1 ? "open session" : "open sessions"),
-    stat(jobs, jobs === 1 ? "scheduled job" : "scheduled jobs"),
-    stat(snap.doctor ? errors : "…", errors === 1 ? "doctor error" : "doctor errors", errors ? "red" : ""));
-  root.append(summary);
+  const totals = el("div", "summary");
+  const stat = (n, l, cls) => { const s = el("div", "stat" + (n && cls ? " " + cls : "")); s.append(el("div", "n", String(n)), el("div", "l", l)); return s; };
+  const upgrades = h.pools.filter(p => p.upgrade).length;
+  totals.append(
+    stat(sum("needs_you"), sum("needs_you") === 1 ? "agent needs you" : "agents need you", "red"),
+    stat(sum("waiting"), sum("waiting") === 1 ? "agent with work waiting" : "agents with work waiting", "amber"),
+    stat(sum("sessions"), sum("sessions") === 1 ? "open session" : "open sessions"),
+    stat(sum("jobs"), sum("jobs") === 1 ? "scheduled job" : "scheduled jobs"),
+    stat(sum("errors"), sum("errors") === 1 ? "doctor error" : "doctor errors", "red"),
+    stat(upgrades, upgrades === 1 ? "pool needs upgrade" : "pools need upgrade", "amber"));
+  out.push(totals);
 
+  const grid = el("div", "grid pools");
+  for (const p of h.pools) grid.append(poolCard(p));
+  out.push(grid);
+
+  return out;
+}
+
+// poolCard is one pool on Home: its state and numbers; a click opens it.
+function poolCard(p) {
+  const c = el("a", "card pcard");
+  c.href = "#/pool/" + encodeURIComponent(p.key);
+  const state = poolState(p);
+  const top = el("div", "top");
+  const id = el("div");
+  const nm = el("div", "name");
+  nm.append(el("span", "sdot " + state.cls), " ", p.name);
+  id.append(nm, el("div", "title", p.path));
+  top.append(id, el("span", "status " + (state.cls || ""), state.word));
+  const rows = el("div", "rows");
+  const r = (k, v, cls) => { const d = el("div", "r" + (cls ? " " + cls : "")); d.append(el("span", "k", k), el("span", "v", v)); rows.append(d); };
+  if (p.ready) {
+    const attn = p.needs_you + p.waiting;
+    r("Agents", String(p.agents));
+    r("Needs attention", attn ? plural(attn, "agent") + (p.needs_you ? " · " + p.needs_you + " need you" : "") : "none", p.needs_you ? "red" : attn ? "amber" : "");
+    r("Waiting", p.pending ? plural(p.pending, "item") : "nothing");
+    r("Sessions", p.sessions ? p.sessions + " open" + (p.jobs ? " · " + plural(p.jobs, "job") : "") : "none open");
+    r("Doctor", (p.errors ? plural(p.errors, "error") + " · " : "") + plural(p.warnings, "warning"), p.errors ? "red" : "");
+  } else rows.append(el("div", "empty", "starting…"));
+  const foot = el("div", "foot");
+  if (p.upgrade) {
+    const up = el("button", "primary", "Upgrade…");
+    up.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); openUpgrade(p.key, p.name); });
+    foot.append(el("span", "status amber", "Needs upgrade"), up);
+  }
+  c.append(top, rows, foot);
+  return c;
+}
+
+// --- the frame: header, sidebars, centre, footer ---
+//
+// Both layouts share the frame: a header (product, breadcrumb, live state,
+// settings), the footer (pool selector and pool stats), and on agent pages a
+// right sidebar of section cards. Workspace adds the agent list on the left
+// and shows the pool overview in the centre; Classic shows the card grid.
+// Layout, sort, filter and which sidebars are open are remembered per browser.
+
+const sideOpen = { left: true, right: true };
+try { Object.assign(sideOpen, JSON.parse(localStorage.getItem("sideOpen") || "{}")); } catch (e) {}
+let footFilter = null; // a footer stat narrowing the agents shown
+
+const narrow = () => window.matchMedia("(max-width: 900px)").matches;
+const agentFilters = {
+  needs: { label: "agents that need you", test: a => a.status.rank === 0 },
+  waiting: { label: "agents with work waiting", test: a => a.status.rank === 1 },
+  sessions: { label: "agents with an open session", test: a => a.sessions.length > 0 },
+  jobs: { label: "agents with scheduled jobs", test: a => a.jobs > 0 },
+  errors: { label: "agents with doctor errors", test: a => a.errors > 0 },
+};
+
+// icon is one of the console's drawn icons, sized and coloured like text.
+const iconPaths = {
+  menu: ["M4 6h16", "M4 12h16", "M4 18h16"],
+  down: ["M6 9l6 6 6-6"],
+  up: ["M6 15l6-6 6 6"],
+  collapseLeft: ["M11 17l-5-5 5-5", "M18 17l-5-5 5-5"],
+  collapseRight: ["M6 17l5-5-5-5", "M13 17l5-5-5-5"],
+};
+function icon(name) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of iconPaths[name]) {
+    const p = document.createElementNS(ns, "path");
+    p.setAttribute("d", d);
+    svg.append(p);
+  }
+  return svg;
+}
+
+// Settings are the pool's: they arrive with its snapshot, and the Settings
+// page saves them in its pool repo (POST /api/settings). While a save is in
+// flight the page keeps its own values, so a frame cannot flip them back.
+let saving = 0, settingsNote = "";
+
+function applySettings(c) {
+  if (!c || saving) return;
+  layout = c.layout;
+  sortBy = c.agent_order;
+  attentionOnly = c.attention_only;
+}
+
+async function saveSettings(patch, all) {
+  const body = { layout, agent_order: sortBy, attention_only: attentionOnly, ...patch, all_pools: !!all };
+  layout = body.layout; sortBy = body.agent_order; attentionOnly = body.attention_only;
+  saving++;
+  settingsNote = "Saving…";
+  render();
+  const here = (pools.find(p => p.key === poolKey) || { name: poolKey }).name;
+  try {
+    const r = await fetch("/api/settings?" + new URLSearchParams({ pool: poolKey }),
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!r.ok) settingsNote = "Not saved: " + (await r.text()).trim();
+    else {
+      const res = await r.json();
+      const bad = res.filter(x => x.error);
+      settingsNote = bad.length ? "Not saved in " + bad.map(x => x.pool + " (" + x.error + ")").join("; ")
+        : all ? "Saved and committed in every pool." : "Saved" + (res[0] && res[0].committed ? " and committed" : "") + " in " + here + ".";
+    }
+  } catch (e) {
+    settingsNote = "Not saved: the console did not answer.";
+  } finally {
+    saving--;
+  }
+  render();
+}
+
+function toggleSide(side) {
+  sideOpen[side] = !sideOpen[side];
+  try { localStorage.setItem("sideOpen", JSON.stringify(sideOpen)); } catch (e) {}
+  render();
+}
+$("menu-btn").addEventListener("click", () => document.body.classList.toggle("left-open"));
+
+// sideHead is a sidebar's top row: its name and the button that collapses it.
+function sideHead(label, side) {
+  const h = el("div", "shead");
+  const open = sideOpen[side];
+  const b = el("button", "quiet icon-btn");
+  b.append(icon(side === "left" ? (open ? "collapseLeft" : "collapseRight") : (open ? "collapseRight" : "collapseLeft")));
+  b.setAttribute("aria-label", (open ? "Collapse " : "Expand ") + label.toLowerCase());
+  b.title = (open ? "Collapse " : "Expand ") + label.toLowerCase();
+  b.addEventListener("click", () => toggleSide(side));
+  h.append(el("span", "lbl", label), b);
+  return h;
+}
+
+function applyFrame(r) {
+  const ws = layout === "workspace" && !r.home && !r.settings; // the agent list belongs to a pool
+  document.body.classList.toggle("home", !!r.home);
+  document.body.classList.toggle("ws", ws);
+  document.body.classList.toggle("left-off", ws && !sideOpen.left);
+  document.body.classList.toggle("right-off", !sideOpen.right);
+  if (!ws) document.body.classList.remove("left-open");
+}
+
+// renderCrumbs is the header's breadcrumb: Home › pool › agent › section.
+function renderCrumbs(r, m) {
+  const nav = $("crumbs");
+  nav.replaceChildren();
+  const add = (text, href) => {
+    if (nav.children.length) nav.append(el("span", "sep", "›"));
+    const c = el(href ? "a" : "span", "crumb", text);
+    if (href) c.href = href;
+    nav.append(c);
+  };
+  const cur = pools.find(p => p.key === poolKey);
+  if (r.settings) { add("Home", "#/"); add("Settings"); }
+  else if (r.home) add("Home");
+  else {
+    add("Home", "#/");
+    add(cur ? cur.name : (poolKey || "…"), r.agent ? poolHash() : null);
+    if (r.agent) {
+      const a = m && m.agents.find(x => x.info.name === r.agent);
+      const sec = sections.find(s => s.key === r.section);
+      add(a && a.info.title ? a.info.title : r.agent, sec ? agentHash(r.agent) : null);
+      if (sec) add(sec.title);
+    }
+  }
+  const last = nav.lastElementChild;
+  if (last) last.classList.add("here");
+  nav.scrollLeft = nav.scrollWidth; // a long trail keeps the current page in view
+}
+
+function wsLeft(m, r) {
+  const left = el("aside", "ws-left");
+  left.setAttribute("aria-label", "Agents");
+  left.append(sideHead("Agents", "left"));
+  const list = el("div", "alist");
+  list.dataset.scroll = "left";
+  if (footFilter) {
+    const f = el("button", "filter", "Showing " + agentFilters[footFilter].label + " ✕");
+    f.addEventListener("click", () => { footFilter = null; render(); });
+    list.append(f);
+  }
+  const shown = shownAgents(m);
+  for (const a of shown) list.append(agentCardCompact(a, r));
+  if (!shown.length) list.append(el("div", "empty", "No agents to show."));
+  left.append(list);
+  return left;
+}
+
+function shownAgents(m) {
+  let shown = attentionOnly ? m.agents.filter(a => a.status.rank < 3 || a.sessions.length) : m.agents;
+  if (footFilter) shown = shown.filter(agentFilters[footFilter].test);
+  return shown;
+}
+
+// agentCardCompact is an agent in the left sidebar: a line or two, or a
+// badge in the collapsed rail. It keeps the section on screen when switching.
+function agentCardCompact(a, r) {
+  const on = r.agent === a.info.name;
+  const c = el("a", "acard" + (on ? " on" : ""));
+  c.href = agentHash(a.info.name, on ? null : r.section);
+  c.title = a.info.name + " — " + a.status.word;
+  if (on) c.setAttribute("aria-current", "page");
+  c.addEventListener("click", () => document.body.classList.remove("left-open"));
+  const stripe = el("div", "stripe");
+  if (a.info.color) stripe.style.background = a.info.color;
+  const top = el("div", "top");
+  top.append(el("span", "name", displayName(a.info)), el("span", "status " + a.status.cls, a.status.word));
+  const line = el("div", "sl");
+  if (a.sessions.length) line.append(el("span", "live", "● " + idleText(Math.min(...a.sessions.map(s => s.idle_seconds)))), " ");
+  const l = a.pending.lines[0];
+  line.append(l ? l.label + " " + lineSummary(l) : a.sessions.length ? "" : "nothing waiting");
+  const rail = el("span", "rail", railLabel(a.info));
+  if (a.info.color) rail.style.borderColor = a.info.color;
+  rail.append(el("span", "sdot " + a.status.cls));
+  c.append(stripe, top, line, rail);
+  return c;
+}
+
+// railLabel is up to three letters for the collapsed rail: a short manifest
+// badge, else the initials of the shown name ("Release PM (board)" → RP).
+function railLabel(info) {
+  if (info.badge && info.badge.length <= 3) return info.badge.toUpperCase();
+  const name = displayName(info).replace(/\(.*?\)/g, "");
+  const parts = name.split(/[\s_-]+/).filter(Boolean);
+  return (parts.length > 1 ? parts.slice(0, 3).map(p => p[0]).join("") : name.trim().slice(0, 2)).toUpperCase();
+}
+
+function poolCounts(m) {
+  return {
+    need: m.agents.filter(a => a.status.rank === 0).length,
+    waiting: m.agents.filter(a => a.status.rank === 1).length,
+    sessions: (snap.sessions || []).length,
+    jobs: (snap.sessions || []).reduce((n, s) => n + s.jobs.length, 0),
+    errors: snap.doctor ? snap.doctor.findings.filter(f => f.level === "error").length : 0,
+  };
+}
+
+// renderFooterStats fills the footer after the pool selector: the pool's
+// numbers (each a filter for the agents shown), doctor, and its actions.
+function renderFooterStats(m) {
+  const box = $("foot-stats");
+  box.replaceChildren();
+  const c = poolCounts(m);
+  const stat = (key, n, label, cls) => {
+    const b = el("button", "fstat" + (n && cls ? " " + cls : "") + (footFilter === key ? " on" : ""));
+    b.append(el("b", null, String(n)), " " + label);
+    b.setAttribute("aria-pressed", String(footFilter === key));
+    b.title = footFilter === key ? "Show every agent" : "Show " + agentFilters[key].label;
+    b.addEventListener("click", () => { footFilter = footFilter === key ? null : key; render(); });
+    return b;
+  };
+  box.append(
+    stat("needs", c.need, "need you", "red"),
+    stat("waiting", c.waiting, "waiting", "amber"),
+    stat("sessions", c.sessions, c.sessions === 1 ? "session" : "sessions"),
+    stat("jobs", c.jobs, c.jobs === 1 ? "job" : "jobs"),
+    stat("errors", snap.doctor ? c.errors : "…", c.errors === 1 ? "doctor error" : "doctor errors", "red"),
+    el("span", "spacer"),
+    el("span", "meta", snap.doctor ? "doctor checked " + ago(snap.doctor.generated) : "doctor running…"));
+  const recheck = el("button", null, "Re-check doctor");
+  recheck.addEventListener("click", () => doRecheck(recheck));
+  box.append(recheck);
+  const cur = pools.find(p => p.key === poolKey);
+  if (cur && cur.upgrade) {
+    const up = el("button", "primary", "Upgrade pool…");
+    up.addEventListener("click", () => openUpgrade(cur.key, cur.name));
+    box.append(up);
+  }
+  const fixable = snap.doctor ? snap.doctor.findings.filter(f => f.fixable) : [];
+  if (fixable.length) {
+    const go = el("button", "primary", "Repair " + fixable.length + "…");
+    go.addEventListener("click", () => openRepair(fixable));
+    box.append(go);
+  }
+}
+
+// poolGrid is the Classic pool page: notices, pool findings, the card grid.
+function poolGrid(m) {
+  const out = [];
+  for (const n of snap.notices || []) out.push(el("div", "notice", n.message));
   if (m.poolFindings.length) {
     const d = el("details", "pool");
     d.append(el("summary", null, "Pool-level findings (" + m.poolFindings.length + ")"));
     for (const f of m.poolFindings) d.append(finding(f, true));
-    root.append(d);
+    out.push(d);
   }
-
-  const fixable = snap.doctor ? snap.doctor.findings.filter(f => f.fixable) : [];
-  if (fixable.length) {
-    const rb = el("div", "repairbar");
-    const go = el("button", null, "Repair…");
-    go.addEventListener("click", () => openRepair(fixable));
-    rb.append(el("span", null, "Doctor can repair " + plural(fixable.length, "item") + " automatically."), go);
-    root.append(rb);
+  if (footFilter) {
+    const f = el("button", "filter", "Showing " + agentFilters[footFilter].label + " ✕");
+    f.addEventListener("click", () => { footFilter = null; render(); });
+    out.push(f);
   }
-
-  const bar = el("div", "toolbar");
-  const lab = el("label");
-  const cb = el("input"); cb.type = "checkbox"; cb.checked = attentionOnly;
-  cb.addEventListener("change", () => { attentionOnly = cb.checked; try { localStorage.setItem("attentionOnly", cb.checked ? "1" : "0"); } catch (e) {} render(); });
-  lab.append(cb, document.createTextNode("Only agents that need attention"));
-  const recheck = el("button", null, "Re-check doctor");
-  recheck.addEventListener("click", () => doRecheck(recheck));
-  const seg = el("div", "seg");
-  seg.setAttribute("role", "group");
-  seg.setAttribute("aria-label", "Sort agents");
-  for (const [k, label] of [["activity", "Activity"], ["name", "Name"]]) {
-    const b = el("button", sortBy === k ? "on" : null, label);
-    b.setAttribute("aria-pressed", String(sortBy === k));
-    b.addEventListener("click", () => { sortBy = k; try { localStorage.setItem("sortBy", k); } catch (e) {} render(); });
-    seg.append(b);
-  }
-  bar.append(el("span", "meta", "Sort"), seg, lab, el("span", "spacer"), el("span", "meta", snap.doctor ? "doctor checked " + ago(snap.doctor.generated) : "doctor running…"), recheck);
-  root.append(bar);
-
   const grid = el("div", "grid");
-  const shown = attentionOnly ? m.agents.filter(a => a.status.rank < 3 || a.sessions.length) : m.agents;
+  const shown = shownAgents(m);
   for (const a of shown) grid.append(card(a));
-  if (!shown.length) grid.append(el("div", "empty", "Nothing needs your attention."));
-  root.append(grid);
+  if (!shown.length) grid.append(el("div", "empty", "Nothing to show."));
+  out.push(grid);
+  return out;
+}
+
+// settingsPage is #/settings: how the console looks, per browser.
+function settingsPage() {
+  const p = el("section", "panel settings");
+  const head = el("div", "phead");
+  const here = (pools.find(p => p.key === poolKey) || { name: poolKey || "…" }).name;
+  head.append(el("h3", null, "Settings for " + here));
+  const body = el("div", "pbody");
+  body.append(el("div", "detail", "Saved in " + here + "'s pool repo (pool/console.yaml) and committed for you. Push the pool repo to take them to another machine."));
+  const row = (title, help, control) => {
+    const r = el("div", "srow");
+    const t = el("div");
+    t.append(el("div", "label", title), el("div", "detail", help));
+    r.append(t, control);
+    body.append(r);
+  };
+  const seg = (label, opts, cur, pick) => {
+    const s = el("div", "seg");
+    s.setAttribute("role", "group");
+    s.setAttribute("aria-label", label);
+    for (const [k, text] of opts) {
+      const b = el("button", cur === k ? "on" : null, text);
+      b.setAttribute("aria-pressed", String(cur === k));
+      b.addEventListener("click", () => pick(k));
+      s.append(b);
+    }
+    return s;
+  };
+  row("Layout", "Classic shows the pool as a grid of agent cards. Workspace keeps the agent list on the left and the pool overview in the centre.",
+    seg("Layout", [["classic", "Classic"], ["workspace", "Workspace"]], layout, (k) => saveSettings({ layout: k })));
+  row("Agent order", "Activity puts open sessions first, then agents that need you, then the rest by name. Name is alphabetical.",
+    seg("Agent order", [["activity", "Activity"], ["name", "Name"]], sortBy, (k) => saveSettings({ agent_order: k })));
+  const lab = el("label", "check");
+  const cb = el("input"); cb.type = "checkbox"; cb.checked = attentionOnly;
+  cb.addEventListener("change", () => saveSettings({ attention_only: cb.checked }));
+  lab.append(cb, document.createTextNode("Only agents that need attention"));
+  row("Agents shown", "Hide agents with nothing waiting and no open session.", lab);
+  const foot = el("div", "srow");
+  const all = el("button", null, "Apply to every pool");
+  all.addEventListener("click", () => saveSettings({}, true));
+  foot.append(el("div", "detail", settingsNote || "Each pool keeps its own settings; the pool on screen decides."), all);
+  body.append(foot);
+  p.append(head, body);
+  return [p];
+}
+
+// poolOverview is the Workspace centre with no agent selected: what needs
+// the person, live activity across the pool, and pool-level findings.
+function poolOverview(m) {
+  const out = [];
+  for (const n of snap.notices || []) out.push(el("div", "notice", n.message));
+  const grid = el("div", "ov");
+
+  const need = m.agents.filter(a => a.status.rank <= 1 || a.errors);
+  const np = el("section", "panel");
+  const nh = el("div", "phead");
+  nh.append(el("h3", null, "Needs you"), el("span", "sums", plural(need.length, "agent")));
+  const nb = el("div", "pbody");
+  for (const a of need) {
+    const row = el("a", "line link");
+    row.href = agentHash(a.info.name, "waiting");
+    const h = el("div", "head");
+    h.append(el("span", "label", displayName(a.info)));
+    if (a.info.title && a.info.title !== a.info.name) h.append(el("span", "slug", a.info.name));
+    h.append(el("span", "status " + a.status.cls, a.status.word));
+    for (const l of a.pending.lines) h.append(st(l.kind === "kb-health" ? null : l.count, l.kind === "kb-health" ? "KB: " + lineSummary(l) : l.label.toLowerCase(), redKinds[l.kind] ? "red" : ""));
+    if (a.errors) h.append(st(a.errors, a.errors === 1 ? "doctor error" : "doctor errors", "red"));
+    for (const s of [...new Set(a.pending.lines.flatMap(l => l.say))]) h.append(el("span", "say", "say “" + s + "”"));
+    row.append(h);
+    nb.append(row);
+  }
+  if (!need.length) nb.append(el("div", "empty", "Nothing needs you in this pool."));
+  np.append(nh, nb);
+
+  const sessions = snap.sessions || [];
+  const lp = el("section", "panel");
+  const lh = el("div", "phead");
+  lh.append(el("h3", null, "Live activity"), el("span", "sums", plural(sessions.length, "open session")));
+  const lb = el("div", "pbody");
+  for (const s of sessions) {
+    const box = el("div", "session");
+    const head = el("div", "head");
+    const what = el("div");
+    const name = el("a", "label", titleOf(s.agent));
+    name.href = agentHash(s.agent, "sessions");
+    what.append(name, " ", el("span", "meta", idleText(s.idle_seconds)));
+    what.append(el("div", "what", [s.tty ? s.tty.replace("/dev/", "") : "", "started " + ago(s.started), s.claim ? "working on " + s.claim : ""].filter(Boolean).join(" · ")));
+    head.append(what);
+    if (s.focusable) {
+      const b = el("button", null, "Bring to front");
+      b.addEventListener("click", () => focusSession(s.agent, s.id, b));
+      head.append(b);
+    }
+    box.append(head);
+    for (const j of s.jobs) box.append(sl(jobChip(j), " " + firstWords(j.prompt, 8)));
+    lb.append(box);
+  }
+  if (!sessions.length) lb.append(el("div", "empty", "No open sessions."));
+  lp.append(lh, lb);
+  grid.append(np, lp);
+
+  if (m.poolFindings.length) {
+    const fp = el("section", "panel");
+    const fh = el("div", "phead");
+    fh.append(el("h3", null, "Pool-level findings"), el("span", "sums", String(m.poolFindings.length)));
+    const fb = el("div", "pbody");
+    for (const f of m.poolFindings) fb.append(finding(f, true));
+    fp.append(fh, fb);
+    grid.append(fp);
+  }
+  out.push(grid);
+  return out;
+}
+
+// keepScroll and restoreScroll carry the sidebars' and centre's scroll
+// positions across a redraw; the centre's only while the address is the same.
+function keepScroll() {
+  const k = { at: location.hash, tops: {} };
+  for (const e of document.querySelectorAll("[data-scroll]")) k.tops[e.dataset.scroll] = e.scrollTop;
+  return k;
+}
+function restoreScroll(k) {
+  for (const e of document.querySelectorAll("[data-scroll]")) {
+    const t = k.tops[e.dataset.scroll];
+    if (t != null && (e.dataset.scroll !== "center" || k.at === location.hash)) e.scrollTop = t;
+  }
 }
 
 function card(a) {
   const c = el("div", "card");
   c.tabIndex = 0;
   c.setAttribute("role", "button");
-  c.setAttribute("aria-label", a.info.name + ", " + a.status.word);
+  c.setAttribute("aria-label", displayName(a.info) + ", " + a.status.word);
   const stripe = el("div", "stripe");
   if (a.info.color) stripe.style.background = a.info.color;
   c.append(stripe);
 
   const top = el("div", "top");
   const id = el("div");
-  id.append(el("div", "name", a.info.name));
-  if (a.info.title && a.info.title !== a.info.name) id.append(el("div", "title", a.info.title));
+  id.append(el("div", "name", displayName(a.info)));
+  if (a.info.title && a.info.title !== a.info.name) id.append(el("div", "title slug", a.info.name));
   top.append(id, el("span", "status " + a.status.cls, a.status.word));
   c.append(top);
 
@@ -391,34 +968,179 @@ function card(a) {
 
 // --- detail ---
 
-function renderDetail(m, name) {
+// --- agent page: a content area and a sidebar of section cards ---
+//
+// The sidebar lists Overview and the agent's sections as compact cards with
+// their numbers; a click renders that section in the content area. The
+// section is part of the address (#/pool/<key>/agent/<name>/<section>).
+
+const sections = [
+  { key: "waiting", title: "Waiting on you", card: waitingCard, body: waitingBody },
+  { key: "sessions", title: "Sessions & jobs", card: sessionsCard, body: sessionsBody },
+  { key: "doctor", title: "Doctor", card: doctorCard, body: doctorBody },
+  { key: "docs", title: "Documents", card: docsCard, body: docsBody },
+  { key: "kb", title: "Knowledge base", card: kbCard, body: kbBody },
+  { key: "history", title: "Recent history", card: historyCard, body: historyBody },
+];
+let roleOpen = false;
+
+const agentHash = (name, section) => poolHash() + "/agent/" + encodeURIComponent(name) + (section ? "/" + section : "");
+
+// renderDetail draws the agent page into root: the content (heading, then
+// the section or Overview) and the right sidebar of section cards.
+function renderDetail(m, name, section, root) {
   const a = m.agents.find(x => x.info.name === name);
-  const root = $("main");
   root.replaceChildren();
-  const back = el("button", "back", "← All agents");
-  back.addEventListener("click", () => { location.hash = poolHash(); });
-  root.append(back);
   if (!a) { root.append(el("div", "empty", "No agent named " + name + " in this pool.")); return; }
   ensureAgentData(a);
 
   const hero = el("div", "hero");
   const sw = el("div", "swatch");
   if (a.info.color) sw.style.background = a.info.color;
-  const txt = el("div");
-  const h = el("h2", null, a.info.name);
-  h.append(el("span", "status " + a.status.cls, a.status.word));
-  txt.append(h);
-  const sub = [a.info.title, a.info.harness === "opencode" ? "opencode" : "Claude Code"].filter(Boolean).join(" · ");
-  txt.append(el("div", "sub", sub));
-  if (a.info.role) txt.append(el("div", "role", a.info.role));
+  const txt = el("div", "txt");
+  const line1 = el("div", "line1");
+  line1.append(el("h2", null, displayName(a.info)), el("span", "status " + a.status.cls, a.status.word),
+    el("span", "meta", [a.info.title && a.info.title !== a.info.name ? a.info.name : "", a.info.harness === "opencode" ? "opencode" : "Claude Code"].filter(Boolean).join(" · ")));
+  txt.append(line1);
+  if (a.info.role) {
+    const role = el("div", "role" + (roleOpen ? " open" : ""), a.info.role);
+    role.addEventListener("click", () => { roleOpen = !roleOpen; role.classList.toggle("open", roleOpen); });
+    txt.append(role);
+  }
   hero.append(sw, txt);
-  root.append(hero);
 
-  const cols = el("div", "cols");
-  const left = el("div"), right = el("div");
+  const sec = sections.find(s => s.key === section) || null;
+  const page = el("div", "agentpage");
+  const content = el("div", "content");
+  const side = el("nav", "sections");
+  side.setAttribute("aria-label", "Sections");
+  const list = el("div", "slist");
+  list.dataset.scroll = "right";
+  list.append(sectionCard(a, null, { sums: [st(null, a.status.word, a.status.cls)], lines: overviewLines(a) }, !sec));
+  for (const s of sections) list.append(sectionCard(a, s, s.card(a), sec === s));
+  side.append(sideHead("Sections", "right"), list);
+  if (sec) {
+    const p = el("section", "panel");
+    const head = el("div", "phead");
+    const sums = el("span", "sums");
+    sums.append(...sec.card(a).sums);
+    head.append(el("h3", null, sec.title), sums);
+    const body = el("div", "pbody");
+    sec.body(a, body);
+    p.append(head, body);
+    content.append(p);
+  } else content.append(...overview(a));
+  content.prepend(hero);
+  content.dataset.scroll = "center";
+  page.append(content, side);
+  root.append(page);
+  // A narrow window shows the sections as a row: keep the current one in view.
+  const on = list.querySelector(".on");
+  if (on && list.scrollWidth > list.clientWidth) list.scrollLeft = on.offsetLeft - list.offsetLeft - 8;
+}
 
-  const wp = panel("Waiting on you", a.pending.total ? plural(a.pending.total, "item") : "");
-  if (!a.pending.lines.length) wp.append(el("div", "empty", "Nothing is waiting on you here."));
+// sectionCard is one compact, linked card in the sidebar.
+function sectionCard(a, s, c, on) {
+  const card = el("a", "scard" + (on ? " on" : ""));
+  card.href = agentHash(a.info.name, s ? s.key : null);
+  if (on) card.setAttribute("aria-current", "page");
+  card.append(el("div", "ttl", s ? s.title : "Overview"));
+  const sums = el("div", "sums");
+  sums.append(...c.sums);
+  card.append(sums);
+  for (const l of c.lines || []) card.append(l);
+  return card;
+}
+
+// sl is one detail line of a section card: one line, cut with an ellipsis.
+function sl(...parts) {
+  const d = el("div", "sl");
+  d.append(...parts);
+  d.title = d.textContent;
+  return d;
+}
+
+// st is one inline stat: "3 intake", the number in bold.
+function st(n, label, cls) {
+  const s = el("span", "st" + (cls ? " " + cls : ""));
+  if (n != null) s.append(el("b", null, String(n)), " ");
+  s.append(label);
+  return s;
+}
+
+const firstWords = (text, n) => { const w = text.split(/\s+/).filter(Boolean); return w.slice(0, n).join(" ") + (w.length > n ? "…" : ""); };
+const jobWhen = (j) => j.schedule_text || (j.recurring ? "every " : "once ") + j.schedule;
+// jobChip is a job's schedule in words, the cron expression on hover.
+const jobChip = (j) => { const c = el("span", "say", jobWhen(j)); c.title = j.schedule; return c; };
+const pendingLine = (a, kind) => a.pending.lines.find(l => l.kind === kind);
+
+// --- Overview: the agent's numbers, then what needs the person now ---
+
+function overviewLines(a) {
+  const says = [...new Set(a.pending.lines.flatMap(l => l.say))];
+  return says.length ? [sl(...says.slice(0, 2).map(s => el("span", "say", "“" + s + "”")))] : [];
+}
+
+function overview(a) {
+  const health = pendingLine(a, "kb-health");
+  const count = (kind) => (pendingLine(a, kind) || { count: 0 }).count;
+  const blocks = [
+    [count("intake"), "intake", "waiting", count("intake") ? "amber" : ""],
+    [count("read-back"), "read-back", "waiting", count("read-back") ? "amber" : ""],
+  ];
+  for (const l of a.pending.lines) {
+    if (!["intake", "read-back", "kb-health"].includes(l.kind)) blocks.push([l.count, l.label.toLowerCase(), "waiting", redKinds[l.kind] ? "red" : "amber"]);
+  }
+  blocks.push(
+    [a.sessions.length, a.sessions.length === 1 ? "open session" : "open sessions", "sessions", ""],
+    [a.jobs, a.jobs === 1 ? "scheduled job" : "scheduled jobs", "sessions", ""],
+    [snap.doctor ? a.errors : "…", a.errors === 1 ? "doctor error" : "doctor errors", "doctor", a.errors ? "red" : ""],
+    [snap.doctor ? a.warns : "…", a.warns === 1 ? "doctor warning" : "doctor warnings", "doctor", a.warns ? "amber" : ""],
+    [a.info.docs, a.info.docs === 1 ? "document" : "documents", "docs", ""],
+    [health ? health.unconfirmed || 0 : 0, "unconfirmed KB", "kb", health && health.unconfirmed ? "amber" : ""]);
+  const summary = el("div", "summary");
+  for (const [n, label, key, cls] of blocks) {
+    const b = el("a", "stat" + (cls ? " " + cls : ""));
+    b.href = agentHash(a.info.name, key);
+    b.append(el("div", "n", String(n)), el("div", "l", label));
+    summary.append(b);
+  }
+
+  const now = el("section", "panel");
+  const head = el("div", "phead");
+  head.append(el("h3", null, "Needs you now"));
+  const body = el("div", "pbody");
+  const urgent = a.pending.lines.filter(l => l.say.length || redKinds[l.kind]);
+  for (const l of urgent) {
+    const line = el("a", "line link" + (redKinds[l.kind] ? " red" : ""));
+    line.href = agentHash(a.info.name, "waiting");
+    const h = el("div", "head");
+    h.append(el("span", "label", l.label), el("span", "count", lineSummary(l)));
+    for (const s of l.say) h.append(el("span", "say", "say “" + s + "”"));
+    line.append(h);
+    body.append(line);
+  }
+  for (const f of a.findings.filter(f => f.level === "error")) body.append(finding(f, false));
+  if (!urgent.length && !a.errors) body.append(el("div", "empty", "Nothing needs you here."));
+  now.append(head, body);
+  return [summary, now];
+}
+
+// --- sections: card(a) gives the sidebar card's numbers and lines; body(a, into) the full view ---
+
+function waitingCard(a) {
+  const sums = a.pending.lines.map(l => l.kind === "kb-health"
+    ? st(null, "KB: " + (lineSummary(l) || "check"), "amber")
+    : st(l.count, l.label.toLowerCase(), redKinds[l.kind] ? "red" : "amber"));
+  const lines = [];
+  const oldest = Math.max(0, ...a.pending.lines.map(l => l.oldest_days || 0));
+  if (oldest) lines.push(sl("oldest " + oldest + "d"));
+  lines.push(...overviewLines(a));
+  return { sums: sums.length ? sums : [st(null, "nothing waiting", "quiet")], lines };
+}
+
+function waitingBody(a, body) {
+  if (!a.pending.lines.length) body.append(el("div", "empty", "Nothing is waiting on you here."));
   for (const l of a.pending.lines) {
     const line = el("div", "line" + (redKinds[l.kind] ? " red" : ""));
     const head = el("div", "head");
@@ -443,12 +1165,21 @@ function renderDetail(m, name) {
       if (l.count > l.items.length && l.list_command) ul.append(el("li", "detail", (l.count - l.items.length) + " more: " + l.list_command));
       line.append(ul);
     }
-    wp.append(line);
+    body.append(line);
   }
-  left.append(wp, docsPanel(a), kbPanel(a));
+}
 
-  const sp = panel("Sessions and scheduled jobs", a.sessions.length ? plural(a.sessions.length, "open") : "");
-  if (!a.sessions.length) sp.append(el("div", "empty", "No open session."));
+function sessionsCard(a) {
+  if (!a.sessions.length) return { sums: [st(null, "no open session", "quiet")] };
+  const jobs = a.sessions.flatMap(s => s.jobs);
+  const lines = jobs.slice(0, 2).map(j => sl(jobChip(j), " " + firstWords(j.prompt, 6)));
+  if (jobs.length > 2) lines.push(sl((jobs.length - 2) + " more jobs"));
+  return { sums: [st(a.sessions.length, "open", "green"), st(null, idleText(Math.min(...a.sessions.map(s => s.idle_seconds)))),
+    st(jobs.length, jobs.length === 1 ? "job" : "jobs")], lines };
+}
+
+function sessionsBody(a, body) {
+  if (!a.sessions.length) body.append(el("div", "empty", "No open session."));
   for (const s of a.sessions) {
     const box = el("div", "session");
     const head = el("div", "head");
@@ -466,32 +1197,124 @@ function renderDetail(m, name) {
     if (s.kb_branch) box.append(el("div", "detail", "KB branch " + s.kb_branch));
     for (const j of s.jobs) {
       const row = el("div", "job");
-      row.append(el("span", "say", j.recurring ? "every " + j.schedule : "once " + j.schedule), el("span", null, j.prompt));
+      row.append(jobChip(j), el("span", null, j.prompt));
       box.append(row);
     }
     if (s.jobs.length && s.jobs_at) box.append(el("div", "detail", "jobs as of " + ago(s.jobs_at)));
-    sp.append(box);
+    body.append(box);
   }
-  right.append(sp);
+}
 
-  const dp = panel("Doctor", snap.doctor ? "checked " + ago(snap.doctor.generated) : "running…");
-  if (snap.doctor && !a.findings.length) dp.append(el("div", "empty", "No findings."));
-  // Errors first and always; warnings past the first few behind a toggle.
-  const errs = a.findings.filter(f => f.level === "error"), warns = a.findings.filter(f => f.level !== "error");
-  for (const f of errs) dp.append(finding(f, false));
-  for (const f of warns.slice(0, 5)) dp.append(finding(f, false));
-  if (warns.length > 5) {
-    const rest = el("div");
-    rest.hidden = true;
-    for (const f of warns.slice(5)) rest.append(finding(f, false));
-    const more = el("button", null, "Show all " + warns.length + " warnings");
-    more.addEventListener("click", () => { rest.hidden = false; more.remove(); });
-    dp.append(rest, more);
+function doctorCard(a) {
+  if (!snap.doctor) return { sums: [st(null, "running…", "quiet")] };
+  const fixable = a.findings.filter(f => f.fixable).length;
+  const sums = [st(a.errors, a.errors === 1 ? "error" : "errors", a.errors ? "red" : "quiet"),
+    st(a.warns, a.warns === 1 ? "warning" : "warnings", a.warns ? "amber" : "quiet")];
+  if (fixable) sums.push(st(fixable, "fixable"));
+  const first = a.findings.find(f => f.level === "error") || a.findings[0];
+  return { sums, lines: [first ? sl(first.message) : sl("checked " + ago(snap.doctor.generated))] };
+}
+
+function doctorBody(a, body) {
+  if (!snap.doctor) { body.append(el("div", "empty", "running…")); return; }
+  body.append(el("div", "detail", "checked " + ago(snap.doctor.generated)));
+  if (!a.findings.length) body.append(el("div", "empty", "No findings."));
+  for (const f of [...a.findings.filter(f => f.level === "error"), ...a.findings.filter(f => f.level !== "error")]) body.append(finding(f, false));
+}
+
+function docsCard(a) {
+  if (!a.info.docs) return { sums: [st(null, "none yet", "quiet")] };
+  const l = agentData.docs;
+  const newest = l && l.docs[0];
+  return { sums: [st(a.info.docs, a.info.docs === 1 ? "document" : "documents"), st(null, "newest " + ago(a.info.docs_newest))],
+    lines: newest ? [sl(newest.path.slice(newest.folder.length + 1))] : [] };
+}
+
+function docsBody(a, body) {
+  const l = agentData.docs;
+  if (!l) { body.append(el("div", "empty", "loading…")); return; }
+  if (!l.docs.length) {
+    body.append(el("div", "empty", "No documents yet. Agents write them in " + l.folders.map(f => f + "/").join(", ") + "."));
+    return;
   }
-  right.append(dp, historyPanel());
+  const grouped = l.folders.length > 1;
+  let folder = null;
+  const order = grouped ? [...l.docs].sort((x, y) => l.folders.indexOf(x.folder) - l.folders.indexOf(y.folder)) : l.docs;
+  for (const doc of order) {
+    if (grouped && doc.folder !== folder) { folder = doc.folder; body.append(el("div", "folder", folder + "/")); }
+    body.append(docRow(doc, doc.path.slice(doc.folder.length + 1)));
+  }
+  if (l.more) body.append(el("div", "detail", l.more + " older documents not listed."));
+}
 
-  cols.append(left, right);
-  root.append(cols);
+function kbCard(a) {
+  const v = agentData.view;
+  const health = pendingLine(a, "kb-health");
+  if (!v) return { sums: [st(null, "loading…", "quiet")] };
+  const folders = v.kb.filter(k => k.folder);
+  const state = v.kb.find(k => k.name === "state.md");
+  const sums = [st(folders.length, folders.length === 1 ? "area" : "areas"), st(v.kb.reduce((n, k) => n + k.count, 0), "files")];
+  if (health && health.unconfirmed) sums.push(st(health.unconfirmed, "unconfirmed", "amber"));
+  const lines = [];
+  if (state) lines.push(sl("state.md updated " + ago(state.modified)));
+  if (health) lines.push(sl("health: " + lineSummary(health)));
+  return { sums, lines };
+}
+
+function kbBody(a, body) {
+  const v = agentData.view;
+  if (!v) { body.append(el("div", "empty", "loading…")); return; }
+  const health = pendingLine(a, "kb-health");
+  if (health) body.append(el("div", "detail", "KB health: " + (health.detail || lineSummary(health))));
+  if (!v.kb.length) { body.append(el("div", "empty", "No knowledge base.")); return; }
+  const files = v.kb.filter(k => !k.folder), folders = v.kb.filter(k => k.folder);
+  // The digest first: it is the agent's own summary of where things stand.
+  files.sort((x, y) => (y.name === "state.md") - (x.name === "state.md"));
+  for (const k of files) body.append(docRow({ kind: "markdown", path: k.files[0].path, url: k.files[0].url, modified: k.modified }, k.name));
+  for (const k of folders) {
+    const area = el("details", "area");
+    const sum = el("summary");
+    sum.append(el("span", "nm", k.name + "/"), el("span", "age", k.count ? plural(k.count, "file") + " · " + ago(k.modified) : "empty"));
+    area.append(sum);
+    for (const f of k.files) area.append(docRow({ kind: "markdown", path: f.path, url: f.url, modified: f.modified }, f.path.slice(("knowledge/" + k.name + "/").length)));
+    if (k.count > k.files.length) area.append(el("div", "detail", (k.count - k.files.length) + " older files not listed."));
+    body.append(area);
+  }
+}
+
+function historyCard() {
+  const v = agentData.view;
+  if (!v) return { sums: [st(null, "loading…", "quiet")] };
+  const week = 7 * 86400 * 1000;
+  const c = v.commits[0];
+  return { sums: [c ? st(null, "last commit " + ago(c.when)) : st(null, "no commits", "quiet"),
+    st(v.closed.filter(x => Date.now() - Date.parse(x.closed) < week).length, "closed this week")],
+    lines: c ? [sl(c.subject)] : [] };
+}
+
+function historyBody(a, body) {
+  const v = agentData.view;
+  if (!v) { body.append(el("div", "empty", "loading…")); return; }
+  const cols = el("div", "cols2");
+  const commits = el("div"), closed = el("div");
+  commits.append(el("h4", "sub", "Commits"));
+  if (!v.commits.length) commits.append(el("div", "empty", "No commits."));
+  for (const c of v.commits) {
+    const row = el("div", "hist");
+    row.append(el("span", "hash", c.hash), el("span", "sub", c.subject), el("span", "age", ago(c.when)));
+    row.title = c.subject;
+    commits.append(row);
+  }
+  closed.append(el("h4", "sub", "Closed requests"));
+  if (!v.closed.length) closed.append(el("div", "empty", "None archived."));
+  for (const c of v.closed) {
+    const row = el("div", "hist");
+    row.append(el("span", "sub", c.title || c.id), el("span", "age", c.from + " · " + ago(c.closed)));
+    row.title = c.id;
+    closed.append(row);
+  }
+  cols.append(commits, closed);
+  body.append(cols);
 }
 
 // --- agent data fetched on demand (documents, knowledge, history) ---
@@ -536,81 +1359,6 @@ function docRow(d, label, title) {
   return row;
 }
 
-function docsPanel(a) {
-  const l = agentData.docs;
-  const p = panel("Documents", l ? (l.docs.length + l.more ? plural(l.docs.length + l.more, "document") : "") : "loading…");
-  if (!l) return p;
-  if (!l.docs.length) {
-    p.append(el("div", "empty", "No documents yet. Agents write them in " + l.folders.map(f => f + "/").join(", ") + "."));
-    return p;
-  }
-  const grouped = l.folders.length > 1;
-  const box = el("div");
-  let folder = null, shown = 0;
-  const rest = el("div");
-  rest.hidden = true;
-  const order = grouped ? [...l.docs].sort((x, y) => l.folders.indexOf(x.folder) - l.folders.indexOf(y.folder)) : l.docs;
-  for (const d of order) {
-    const target = shown < 12 ? box : rest;
-    if (grouped && d.folder !== folder) { folder = d.folder; target.append(el("div", "folder", folder + "/")); }
-    target.append(docRow(d, d.path.slice(d.folder.length + 1)));
-    shown++;
-  }
-  p.append(box);
-  if (shown > 12) {
-    const more = el("button", null, "Show all " + shown);
-    more.addEventListener("click", () => { rest.hidden = false; more.remove(); });
-    p.append(rest, more);
-  }
-  if (l.more) p.append(el("div", "detail", l.more + " older documents not listed."));
-  return p;
-}
-
-function kbPanel(a) {
-  const v = agentData.view;
-  const health = a.pending.lines.find(l => l.kind === "kb-health");
-  const p = panel("Knowledge base", health ? lineSummary(health) : "");
-  if (!v) { p.lastChild.append(el("span", "note", " loading…")); return p; }
-  if (!v.kb.length) { p.append(el("div", "empty", "No knowledge base.")); return p; }
-  const files = v.kb.filter(k => !k.folder), folders = v.kb.filter(k => k.folder);
-  // The digest first: it is the agent's own summary of where things stand.
-  files.sort((x, y) => (y.name === "state.md") - (x.name === "state.md"));
-  for (const k of files) p.append(docRow({ kind: "markdown", path: k.files[0].path, url: k.files[0].url, modified: k.modified }, k.name));
-  for (const k of folders) {
-    const d = el("details", "area");
-    const sum = el("summary");
-    sum.append(el("span", "nm", k.name + "/"), el("span", "age", k.count ? plural(k.count, "file") + " · " + ago(k.modified) : "empty"));
-    d.append(sum);
-    for (const f of k.files) d.append(docRow({ kind: "markdown", path: f.path, url: f.url, modified: f.modified }, f.path.slice(("knowledge/" + k.name + "/").length)));
-    if (k.count > k.files.length) d.append(el("div", "detail", (k.count - k.files.length) + " older files not listed."));
-    p.append(d);
-  }
-  return p;
-}
-
-function historyPanel() {
-  const v = agentData.view;
-  const p = panel("Recent history", "");
-  if (!v) { p.append(el("div", "empty", "loading…")); return p; }
-  p.append(el("h4", "sub", "Commits"));
-  if (!v.commits.length) p.append(el("div", "empty", "No commits."));
-  for (const c of v.commits) {
-    const row = el("div", "hist");
-    row.append(el("span", "hash", c.hash), el("span", "sub", c.subject), el("span", "age", ago(c.when)));
-    row.title = c.subject;
-    p.append(row);
-  }
-  p.append(el("h4", "sub", "Closed requests"));
-  if (!v.closed.length) p.append(el("div", "empty", "None archived."));
-  for (const c of v.closed) {
-    const row = el("div", "hist");
-    row.append(el("span", "sub", c.title || c.id), el("span", "age", c.from + " · " + ago(c.closed)));
-    row.title = c.id;
-    p.append(row);
-  }
-  return p;
-}
-
 // The viewer frames a document from its capability path. Everything but a
 // PDF is sandboxed by the frame and by the server's CSP; Chrome will not
 // show a PDF in a sandboxed frame, and the server only serves real PDFs.
@@ -631,14 +1379,6 @@ $("viewer-close").addEventListener("click", () => $("viewer").close());
 // The close event arrives after close() returns, possibly after the next
 // document opened: only an unopened viewer drops its frame.
 $("viewer").addEventListener("close", () => { if (!$("viewer").open) $("viewer").querySelector("iframe")?.remove(); });
-
-function panel(title, note) {
-  const s = el("section", "panel");
-  const h = el("h3", null, title);
-  if (note) h.append(el("span", "note", note));
-  s.append(h);
-  return s;
-}
 
 function finding(f, withAgent) {
   const row = el("div", "finding " + f.level);
@@ -682,7 +1422,7 @@ function openRepair(items) {
   const list = el("ul");
   for (const f of items) list.append(el("li", null, "[" + f.agent + "] " + f.message));
   body.replaceChildren(el("div", null, "These items will be repaired:"), list);
-  const go = el("button", null, "Repair " + plural(items.length, "item"));
+  const go = el("button", "primary", "Repair " + plural(items.length, "item"));
   go.addEventListener("click", () => doRepair(go));
   $("repair-actions").replaceChildren(go);
   $("repair").showModal();
@@ -714,6 +1454,68 @@ async function doRepair(b) {
 }
 $("repair-close").addEventListener("click", () => $("repair").close());
 
+// The Upgrade button (ADR-0079): preview with `pool upgrade --check`, run on
+// confirm, then say what changed and which sessions to restart.
+async function openUpgrade(key, name) {
+  const body = $("upgrade-body"), acts = $("upgrade-actions");
+  $("upgrade-title").textContent = "Upgrade " + name;
+  body.replaceChildren(el("div", null, "Checking what the upgrade would change…"));
+  acts.replaceChildren();
+  $("upgrade").showModal();
+  try {
+    const r = await fetch("/api/pool/upgrade/check?" + new URLSearchParams({ pool: key }), { method: "POST" });
+    if (!r.ok) { body.replaceChildren(el("div", "err", (await r.text()).trim())); return; }
+    const res = await r.json();
+    // Nothing to change but the pool still says it needs an upgrade: only the
+    // record of which meshctl last upgraded it is behind. Running the upgrade
+    // changes nothing else and brings the record up to date.
+    const stale = !res.pending && (pools.find(p => p.key === key) || {}).upgrade;
+    body.replaceChildren(el("div", null, res.pending ? "The upgrade would make these changes:"
+      : stale ? "Nothing in " + name + " needs changing; only its record of the last upgrade is behind. Upgrading updates that record and clears the notice."
+      : name + " is already up to date."), el("pre", "out", res.output));
+    if (!res.pending && !stale) return;
+    const go = el("button", "primary", res.pending ? "Upgrade " + name : "Record the upgrade");
+    go.addEventListener("click", () => runUpgrade(key, name, go));
+    acts.replaceChildren(go);
+  } catch (e) {
+    body.replaceChildren(el("div", "err", "The console did not answer."));
+  }
+}
+
+async function runUpgrade(key, name, b) {
+  b.disabled = true;
+  b.textContent = "Upgrading…";
+  const body = $("upgrade-body");
+  body.replaceChildren(el("div", null, "Upgrading " + name + ". This takes a few seconds."));
+  try {
+    const r = await fetch("/api/pool/upgrade?" + new URLSearchParams({ pool: key }), { method: "POST" });
+    if (!r.ok) { body.replaceChildren(el("div", "err", (await r.text()).trim())); return; }
+    const res = await r.json();
+    const said = { upgraded: name + " is upgraded.", "needs-person": name + " is upgraded, with items only you can do (listed below).", failed: "The upgrade did not finish (output below)." };
+    body.replaceChildren(el("div", res.outcome === "failed" ? "err" : null, said[res.outcome] || said.failed));
+    const open = key === poolKey && snap ? (snap.sessions || []) : [];
+    if (open.length) {
+      body.append(el("div", null, "Restart these open sessions so they pick up the new wiring:"));
+      for (const s of open) {
+        const row = el("div", "job");
+        row.append(el("span", null, titleOf(s.agent) + " · " + idleText(s.idle_seconds)));
+        if (s.focusable) {
+          const f = el("button", null, "Bring to front");
+          f.addEventListener("click", () => focusSession(s.agent, s.id, f));
+          row.append(f);
+        }
+        body.append(row);
+      }
+    } else if (key !== poolKey) body.append(el("div", null, "Restart any open sessions in " + name + " so they pick up the new wiring."));
+    body.append(el("pre", "out", res.output));
+  } catch (e) {
+    body.replaceChildren(el("div", "err", "The console did not answer."));
+  } finally {
+    $("upgrade-actions").replaceChildren();
+  }
+}
+$("upgrade-close").addEventListener("click", () => $("upgrade").close());
+
 async function doRecheck(b) {
   b.disabled = true;
   b.textContent = "Checking…";
@@ -740,7 +1542,7 @@ function renderSwitcher() {
   $("pool-name").textContent = cur ? cur.name : (poolKey || "…");
   $("pool-dot").className = "sdot " + (cur ? poolState(cur).cls : "");
   $("pool-btn").title = cur ? cur.path : "";
-  document.title = (cur ? cur.name + " · " : "") + "Mesh console";
+  document.title = (cur && !route().home ? cur.name + " · " : "") + "Agent Mesh";
   const others = pools.filter(p => p.key !== poolKey && p.ready && (p.needs_you || p.errors));
   const elsewhere = $("elsewhere");
   elsewhere.hidden = !others.length;
@@ -769,7 +1571,7 @@ function renderMenu() {
     if (p.ready && p.pending && st.cls === "red") facts.append(el("span", "pill", p.pending + " waiting"));
     if (p.sessions) facts.append(el("span", "pill on", plural(p.sessions, "session")));
     if (p.warnings && !p.errors) facts.append(el("span", "pill", plural(p.warnings, "warning")));
-    if (p.upgrade) facts.append(el("span", "pill", "upgrade available"));
+    if (p.upgrade) facts.append(el("span", "pill", "needs upgrade"));
     body.append(facts);
     o.append(body);
     o.addEventListener("click", () => choosePool(p.key));
@@ -781,8 +1583,8 @@ function openMenu(open) {
   $("pool-menu").hidden = !open;
   $("pool-btn").setAttribute("aria-expanded", String(open));
   if (open) {
-    // On a phone the menu is fixed to the gutters, just below the button.
-    $("pool-menu").style.top = matchMedia("(max-width: 600px)").matches ? ($("pool-btn").getBoundingClientRect().bottom + 6) + "px" : "";
+    // On a phone the menu is fixed to the gutters, just above the button.
+    $("pool-menu").style.bottom = matchMedia("(max-width: 600px)").matches ? (innerHeight - $("pool-btn").getBoundingClientRect().top + 6) + "px" : "";
     renderMenu();
   }
 }
@@ -819,8 +1621,10 @@ document.addEventListener("keydown", (e) => {
 // pools had keys) means the pool on screen. No pool: the last one viewed,
 // else the console's default.
 function route() {
-  let m = /^#\/pool\/([^/]+)(?:\/agent\/(.+))?$/.exec(location.hash);
-  if (m) return { pool: decodeURIComponent(m[1]), agent: m[2] ? decodeURIComponent(m[2]) : null };
+  if (location.hash === "#/settings") return { pool: null, agent: null, settings: true };
+  if (["", "#", "#/"].includes(location.hash)) return { pool: null, agent: null, home: true };
+  let m = /^#\/pool\/([^/]+)(?:\/agent\/([^/]+)(?:\/([a-z]+))?)?$/.exec(location.hash);
+  if (m) return { pool: decodeURIComponent(m[1]), agent: m[2] ? decodeURIComponent(m[2]) : null, section: m[3] || null };
   m = /^#\/agent\/(.+)$/.exec(location.hash);
   return { pool: null, agent: m ? decodeURIComponent(m[1]) : null };
 }
@@ -829,15 +1633,29 @@ function remembered() { try { return localStorage.getItem("pool"); } catch (e) {
 function remember(key) { try { if (key) localStorage.setItem("pool", key); else localStorage.removeItem("pool"); } catch (e) {} }
 
 function render() {
+  const r = route();
   renderSwitcher();
-  if (!snap) return;
+  applyFrame(r);
+  if (!snap) { renderCrumbs(r, null); return; }
+  const m = model();
+  renderCrumbs(r, m);
   $("pool").textContent = snap.pool;
   $("pool").title = snap.pool;
-  $("version").textContent = "meshctl " + snap.version;
-  $("updated").textContent = "updated " + ago(snap.pending.generated);
-  const m = model();
-  const name = route().agent;
-  if (name) renderDetail(m, name); else renderGrid(m);
+  $("version").textContent = "v" + snap.version.replace(/^v/, "");
+  $("version").title = "meshctl " + snap.version;
+  $("updated").textContent = "· " + ago(snap.pending.generated);
+  const kept = keepScroll();
+  const root = $("main");
+  root.replaceChildren();
+  const center = el("div", "center");
+  if (r.settings) { center.dataset.scroll = "center"; center.append(...settingsPage()); }
+  else if (r.home) { center.dataset.scroll = "center"; center.append(...homePage()); }
+  else if (r.agent) { center.classList.add("has-page"); renderDetail(m, r.agent, r.section, center); }
+  else { center.dataset.scroll = "center"; center.append(...(layout === "workspace" ? poolOverview(m) : poolGrid(m))); }
+  if (document.body.classList.contains("ws")) root.append(wsLeft(m, r));
+  root.append(center);
+  renderFooterStats(m);
+  restoreScroll(kept);
 }
 
 function onRoute() {
@@ -853,8 +1671,13 @@ function onRoute() {
 }
 
 window.addEventListener("hashchange", onRoute);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && route().agent && !$("item").open && !$("viewer").open && !$("repair").open) location.hash = poolHash(); });
-setInterval(() => { if (snap) $("updated").textContent = "updated " + ago(snap.pending.generated); }, 1000);
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || $("item").open || $("viewer").open || $("repair").open || $("upgrade").open) return;
+  if (document.body.classList.contains("left-open")) { document.body.classList.remove("left-open"); return; }
+  const r = route();
+  if (r.section) location.hash = agentHash(r.agent); else if (r.agent) location.hash = poolHash();
+});
+setInterval(() => { if (snap) $("updated").textContent = "· " + ago(snap.pending.generated); }, 1000);
 
 function setLive(live, text) {
   $("dot").classList.toggle("live", live);
@@ -881,7 +1704,12 @@ function connect() {
     if (!pools.some(p => p.key === next.pool_key)) { poolGone(); return; }
     remember(poolKey);
     if (!next.pending || !next.pending.agents) { renderSwitcher(); return; } // the empty frame before the first compute
+    // A console restarted underneath the page: new page code after an
+    // update, else fresh document links (they are signed per process).
+    if (snap && next.version !== snap.version) { location.reload(); return; }
+    if (snap && next.boot !== snap.boot) Object.assign(agentData, { docsSig: null, viewAt: 0 });
     snap = next;
+    applySettings(next.console);
     setLive(true, "live");
     // Re-rendering replaces the page; keep the reader's place.
     const y = window.scrollY;

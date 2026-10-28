@@ -31,3 +31,25 @@ The console is read-only (ADR-0077). Doctor marks the findings it can repair its
 - Positive: the person clears doctor's routine drift from the page, without an agent session.
 - Negative: anything holding the console token can trigger the repairs. Agents can read the token (ADR-0077), but any agent can already run `meshctl doctor --fix`, so this grants nothing new.
 - Negative: the console is no longer strictly read-only; the README and ADR-0077 say so.
+
+## Amendment (2026-10-28, v1.10.0): the console saves its own settings in the pool repo
+
+The console's settings (layout, agent order, the attention filter) are per pool and live in the pool repo, so a pool cloned on another machine opens the same way. Browser storage kept them on one machine only.
+
+- **A file of its own.** `pool/console.yaml`, beside `config.yaml`. The console never writes `config.yaml`, which meshctl never rewrites (ADR-0066).
+- **Committed, never pushed.** `POST /api/settings?pool=` writes the file and commits only that path in the pool repo, with the person's git identity, like `pool upgrade`; anything else uncommitted is left alone. Pushing stays with the person. "Apply to every pool" writes and commits the same settings in each pool the console serves.
+- **The pool on screen decides.** Each snapshot carries its pool's settings; a pool without the file gets the defaults (Classic, activity order, every agent shown). Which sidebars are open and the footer's filter stay in the browser: they are view state, not settings.
+- **Guarded like every POST.** An agent holding the token could change how the console looks for a pool, nothing more.
+
+This is the console's second change to a pool. Each further one still needs its own decision.
+
+## Amendment (2026-10-28, v1.10.0): the console can upgrade a pool
+
+A pool whose last `pool upgrade` ran with an older meshctl shows **Needs upgrade** on Home, with an Upgrade button there and in the pool's footer. Before, the upgrade meant asking an agent to run one command.
+
+- **Preview first.** The button runs `meshctl pool upgrade --check` for that pool and shows its output: the doctrine diff, each agent's changes, and the warnings (open sessions, uncommitted changes). Nothing runs until the person confirms. When the check finds nothing to change but the pool's record of its last upgrade is behind, the dialog says so and offers to record the upgrade, which clears the notice.
+- **The same command.** On confirm, `POST /api/pool/upgrade?pool=` runs the console's own binary as `meshctl pool upgrade` in the pool root, so the button and the command never differ. It never passes `--force`: locally edited doctrine gets its `.upstream` copy and the result says it needs a person. Commits happen as the command makes them; nothing is pushed. One upgrade runs at a time per pool.
+- **Then restart.** The result lists the pool's open sessions to restart, each with Bring to front.
+- **Guarded like every POST.** An agent holding the token could start an upgrade, but any agent can already run `meshctl pool upgrade`, so the button grants nothing new.
+
+This is the console's third change to a pool.

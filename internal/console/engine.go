@@ -44,6 +44,7 @@ type Snapshot struct {
 	Notices   []Notice               `json:"notices"`
 	Sessions  []SessionReport        `json:"sessions"`
 	Agents    []AgentInfo            `json:"agents"`
+	Console   mesh.ConsoleSettings   `json:"console"` // how the console looks for this pool (pool/console.yaml)
 }
 
 // Notice is a pool-level message (ticket 06): not any one peer's work.
@@ -62,8 +63,9 @@ type Engine struct {
 	snap Snapshot
 	subs map[chan []byte]struct{}
 
-	recheck chan struct{}
-	fixing  sync.Mutex // one doctor repair at a time
+	recheck   chan struct{}
+	fixing    sync.Mutex // one doctor repair at a time
+	upgrading sync.Mutex // one pool upgrade at a time
 
 	// OnUpdate, when set before Run, is called after each new snapshot is
 	// published (outside the engine's lock): the hub's cue to tell every
@@ -168,7 +170,10 @@ func (e *Engine) RefreshPending() {
 	}
 	sessions := Sessions(e.dir, now)
 	roster := Roster(e.dir)
-	e.update(func(s *Snapshot) { s.Pending, s.Notices, s.Sessions, s.Agents = rep, notices, sessions, roster })
+	console := mesh.ReadConsoleSettings(e.dir)
+	e.update(func(s *Snapshot) {
+		s.Pending, s.Notices, s.Sessions, s.Agents, s.Console = rep, notices, sessions, roster, console
+	})
 }
 
 // Fix applies doctor's automatic repairs, as `meshctl doctor --fix` does,

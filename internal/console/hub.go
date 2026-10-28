@@ -30,6 +30,9 @@ type PoolSummary struct {
 	Ready    bool   `json:"ready"`     // pending computed at least once
 	Pending  int    `json:"pending"`   // items waiting, across peers
 	NeedsYou int    `json:"needs_you"` // peers with KB branches or conflicts
+	Waiting  int    `json:"waiting"`   // other peers with work for the person (a phrase to say, or read-back)
+	Agents   int    `json:"agents"`
+	Jobs     int    `json:"jobs"` // scheduled jobs across open sessions
 	Errors   int    `json:"errors"`
 	Warnings int    `json:"warnings"`
 	Sessions int    `json:"sessions"`
@@ -43,6 +46,9 @@ type Frame struct {
 	Snapshot
 	PoolKey string        `json:"pool_key"`
 	Pools   []PoolSummary `json:"pools"`
+	// Boot is new each time the console starts. Document links are signed
+	// per process (ADR-0078), so a page that sees it change refetches them.
+	Boot string `json:"boot"`
 }
 
 // PoolRef is a pool the hub serves: its key in URLs, name and root.
@@ -57,6 +63,7 @@ var ErrNoPool = errors.New("no such pool in this console")
 type Hub struct {
 	start   string // the pool the console was started from; "" outside one
 	version string
+	boot    string
 	// Entries lists the registered pools; tests replace it.
 	Entries func() ([]mesh.PoolEntry, error)
 
@@ -80,7 +87,7 @@ type hubSub struct {
 // NewHub prepares a hub; start is the pool the console opens on ("" for the
 // first registered pool).
 func NewHub(start, version string) *Hub {
-	return &Hub{start: start, version: version, Entries: mesh.RegisteredPools,
+	return &Hub{start: start, version: version, boot: strconv.FormatInt(time.Now().UnixNano(), 36), Entries: mesh.RegisteredPools,
 		pools: map[string]*hubPool{}, subs: map[*hubSub]struct{}{}}
 }
 
@@ -268,7 +275,7 @@ func (h *Hub) frameLocked(key string) (Frame, bool) {
 	if key == "" {
 		key = h.defaultKeyLocked()
 	}
-	f := Frame{PoolKey: key, Pools: []PoolSummary{}}
+	f := Frame{PoolKey: key, Pools: []PoolSummary{}, Boot: h.boot}
 	found := false
 	for _, r := range h.refs {
 		p, ok := h.pools[r.Path]
@@ -286,15 +293,18 @@ func (h *Hub) frameLocked(key string) (Frame, bool) {
 
 // Summarize is a pool's switcher line from its snapshot.
 func Summarize(r PoolRef, s Snapshot) PoolSummary {
-	ps := PoolSummary{Key: r.Key, Name: r.Name, Path: r.Path, Ready: s.Pending.Agents != nil, Sessions: len(s.Sessions)}
+	ps := PoolSummary{Key: r.Key, Name: r.Name, Path: r.Path, Ready: s.Pending.Agents != nil, Sessions: len(s.Sessions), Agents: len(s.Agents)}
 	for _, a := range s.Pending.Agents {
 		ps.Pending += a.Total
-		for _, l := range a.Lines {
-			if l.Kind == "kb-branches" || l.Kind == "conflicts" {
-				ps.NeedsYou++
-				break
-			}
+		switch agentAttention(a) {
+		case attentionNeedsYou:
+			ps.NeedsYou++
+		case attentionWaiting:
+			ps.Waiting++
 		}
+	}
+	for _, se := range s.Sessions {
+		ps.Jobs += len(se.Jobs)
 	}
 	if s.Doctor != nil {
 		for _, f := range s.Doctor.Findings {

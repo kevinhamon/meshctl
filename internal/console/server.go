@@ -97,7 +97,9 @@ func (s Settings) URL() string {
 // that changes something (the re-check) must also come from the console's
 // own page. With a hub, ?pool=<key> picks the pool; none means the default.
 type Server struct {
-	Hub      *Hub
+	Hub *Hub
+	// Run runs the installed meshctl for the Upgrade button; nil runs this binary.
+	Run      Runner
 	Engine   *Engine
 	Settings Settings
 	UI       http.Handler // the page (ticket 04); nil serves a placeholder
@@ -127,6 +129,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/item", s.item)
 	mux.HandleFunc("POST /api/doctor/recheck", s.recheck)
 	mux.HandleFunc("POST /api/doctor/fix", s.fix)
+	mux.HandleFunc("POST /api/settings", s.saveSettings)
+	mux.HandleFunc("POST /api/pool/upgrade/check", s.upgradeCheck)
+	mux.HandleFunc("POST /api/pool/upgrade", s.upgrade)
 	mux.HandleFunc("POST /api/focus", s.focus)
 	mux.HandleFunc("GET /api/docs", s.docs)
 	mux.HandleFunc("GET /api/agent", s.agentView)
