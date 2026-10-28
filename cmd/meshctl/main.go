@@ -157,6 +157,7 @@ func rootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.SetVersionTemplate("meshctl {{.Version}}\n")
+	root.SetUsageTemplate(root.UsageTemplate() + "\nFriction, a gap, a bug or an idea? https://github.com/kevinhamon/meshctl/issues/new/choose\n")
 	root.AddCommand(
 		versionCmd(), updateCmd(),
 		// Resource groups (noun → verb).
@@ -1440,7 +1441,7 @@ func memoryCmd() *cobra.Command {
 
 	rebuild := &cobra.Command{
 		Use:   "rebuild",
-		Short: "Scan knowledge/ + agent.yaml; write .memory/index.json (atomic, pure rebuild)",
+		Short: "Remove a leftover .memory/index.json; recall is computed live",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {

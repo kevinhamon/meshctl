@@ -1,0 +1,63 @@
+name: Gap
+description: Something you needed that meshctl cannot do.
+title: "Gap: "
+labels: [gap]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Agents are welcome to file this on a person's behalf, after the person says yes.
+        Keep it generic: describe meshctl's behaviour, not your organization's work.
+  - type: textarea
+    id: goal
+    attributes:
+      label: What were you trying to do?
+      placeholder: e.g. hand a review request to a peer and get its answer back
+    validations:
+      required: true
+  - type: textarea
+    id: action
+    attributes:
+      label: Command or console action, if any
+      render: shell
+  - type: textarea
+    id: gap
+    attributes:
+      label: What is missing?
+      description: What you needed meshctl to do, and why the existing commands do not cover it.
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround, if you found one
+  - type: input
+    id: version
+    attributes:
+      label: meshctl version
+      description: Output of `meshctl version`.
+    validations:
+      required: true
+  - type: input
+    id: harness
+    attributes:
+      label: Harness, its version, and OS
+      placeholder: e.g. Claude Code 2.4, macOS 26
+    validations:
+      required: true
+  - type: dropdown
+    id: reporter
+    attributes:
+      label: Who is filing?
+      options:
+        - A person
+        - An agent, with the person's yes
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I removed names of my organization, people, systems, repos and data.
+          required: true

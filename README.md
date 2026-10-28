@@ -38,7 +38,7 @@ command you approve.
 
 ## Install
 
-Requires Go 1.22+ (to build) or a release binary. Any of:
+Requires Go 1.26+ (to build) or a release binary. Any of:
 
 ```sh
 # 1. go install (module path is the repo — no manual download)
@@ -105,6 +105,7 @@ existing pool with `meshctl agent bootstrap`.
 
 ```
 meshctl pool    init [path] | upgrade [--check] [--force] [--doctrine-only] | list | teardown [--purge --yes] [--dry-run]
+                register [path] | forget <name|path> | migrate   # machine registry; legacy layout
 meshctl agent   new <name> | onboard <name|path> | bootstrap | list | identity | brief --agent <peer> [--request <id>]
 meshctl msg     ask <target> <type> "…" [--in-session [--work] | --detach] | send <target> <type> "…"
 meshctl inbox   list [--all] | next [--claim] | claim <id> | release <id>   # list: open queue, priority then age
@@ -125,7 +126,8 @@ meshctl state   show | template | set --summary-file <summary>   (the ≤40-line
 meshctl intuition recall "<q>"
 meshctl hook    session-start | user-prompt | session-beat | session-end | pre-tool-use | post-tool-use | status-line   (wired per-agent; not run by hand)
 meshctl doctor  [--fix] [--json]     # manifests, wiring, KB consistency, pool hygiene
-meshctl console [--open] [--print-url] | install | uninstall   # live view of this machine's pools on localhost
+meshctl console [--open] [--print-url] [--port N] | install | uninstall   # live view of this machine's pools on localhost
+meshctl update  [--check] [--version vX.Y.Z] [--force] | version
 meshctl ask … | send …               (top-level aliases for msg ask|send)
 ```
 
@@ -405,19 +407,28 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
 |------|------|
 | `cmd/meshctl/` | CLI entrypoint (cobra). |
 | `internal/mesh/` | Core: manifests, directory, intake/dispatch, concurrency (sessions/claims/kb worktrees), cognition (memory/recall/episodic/handoff/intuition), harness adapters, pool init. |
+| `internal/console/` | `meshctl console`: the localhost server and its single-page UI (`ui/index.html`, design notes in `ui/DESIGN.md`). |
+| `internal/selfupdate/` | `meshctl update` and the once-a-day release check. |
 | `internal/mesh/templates/` | Embedded (`go:embed`) source, edited in place: agent scaffold, skills (`mesh-cognition`, `mesh-steward`), steward CLAUDE.md, and the doctrine (`templates/doctrine/{agent-comms,distiller}.md`) the binary emits into each pool. |
 | `docs/` | Human docs: `DESIGN.md` (why it's built this way), `build-spec.md` (what to build), `knowledge-and-memory.md` (the cognition design brief). |
 | `Taskfile.yaml` | `task install` / `build`. |
 
 ## Conventions
 
-- A pool is a plain container of workspaces — not itself a git repo. `meshctl` and each
-  agent are independent repos cloned into it; `pool/` (doctrine, glossary, config) is its
-  own git repo. Runtime artifacts (`pool/dispatch.*`, `pool/worktrees/`, `.sessions/`,
+- A pool is a plain container of workspaces — not itself a git repo. Each agent is its
+  own repo in the pool, and `pool/` (doctrine, glossary, config) is its own git repo. Runtime artifacts (`pool/dispatch.*`, `pool/worktrees/`, `.sessions/`,
   `.memory/`) are git-ignored.
 - Prefer SSH git remotes.
 - A change to what a harness can do updates `internal/mesh/parity.go` in the same commit:
   every command is classified there, and the README table above is generated from it.
+
+## Feedback
+
+Hit friction, a missing capability, a bug, or have an idea? Open an issue with the matching
+form at <https://github.com/kevinhamon/meshctl/issues/new/choose>: **Friction**, **Gap**,
+**Suggestion** or **Bug**. Agents may file on a person's behalf once the person says yes;
+the shipped doctrine tells them how. Describe meshctl's behaviour only, not your
+organization's work. `meshctl --help` ends with the same link.
 
 ## Versioning
 

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: How meshctl works
+    url: https://github.com/kevinhamon/meshctl#readme
+    about: Commands, concepts and the confirmation flow.

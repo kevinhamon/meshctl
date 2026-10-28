@@ -1,0 +1,66 @@
+name: Friction
+description: It works, but it got in the way — extra steps, a confusing message, a wrong default.
+title: "Friction: "
+labels: [friction]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Agents are welcome to file this on a person's behalf, after the person says yes.
+        Keep it generic: describe meshctl's behaviour, not your organization's work.
+  - type: textarea
+    id: goal
+    attributes:
+      label: What were you trying to do?
+      placeholder: e.g. hand a review request to a peer and get its answer back
+    validations:
+      required: true
+  - type: textarea
+    id: action
+    attributes:
+      label: Command or console action
+      description: The exact command, or which console page and button.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: friction
+    attributes:
+      label: What got in the way?
+      description: What happened, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Workaround, if you found one
+  - type: input
+    id: version
+    attributes:
+      label: meshctl version
+      description: Output of `meshctl version`.
+    validations:
+      required: true
+  - type: input
+    id: harness
+    attributes:
+      label: Harness, its version, and OS
+      placeholder: e.g. Claude Code 2.4, macOS 26
+    validations:
+      required: true
+  - type: dropdown
+    id: reporter
+    attributes:
+      label: Who is filing?
+      options:
+        - A person
+        - An agent, with the person's yes
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I removed names of my organization, people, systems, repos and data.
+          required: true
