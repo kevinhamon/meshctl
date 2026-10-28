@@ -8,7 +8,7 @@ How the engineering skills should consume this repo's domain documentation when 
 - **`GLOSSARY-MAP.md`** at the repo root if it exists: it points at one `GLOSSARY.md` per context. Read each one relevant to the topic.
 - **`docs/decisions/`**: read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/decisions/` for context-scoped decisions.
 
-In this repo, ADRs live in `docs/decisions/`, not `docs/adr/`. New ADRs copy `docs/decisions/template.md`, continue the numbering from the next free number listed in `docs/decisions/README.md` (gaps are historical), and add a row to that README's index.
+In this repo, ADRs live in `docs/decisions/`, not `docs/adr/`. That folder is private: the public mirror never carries it, so write ADRs as the maintainer's record and keep public docs readable without them. New ADRs copy `docs/decisions/template.md`, continue the numbering from the next free number listed in `docs/decisions/README.md` (gaps are historical), and add a row to that README's index.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 

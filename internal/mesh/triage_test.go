@@ -239,7 +239,7 @@ func TestTriageWorksheet_KnowledgeSignal(t *testing.T) {
 	r := triageAsk(t, arch, "developer", "guidance", "decide the retry policy", nil, triageDaysAgo(4))
 	other := triageAsk(t, arch, "analyst", "guidance", "pick the metrics store", nil, triageDaysAgo(4))
 	// A Confirm: commit on the peer's own main naming the id.
-	gitOut(t, arch.Dir(), "commit", "-q", "--allow-empty", "-m", ConfirmSubjectPrefix+"retry policy settled", "-m", "Closes "+r.ID)
+	gitOut(t, arch.Dir(), "commit", "-q", "--allow-empty", "-m", ConfirmSubjectPrefix+"retry policy circulated", "-m", "Closes "+r.ID)
 	sha := strings.TrimSpace(gitOut(t, arch.Dir(), "rev-parse", "--short", "HEAD"))
 	// A canonical peer's knowledge entry body naming the other id.
 	entry := filepath.Join(dev.Dir(), KnowledgeDir, "decisions", "metrics.md")
@@ -259,7 +259,7 @@ func TestTriageWorksheet_KnowledgeSignal(t *testing.T) {
 	}
 
 	_, text := worksheetFor(t, dir, arch)
-	if s := triageSection(t, text, r.ID); !strings.Contains(s, "architect@"+sha) || !strings.Contains(s, "retry policy settled") {
+	if s := triageSection(t, text, r.ID); !strings.Contains(s, "architect@"+sha) || !strings.Contains(s, "retry policy circulated") {
 		t.Errorf("Confirm: commit not listed with pointer:\n%s", s)
 	}
 	s := triageSection(t, text, other.ID)
@@ -326,7 +326,7 @@ func TestTriageWorksheet_RedirectChainEndingClosed(t *testing.T) {
 
 func TestTriageWorksheet_RequesterMentions(t *testing.T) {
 	dir, arch, dev, _ := triagePool(t)
-	r := triageAsk(t, arch, "developer", "guidance", "settle the billing retry policy", nil, triageDaysAgo(4))
+	r := triageAsk(t, arch, "developer", "guidance", "circulate the billing retry policy", nil, triageDaysAgo(4))
 	if err := HandoffSet(dev, "## Now\n\n- waiting on "+r.ID+" from architect\n- unrelated line\n", triageNow); err != nil {
 		t.Fatal(err)
 	}

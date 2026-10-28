@@ -242,9 +242,9 @@ func TestWorkBrief_PromotionEndsInNeedsConfirm(t *testing.T) {
 // shown, with the summary, in its response body and in the gate's deny.
 func TestNeedsConfirm_CarriesRelatedEntries(t *testing.T) {
 	p := newRelatedPool(t, nil)
-	commitKBBody(t, p.wt, map[string]string{"architecture/settlement-window.md": "# Settlement window\n\nDaily.\n"})
-	sum := writeSummary(t, p.arch, "sess-1", settlementSummary)
-	const related = "mesh://market/architecture/settlement-rules.md — Settlement window rules"
+	commitKBBody(t, p.wt, map[string]string{"architecture/circulation-window.md": "# Circulation window\n\nDaily.\n"})
+	sum := writeSummary(t, p.arch, "sess-1", circulationSummary)
+	const related = "mesh://lending/architecture/circulation-rules.md — Circulation window rules"
 
 	_, err := KBFinish(p.root, p.arch, "sess-1", KBFinishOptions{Headless: true, SummaryFile: sum, Now: finishNow})
 	var nc *KBNeedsConfirmError

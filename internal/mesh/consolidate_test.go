@@ -108,17 +108,17 @@ func TestADRFrontmatterMigration_AdditiveAndIdempotent(t *testing.T) {
 
 func TestRecall_TiersAndSupersededDropped(t *testing.T) {
 	dir := meshRoot(t)
-	a := newTestAgent(t, dir, "grid-expert", true, nil)
-	writeKB(t, a, "decisions/0001-settlement-window.md", "---\nstatus: superseded\nsuperseded_by: [2]\n---\n# 0001. Settlement window is weekly\n")
-	writeKB(t, a, "decisions/0002-settlement-window-daily.md", "---\nstatus: accepted\nsupersedes: [1]\n---\n# 0002. Settlement window is daily\n")
-	writeKB(t, a, "architecture/settlement.md", "# Settlement window\n\nDaily since 0002. The warehouse exposes it as a view.\n")
-	writeKB(t, a, "candidates/settlement-window-idea.md", "# Settlement window idea\n")
-	writeKB(t, a, "handoff.md", "## Current State\nsettlement window WIP\n")
+	a := newTestAgent(t, dir, "catalog-expert", true, nil)
+	writeKB(t, a, "decisions/0001-circulation-window.md", "---\nstatus: superseded\nsuperseded_by: [2]\n---\n# 0001. Circulation window is weekly\n")
+	writeKB(t, a, "decisions/0002-circulation-window-daily.md", "---\nstatus: accepted\nsupersedes: [1]\n---\n# 0002. Circulation window is daily\n")
+	writeKB(t, a, "architecture/circulation.md", "# Circulation window\n\nDaily since 0002. The depot exposes it as a view.\n")
+	writeKB(t, a, "candidates/circulation-window-idea.md", "# Circulation window idea\n")
+	writeKB(t, a, "handoff.md", "## Current State\ncirculation window WIP\n")
 	// Confirmed entries (ADR-0067): without a ledger every hit would rank in
 	// the one unconfirmed slot and the tier order would not show.
-	confirmKB(t, a, "architecture/settlement.md", "decisions/0002-settlement-window-daily.md")
+	confirmKB(t, a, "architecture/circulation.md", "decisions/0002-circulation-window-daily.md")
 
-	hits, err := Recall(a, "settlement window", 20)
+	hits, err := Recall(a, "circulation window", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,9 +148,9 @@ func TestRecall_TiersAndSupersededDropped(t *testing.T) {
 	if sawHandoff {
 		t.Fatalf("handoff headings must not be topics: %+v", hits)
 	}
-	if tierOf["knowledge/architecture/settlement.md"] != TierCurrent ||
-		tierOf["knowledge/decisions/0002-settlement-window-daily.md"] != TierLog ||
-		tierOf["knowledge/candidates/settlement-window-idea.md"] != TierInbox {
+	if tierOf["knowledge/architecture/circulation.md"] != TierCurrent ||
+		tierOf["knowledge/decisions/0002-circulation-window-daily.md"] != TierLog ||
+		tierOf["knowledge/candidates/circulation-window-idea.md"] != TierInbox {
 		t.Fatalf("tiers: %+v", tierOf)
 	}
 	if first != TierCurrent {
@@ -158,7 +158,7 @@ func TestRecall_TiersAndSupersededDropped(t *testing.T) {
 	}
 
 	// Bodies: only current-tier hits are inlined, within the budget.
-	withBodies, err := RecallWithBodies(a, "settlement window", 20, 200)
+	withBodies, err := RecallWithBodies(a, "circulation window", 20, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestRecall_TiersAndSupersededDropped(t *testing.T) {
 		t.Fatalf("markdown:\n%s", md)
 	}
 	// Zero budget ⇒ pointers only.
-	plain, _ := RecallWithBodies(a, "settlement window", 20, 0)
+	plain, _ := RecallWithBodies(a, "circulation window", 20, 0)
 	for _, h := range plain {
 		if h.Body != "" {
 			t.Fatal("budget 0 must not inline bodies")
@@ -186,11 +186,11 @@ func TestRecall_TiersAndSupersededDropped(t *testing.T) {
 
 func TestStateLintAndSet(t *testing.T) {
 	dir := meshRoot(t)
-	a := newTestAgent(t, dir, "warehouse", true, nil)
+	a := newTestAgent(t, dir, "depot", true, nil)
 	if p := StateLint(StateTemplate); len(p) < 1 || !strings.Contains(strings.Join(p, " "), "placeholder") {
 		t.Fatalf("template must fail lint: %v", p)
 	}
-	good := "## Now\nAll loads are MERGE on object key.\n\n## Active\n- none\n\n## Recently decided\n- ADR-0002 daily settlement window\n\n## Open questions\n- none\n"
+	good := "## Now\nAll imports are upserts on object key.\n\n## Active\n- none\n\n## Recently decided\n- ADR-0002 daily circulation window\n\n## Open questions\n- none\n"
 	if p := StateLint(good); len(p) != 0 {
 		t.Fatalf("good body: %v", p)
 	}
@@ -206,7 +206,7 @@ func TestStateLintAndSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, _ := StateShow(a)
-	if !strings.HasPrefix(s, "<!-- meshctl state — warehouse updated 2026-10-14T01:00:00Z") || !strings.Contains(s, "## Now") {
+	if !strings.HasPrefix(s, "<!-- meshctl state — depot updated 2026-10-14T01:00:00Z") || !strings.Contains(s, "## Now") {
 		t.Fatalf("state file:\n%s", s)
 	}
 	// Re-setting from `show` output does not stack headers.
@@ -217,7 +217,7 @@ func TestStateLintAndSet(t *testing.T) {
 	if strings.Count(s2, "<!-- meshctl state") != 1 {
 		t.Fatalf("header stacked:\n%s", s2)
 	}
-	if blk := StateBlock(a); !strings.HasPrefix(blk, "# Current state — digest") || !strings.Contains(blk, "MERGE on object key") {
+	if blk := StateBlock(a); !strings.HasPrefix(blk, "# Current state — digest") || !strings.Contains(blk, "upserts on object key") {
 		t.Fatalf("block:\n%s", blk)
 	}
 	// Session start injects the digest ahead of the handoff.
@@ -239,13 +239,13 @@ func TestStateLintAndSet(t *testing.T) {
 
 func TestKBConsolidate_DebtAndDoctor(t *testing.T) {
 	dir := meshRoot(t)
-	a := newTestAgent(t, dir, "warehouse", true, nil)
+	a := newTestAgent(t, dir, "depot", true, nil)
 	now := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
 	old := now.Add(-30 * 24 * time.Hour)
 
 	// Accepted decision dated today that updates a doc last touched a month ago.
-	writeKB(t, a, "decisions/0003-merge-on-key.md", "---\nstatus: accepted\ndate: 2026-10-14\nupdates: [architecture/loads.md]\n---\n# 0003. Merge on key\n")
-	loads := writeKB(t, a, "architecture/loads.md", "# Loads\nold text\n")
+	writeKB(t, a, "decisions/0003-upsert-on-key.md", "---\nstatus: accepted\ndate: 2026-10-14\nupdates: [architecture/imports.md]\n---\n# 0003. Upsert on key\n")
+	loads := writeKB(t, a, "architecture/imports.md", "# Imports\nold text\n")
 	_ = os.Chtimes(loads, old, old)
 	// A bullet-only decision (needs frontmatter) and a broken superseded link.
 	writeKB(t, a, "decisions/0001-old.md", "# 0001. Old\n- **Status:** superseded by ADR-0099\n")
@@ -264,7 +264,7 @@ func TestKBConsolidate_DebtAndDoctor(t *testing.T) {
 	if len(r.NoFrontmatter) != 1 || r.NoFrontmatter[0] != "decisions/0001-old.md" {
 		t.Fatalf("no-frontmatter: %+v", r.NoFrontmatter)
 	}
-	if len(r.Unlanded) != 1 || !strings.Contains(r.Unlanded[0], "ADR-0003") || !strings.Contains(r.Unlanded[0], "architecture/loads.md") {
+	if len(r.Unlanded) != 1 || !strings.Contains(r.Unlanded[0], "ADR-0003") || !strings.Contains(r.Unlanded[0], "architecture/imports.md") {
 		t.Fatalf("unlanded: %+v", r.Unlanded)
 	}
 	if !r.StateMissing || len(r.NotInDigest) != 1 || !strings.Contains(r.NotInDigest[0], "ADR-0003") {
@@ -290,13 +290,13 @@ func TestKBConsolidate_DebtAndDoctor(t *testing.T) {
 	}
 	var text []string
 	for _, f := range findings {
-		if f.Agent == "warehouse" {
+		if f.Agent == "depot" {
 			text = append(text, f.Level+": "+f.Message)
 		}
 	}
 	all := strings.Join(text, "\n")
 	for _, want := range []string{
-		"error: decisions/0003-merge-on-key.md (accepted) updates architecture/loads.md",
+		"error: decisions/0003-upsert-on-key.md (accepted) updates architecture/imports.md",
 		"warn: no knowledge/state.md digest",
 		"warn: 1 candidate(s) older than 14 days",
 		"warn: knowledge/handoff.md: ",
@@ -327,7 +327,7 @@ func TestKBConsolidate_DebtAndDoctor(t *testing.T) {
 
 	// Landing the decision (touch the doc) and writing the digest clears those items.
 	_ = os.Chtimes(loads, now, now)
-	if err := StateSet(a, "## Now\nMERGE on key.\n\n## Active\n- none\n\n## Recently decided\n- ADR-0003 merge on key\n\n## Open questions\n- none\n", now.Add(time.Hour)); err != nil {
+	if err := StateSet(a, "## Now\nUpsert on key.\n\n## Active\n- none\n\n## Recently decided\n- ADR-0003 upsert on key\n\n## Open questions\n- none\n", now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	r3 := KBConsolidate(a, now)
@@ -337,7 +337,7 @@ func TestKBConsolidate_DebtAndDoctor(t *testing.T) {
 	// The only error left is the deliberately broken superseded link.
 	findings, _ = Doctor(dir)
 	for _, f := range findings {
-		if f.Agent == "warehouse" && f.Level == "error" && !strings.Contains(f.Message, "0001-old.md") {
+		if f.Agent == "depot" && f.Level == "error" && !strings.Contains(f.Message, "0001-old.md") {
 			t.Fatalf("unexpected error after landing: %s", f.Message)
 		}
 	}
@@ -345,7 +345,7 @@ func TestKBConsolidate_DebtAndDoctor(t *testing.T) {
 
 func TestDoctor_CleanKBHasNoS1Noise(t *testing.T) {
 	dir := meshRoot(t)
-	a := newTestAgent(t, dir, "warehouse", true, nil)
+	a := newTestAgent(t, dir, "depot", true, nil)
 	// A fresh agent (no decisions/, no architecture/) gets no state-digest nag.
 	findings, _ := Doctor(dir)
 	for _, f := range findings {

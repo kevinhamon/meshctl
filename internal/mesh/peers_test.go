@@ -17,7 +17,7 @@ func peerPool(t *testing.T) (dir string, caller *Agent) {
 	dir = meshRoot(t)
 	caller = newTestAgent(t, dir, "developer", false, []string{"code"})
 	newTestAgent(t, dir, "architect", true, nil)
-	newTestAgent(t, dir, "grid-expert", true, nil)
+	newTestAgent(t, dir, "catalog-expert", true, nil)
 	newTestAgent(t, dir, "pm", false, []string{"tracker"})
 	return dir, caller
 }
@@ -29,7 +29,7 @@ func TestPeers_RenderedForDispatchablePeersOnly(t *testing.T) {
 	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{"architect", "grid-expert"} {
+	for _, p := range []string{"architect", "catalog-expert"} {
 		if !fileExists(PeerAgentFile(caller.Dir(), p)) {
 			t.Fatalf("missing peer definition for %s", p)
 		}
@@ -94,8 +94,8 @@ func TestPeers_RosterChangeRefreshesAndRemoves(t *testing.T) {
 	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	// grid-expert stops being dispatchable → its definition is removed.
-	mp := ManifestPath(dir, "grid-expert")
+	// catalog-expert stops being dispatchable → its definition is removed.
+	mp := ManifestPath(dir, "catalog-expert")
 	b, _ := os.ReadFile(mp)
 	_ = os.WriteFile(mp, []byte(strings.Replace(string(b), "dispatchable: true", "dispatchable: false", 1)), 0o644)
 	// architect's title changes → its definition is refreshed.
@@ -104,9 +104,9 @@ func TestPeers_RosterChangeRefreshesAndRemoves(t *testing.T) {
 	_ = os.WriteFile(mp, []byte(strings.Replace(string(b), "architect title", "Chief Architect", 1)), 0o644)
 
 	plan := PlanPeerAgents(dir, caller.Dir())
-	// grid-expert loses both definitions (no longer dispatchable, not mutating);
+	// catalog-expert loses both definitions (no longer dispatchable, not mutating);
 	// architect's consult and work definitions both carry the title.
-	if strings.Join(plan.Remove, ",") != "grid-expert,grid-expert-work" || strings.Join(plan.Update, ",") != "architect,architect-work" {
+	if strings.Join(plan.Remove, ",") != "catalog-expert,catalog-expert-work" || strings.Join(plan.Update, ",") != "architect,architect-work" {
 		t.Fatalf("plan: %+v", plan)
 	}
 	notes, err := ensurePeerAgents(dir, caller.Dir())
@@ -116,7 +116,7 @@ func TestPeers_RosterChangeRefreshesAndRemoves(t *testing.T) {
 	if len(notes) != 2 {
 		t.Fatalf("notes: %v", notes)
 	}
-	if fileExists(PeerAgentFile(caller.Dir(), "grid-expert")) || fileExists(PeerWorkAgentFile(caller.Dir(), "grid-expert")) {
+	if fileExists(PeerAgentFile(caller.Dir(), "catalog-expert")) || fileExists(PeerWorkAgentFile(caller.Dir(), "catalog-expert")) {
 		t.Fatal("stale definition not removed")
 	}
 	got, _ := os.ReadFile(PeerAgentFile(caller.Dir(), "architect"))
@@ -184,12 +184,12 @@ func TestPeers_UpgradePlanAndDoctorFlagStaleSet(t *testing.T) {
 	dir, caller := peerPool(t)
 	// The caller was scaffolded before its peers existed, so its set is stale.
 	plan := PlanPeerAgents(dir, caller.Dir())
-	if strings.Join(plan.Write, ",") != "architect,architect-work,grid-expert,grid-expert-work,pm-work" {
+	if strings.Join(plan.Write, ",") != "architect,architect-work,catalog-expert,catalog-expert-work,pm-work" {
 		t.Fatalf("want consult+work for dispatchable peers and work for pm, got %+v", plan)
 	}
 	ap := planAgent(caller, time.Now())
 	joined := strings.Join(ap.Actions, "\n")
-	if !strings.Contains(joined, "write in-session peer subagents: mesh-architect, mesh-architect-work, mesh-grid-expert, mesh-grid-expert-work, mesh-pm-work") {
+	if !strings.Contains(joined, "write in-session peer subagents: mesh-architect, mesh-architect-work, mesh-catalog-expert, mesh-catalog-expert-work, mesh-pm-work") {
 		t.Fatalf("upgrade plan missing peer actions: %v", ap.Actions)
 	}
 	found := false
@@ -204,7 +204,7 @@ func TestPeers_UpgradePlanAndDoctorFlagStaleSet(t *testing.T) {
 	if _, err := UpgradeAgents(dir); err != nil {
 		t.Fatal(err)
 	}
-	for _, a := range []string{"developer", "architect", "grid-expert", "pm"} {
+	for _, a := range []string{"developer", "architect", "catalog-expert", "pm"} {
 		ag, _ := FindAgent(dir, a)
 		if p := PlanPeerAgents(dir, ag.Dir()); !p.Empty() {
 			t.Fatalf("%s still stale after upgrade: %+v", a, p)
@@ -217,7 +217,7 @@ func TestPeers_UpgradePlanAndDoctorFlagStaleSet(t *testing.T) {
 	}
 	// A dispatchable peer gets the OTHER dispatchable peer, never itself.
 	arch, _ := FindAgent(dir, "architect")
-	if fileExists(PeerAgentFile(arch.Dir(), "architect")) || !fileExists(PeerAgentFile(arch.Dir(), "grid-expert")) {
+	if fileExists(PeerAgentFile(arch.Dir(), "architect")) || !fileExists(PeerAgentFile(arch.Dir(), "catalog-expert")) {
 		t.Fatal("peer set for architect wrong")
 	}
 }
@@ -279,7 +279,7 @@ func TestPeers_MutatingPeerGetsWorkDefinitionOnly(t *testing.T) {
 		t.Fatal("mutating peer's description must say delegation needs approval")
 	}
 	got := InstalledPeers(caller.Dir())
-	want := []InstalledPeer{{"architect", true, true}, {"grid-expert", true, true}, {"pm", false, true}}
+	want := []InstalledPeer{{"architect", true, true}, {"catalog-expert", true, true}, {"pm", false, true}}
 	if len(got) != len(want) {
 		t.Fatalf("installed: %+v", got)
 	}

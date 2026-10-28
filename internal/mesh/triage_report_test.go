@@ -14,7 +14,7 @@ func TestTriageReport_ValidatorAcceptsGrammar(t *testing.T) {
 		"# Triage report — architect, 2026-10-18",
 		"",
 		"Consulted:",
-		`- developer: "the queue question is settled, see the ADR"`,
+		`- developer: "the queue question is circulated, see the ADR"`,
 		"",
 		`- 2026-10-01-developer-a · stands · "no supersession signal; checked work branches, knowledge, siblings" · worksheet`,
 		`- 2026-10-02-developer-b · superseded → architect:2026-10-01-developer-a · "same ask, older request" · worksheet siblings`,

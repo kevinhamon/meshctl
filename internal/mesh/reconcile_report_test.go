@@ -18,12 +18,12 @@ func TestReconcileReport_ValidatorAcceptsGrammarAndNamesFailingLines(t *testing.
 ## Entries
 
 - state.md#now · consistent · "All services are Go." (services.yaml)
-- reference/netting.md · conflict → mesh://bravo/reference/netting.md · "we net daily" vs "bravo nets weekly"
-- reference/window.md · conflict → doctrine · "window is ours" vs "the market operator sets the window"
+- reference/renewal.md · conflict → mesh://bravo/reference/renewal.md · "we renew daily" vs "bravo renews weekly"
+- reference/window.md · conflict → doctrine · "window is ours" vs "the lending operator sets the window"
 - reference/fees.md · conflict → owner bravo, pending · "fee is 2%" vs mesh://bravo/reference/fees.md "fee is 3%"
 - playbooks/run.md · judgment · "run it when the queue is empty"
 - experience/slip.md · ungrounded · "the slip cost a day"
-- glossary.md#settlement-window · term-vs-fact · "the netting period is daily"
+- glossary.md#circulation-window · term-vs-fact · "the renewal period is daily"
 `
 	r := ParseReconcileReport(good)
 	if err := r.Err(); err != nil {

@@ -12,9 +12,9 @@ import (
 
 func TestDoctor_FreshPeerHasNoLedgerFindings(t *testing.T) {
 	dir := meshRoot(t)
-	newTestAgent(t, dir, "grid-expert", true, nil)
+	newTestAgent(t, dir, "catalog-expert", true, nil)
 	fs, _ := Doctor(dir)
-	for _, f := range agentFindings(fs, "grid-expert", "") {
+	for _, f := range agentFindings(fs, "catalog-expert", "") {
 		if strings.Contains(f.Message, "unconfirmed") || strings.Contains(f.Message, LedgerFile) {
 			t.Fatalf("a fresh peer (scaffolded READMEs, empty ledger) is clean: %+v", f)
 		}
@@ -23,10 +23,10 @@ func TestDoctor_FreshPeerHasNoLedgerFindings(t *testing.T) {
 
 func TestDoctor_LedgerFindings(t *testing.T) {
 	dir := meshRoot(t)
-	a := newTestAgent(t, dir, "grid-expert", true, nil)
+	a := newTestAgent(t, dir, "catalog-expert", true, nil)
 	writeKB(t, a, "playbooks/release.md", "# Release\n")
 	writeKB(t, a, "playbooks/gone.md", "# Gone\n")
-	writeKB(t, a, "architecture/settlement.md", "# Settlement\n")
+	writeKB(t, a, "architecture/circulation.md", "# Circulation\n")
 	writeKB(t, a, "decisions/0001-confirmed.md", "---\nstatus: accepted\n---\n# 0001. Confirmed\n")
 	writeKB(t, a, "decisions/0002-accepted.md", "---\nstatus: accepted\n---\n# 0002. Accepted only\n")
 	writeKB(t, a, "decisions/0003-proposed.md", "---\nstatus: proposed\n---\n# 0003. Proposed\n")
@@ -42,12 +42,12 @@ func TestDoctor_LedgerFindings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fs := agentFindings(func() []DoctorFinding { f, _ := Doctor(dir); return f }(), "grid-expert", "")
+	fs := agentFindings(func() []DoctorFinding { f, _ := Doctor(dir); return f }(), "catalog-expert", "")
 	for _, want := range []string{
 		"lists playbooks/gone.md",
 		"lists state.md#old-section",
 		"decisions/0002-accepted.md is accepted but unconfirmed",
-		"1 unconfirmed current-tier entry: architecture/settlement.md",
+		"1 unconfirmed current-tier entry: architecture/circulation.md",
 	} {
 		if !hasFinding(fs, want) {
 			t.Fatalf("missing %q in %+v", want, fs)
@@ -69,7 +69,7 @@ func TestDoctor_LedgerFindings(t *testing.T) {
 	if err := os.Remove(LedgerPath(a.Dir())); err != nil {
 		t.Fatal(err)
 	}
-	fs = agentFindings(func() []DoctorFinding { f, _ := Doctor(dir); return f }(), "grid-expert", "")
+	fs = agentFindings(func() []DoctorFinding { f, _ := Doctor(dir); return f }(), "catalog-expert", "")
 	if !hasFinding(fs, "3 unconfirmed current-tier entries") || !hasFinding(fs, "no "+KnowledgeDir+"/"+LedgerFile) {
 		t.Fatalf("no-ledger count: %+v", fs)
 	}
@@ -78,7 +78,7 @@ func TestDoctor_LedgerFindings(t *testing.T) {
 	if err := os.WriteFile(LedgerPath(a.Dir()), []byte("a: [unclosed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	fs = agentFindings(func() []DoctorFinding { f, _ := Doctor(dir); return f }(), "grid-expert", "")
+	fs = agentFindings(func() []DoctorFinding { f, _ := Doctor(dir); return f }(), "catalog-expert", "")
 	if !hasFinding(fs, "unparseable") || !hasFinding(fs, "3 unconfirmed current-tier entries") {
 		t.Fatalf("unparseable ledger: %+v", fs)
 	}

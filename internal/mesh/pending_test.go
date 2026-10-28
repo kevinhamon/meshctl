@@ -241,9 +241,9 @@ func TestPending_HealthLineOnlyWithCandidatesOrReport(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)
 	now := time.Now()
-	p := filepath.Join(a.Dir(), KnowledgeDir, "reference", "netting.md")
+	p := filepath.Join(a.Dir(), KnowledgeDir, "reference", "renewal.md")
 	_ = os.MkdirAll(filepath.Dir(p), 0o755)
-	if err := os.WriteFile(p, []byte("# Netting\n\nWe net daily.\n"), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte("# Renewal\n\nWe net daily.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if len(UnconfirmedCurrentEntries(a.Dir())) == 0 {
@@ -252,7 +252,7 @@ func TestPending_HealthLineOnlyWithCandidatesOrReport(t *testing.T) {
 	if got := PendingMarkdown(dir, a, now); got != "" {
 		t.Fatalf("unconfirmed entries alone (no candidates, no report) ⇒ no block, got %q", got)
 	}
-	writeReconcileReport(t, a, now.AddDate(0, 0, -3).Format("2006-01-02"), "- reference/netting.md · consistent · \"we net daily\"\n")
+	writeReconcileReport(t, a, now.AddDate(0, 0, -3).Format("2006-01-02"), "- reference/renewal.md · consistent · \"we renew daily\"\n")
 	h := pendingLine(PendingMarkdown(dir, a, now), "KB health")
 	if !strings.Contains(h, "unconfirmed") || !strings.Contains(h, "reconcile report 3d ago") {
 		t.Fatalf("report present ⇒ health line, got %q", h)
@@ -262,9 +262,9 @@ func TestPending_HealthLineOnlyWithCandidatesOrReport(t *testing.T) {
 	}
 
 	// An open conflict is an action kind.
-	writeReconcileReport(t, a, now.AddDate(0, 0, -2).Format("2006-01-02"), "- reference/netting.md · conflict → mesh://bravo/reference/netting.md · \"we net daily\" vs \"bravo nets weekly\"\n")
+	writeReconcileReport(t, a, now.AddDate(0, 0, -2).Format("2006-01-02"), "- reference/renewal.md · conflict → mesh://bravo/reference/renewal.md · \"we renew daily\" vs \"bravo renews weekly\"\n")
 	c := pendingLine(PendingMarkdown(dir, a, now), "Open conflicts")
-	for _, want := range []string{"1,", "reference/netting.md", "2d", "meshctl kb confirm"} {
+	for _, want := range []string{"1,", "reference/renewal.md", "2d", "meshctl kb confirm"} {
 		if !strings.Contains(c, want) {
 			t.Errorf("conflicts line missing %q: %s", want, c)
 		}

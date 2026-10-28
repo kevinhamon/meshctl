@@ -12,7 +12,7 @@ import (
 // decision 46): ledger lines and the Confirm: commit on main in one step, at
 // most five paths per call, refusals by latest verdict.
 
-const confirmGlossary = "# Glossary\n\n## Settlement window\n\n**Settlement window**: the netting period.\n\n## Fact owner\n\n**Fact owner**: the peer that owns a fact.\n"
+const confirmGlossary = "# Glossary\n\n## Circulation window\n\n**Circulation window**: the renewal period.\n\n## Fact owner\n\n**Fact owner**: the peer that owns a fact.\n"
 
 // confirmFixture is a gated peer repo on main with a few committed entries.
 func confirmFixture(t *testing.T) (dir string, a *Agent) {
@@ -25,7 +25,7 @@ func confirmFixture(t *testing.T) (dir string, a *Agent) {
 	writeKB(t, a, "reference/e.md", "# E\n\nE.\n")
 	writeKB(t, a, "reference/f.md", "# F\n\nF.\n")
 	writeKB(t, a, PeerGlossaryFile, confirmGlossary)
-	if err := StateSet(a, "## Now\n\nShipping.\n\n## Active\n\n- settlement\n", finishNow); err != nil {
+	if err := StateSet(a, "## Now\n\nShipping.\n\n## Active\n\n- circulation\n", finishNow); err != nil {
 		t.Fatal(err)
 	}
 	gitInit(t, a.Dir())
@@ -54,10 +54,10 @@ Confirm the reviewed reference entries after the first reconcile pass.
 - reference/d.md · consistent · "D."
 - reference/e.md · consistent · "E."
 - reference/f.md · consistent · "F."
-- glossary.md#settlement-window · consistent · "the netting period"
+- glossary.md#circulation-window · consistent · "the renewal period"
 - glossary.md#fact-owner · consistent · "the peer that owns a fact"
 - state.md#now · consistent · "Shipping."
-- state.md#active · consistent · "settlement"
+- state.md#active · consistent · "circulation"
 `
 
 func confirmPaths(dir string, a *Agent, report string, paths ...string) (KBConfirmResult, error) {
@@ -68,7 +68,7 @@ func TestKBConfirm_WritesLedgerAndConfirmCommitOnMain(t *testing.T) {
 	dir, a := confirmFixture(t)
 	rep := writeConfirmReport(t, a, confirmReport)
 
-	res, err := confirmPaths(dir, a, rep, "reference/a.md", "glossary.md#settlement-window")
+	res, err := confirmPaths(dir, a, rep, "reference/a.md", "glossary.md#circulation-window")
 	if err != nil {
 		t.Fatalf("kb confirm: %v", err)
 	}
@@ -84,13 +84,13 @@ func TestKBConfirm_WritesLedgerAndConfirmCommitOnMain(t *testing.T) {
 		t.Fatalf("ledger line for reference/a.md: %+v", ae)
 	}
 	ge := l.Entries[PeerGlossaryFile]
-	if len(ge.Sections) != 1 || ge.Sections["settlement-window"] == "" || ge.Hash != "" {
+	if len(ge.Sections) != 1 || ge.Sections["circulation-window"] == "" || ge.Hash != "" {
 		t.Fatalf("want exactly one section hash for glossary.md, got %+v", ge)
 	}
-	if strings.Join(res.Ledgered, ",") != "reference/a.md,glossary.md#settlement-window" || res.Confirm == "" {
+	if strings.Join(res.Ledgered, ",") != "reference/a.md,glossary.md#circulation-window" || res.Confirm == "" {
 		t.Fatalf("result: %+v", res)
 	}
-	if !l.SectionConfirmed(a.Dir(), PeerGlossaryFile, "settlement-window") || l.SectionConfirmed(a.Dir(), PeerGlossaryFile, "fact-owner") {
+	if !l.SectionConfirmed(a.Dir(), PeerGlossaryFile, "circulation-window") || l.SectionConfirmed(a.Dir(), PeerGlossaryFile, "fact-owner") {
 		t.Fatal("only the addressed section is confirmed")
 	}
 	if strings.TrimSpace(gitOut(t, a.Dir(), "status", "--porcelain")) != "" {
@@ -186,7 +186,7 @@ func TestKBConfirm_NonOwnerConflictWaitsForOwnerLedger(t *testing.T) {
 	owner := newTestAgent(t, dir, "bravo", false, nil)
 	writeKB(t, owner, "reference/fees.md", "# Fees\n\nThe fee is 3%.\n")
 	rep := writeConfirmReport(t, a, `## Intent
-Confirm after the owner settled the fee.
+Confirm after the owner circulated the fee.
 
 - reference/a.md · conflict → owner bravo, pending · "fee is 2%" vs mesh://bravo/reference/fees.md "fee is 3%"
 `)

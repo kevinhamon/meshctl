@@ -49,7 +49,7 @@ func gitCallCounter(t *testing.T) func() int {
 
 func TestAgedCandidates_DatesFromOneGitPass(t *testing.T) {
 	root := meshRoot(t)
-	a := newTestAgent(t, root, "grid", false, nil)
+	a := newTestAgent(t, root, "catalog", false, nil)
 	gitInit(t, a.Dir())
 	cands := filepath.Join(a.Dir(), KnowledgeDir, "candidates")
 	now := time.Now()
@@ -82,7 +82,7 @@ func TestAgedCandidates_DatesFromOneGitPass(t *testing.T) {
 
 func TestWorkBranchRefs_ReadsRefFilesWithoutGit(t *testing.T) {
 	root := meshRoot(t)
-	a := newTestAgent(t, root, "grid", false, nil)
+	a := newTestAgent(t, root, "catalog", false, nil)
 	gitInit(t, a.Dir())
 	run := func(args ...string) {
 		t.Helper()

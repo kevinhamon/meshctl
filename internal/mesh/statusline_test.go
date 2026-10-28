@@ -58,7 +58,7 @@ func TestStatusLine_UnconfirmedEntriesCueReconcile(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)
 	for rel, body := range map[string]string{
-		"reference/netting.md": "# Netting\n\nWe net daily.\n",
+		"reference/renewal.md": "# Renewal\n\nWe net daily.\n",
 		"candidates/fresh.md":  "# Fresh\n",
 	} {
 		p := filepath.Join(a.Dir(), KnowledgeDir, filepath.FromSlash(rel))

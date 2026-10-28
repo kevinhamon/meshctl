@@ -84,7 +84,7 @@ func TestScaffold_NoPeerGlossary(t *testing.T) {
 func TestDoctor_WarnsOnPeerGlossaryOncePoolGlossaryExists(t *testing.T) {
 	root := migratedRoot(t)
 	a := newTestAgent(t, root, "architect", false, nil)
-	writePeerGlossary(t, a, "# Glossary\n\n**Settlement window**: The period.\n")
+	writePeerGlossary(t, a, "# Glossary\n\n**Circulation window**: The period.\n")
 
 	fs, _ := Doctor(root)
 	got := agentFindings(fs, "architect", peerGlossaryWarn)
@@ -99,7 +99,7 @@ func TestDoctor_WarnsOnPeerGlossaryOncePoolGlossaryExists(t *testing.T) {
 func TestDoctor_SilentOnPeerGlossaryWithoutPoolGlossary(t *testing.T) {
 	root := migratedRoot(t)
 	a := newTestAgent(t, root, "architect", false, nil)
-	writePeerGlossary(t, a, "**Settlement window**: The period.\n")
+	writePeerGlossary(t, a, "**Circulation window**: The period.\n")
 	if err := os.Remove(PoolGlossaryPath(root)); err != nil {
 		t.Fatal(err)
 	}
@@ -111,8 +111,8 @@ func TestDoctor_SilentOnPeerGlossaryWithoutPoolGlossary(t *testing.T) {
 
 func TestDoctor_OwnsWithoutPoolTermWarnsSoftly(t *testing.T) {
 	root := migratedRoot(t)
-	writePoolGlossary(t, root, "# Pool glossary\n\n**Settlement Window**: The period.\n")
-	owningAgent(t, root, "architect", "settlement-window", "Netting")
+	writePoolGlossary(t, root, "# Pool glossary\n\n**Circulation Window**: The period.\n")
+	owningAgent(t, root, "architect", "circulation-window", "Renewal")
 
 	fs, _ := Doctor(root)
 	got := agentFindings(fs, "architect", ownsWarn)
@@ -120,7 +120,7 @@ func TestDoctor_OwnsWithoutPoolTermWarnsSoftly(t *testing.T) {
 		t.Fatalf("want one warn for the unmatched owns value, got %+v", got)
 	}
 	msg := got[0].Message
-	if !strings.Contains(msg, "`Netting`") || strings.Contains(msg, "settlement-window") {
+	if !strings.Contains(msg, "`Renewal`") || strings.Contains(msg, "circulation-window") {
 		t.Fatalf("warning must name only the unmatched value: %q", msg)
 	}
 	if !strings.Contains(msg, "consider") {
@@ -130,8 +130,8 @@ func TestDoctor_OwnsWithoutPoolTermWarnsSoftly(t *testing.T) {
 
 func TestDoctor_OwnsMatchIsKebabSlugCaseInsensitive(t *testing.T) {
 	root := migratedRoot(t)
-	writePoolGlossary(t, root, "**Settlement Window**: The period.\n**Fact owner**: The peer.\n")
-	owningAgent(t, root, "architect", "Settlement-Window", "fact owner")
+	writePoolGlossary(t, root, "**Circulation Window**: The period.\n**Fact owner**: The peer.\n")
+	owningAgent(t, root, "architect", "Circulation-Window", "fact owner")
 
 	fs, _ := Doctor(root)
 	if got := agentFindings(fs, "architect", ownsWarn); len(got) != 0 {
@@ -141,7 +141,7 @@ func TestDoctor_OwnsMatchIsKebabSlugCaseInsensitive(t *testing.T) {
 
 func TestDoctor_OwnsSilentOnEmptyPoolGlossary(t *testing.T) {
 	root := migratedRoot(t) // template glossary: prose, no terms
-	owningAgent(t, root, "architect", "netting")
+	owningAgent(t, root, "architect", "renewal")
 
 	fs, _ := Doctor(root)
 	if got := agentFindings(fs, "architect", ownsWarn); len(got) != 0 {
@@ -151,9 +151,9 @@ func TestDoctor_OwnsSilentOnEmptyPoolGlossary(t *testing.T) {
 
 func TestDoctor_OwnsSilentWhileLegacyPeerGlossaryRemains(t *testing.T) {
 	root := migratedRoot(t)
-	writePoolGlossary(t, root, "**Settlement window**: The period.\n")
-	a := owningAgent(t, root, "architect", "netting")
-	writePeerGlossary(t, a, "**Netting**: Offsetting positions.\n")
+	writePoolGlossary(t, root, "**Circulation window**: The period.\n")
+	a := owningAgent(t, root, "architect", "renewal")
+	writePeerGlossary(t, a, "**Renewal**: Extending a loan.\n")
 
 	fs, _ := Doctor(root)
 	if got := agentFindings(fs, "architect", ownsWarn); len(got) != 0 {
@@ -167,9 +167,9 @@ func TestDoctor_OwnsSilentWhileLegacyPeerGlossaryRemains(t *testing.T) {
 func TestRecall_LegacyPeerGlossaryStaysCurrentTier(t *testing.T) {
 	root := migratedRoot(t)
 	a := newTestAgent(t, root, "architect", false, nil)
-	writePeerGlossary(t, a, "# Glossary\n\n## Netting\n\n**Netting**: Offsetting positions.\n")
+	writePeerGlossary(t, a, "# Glossary\n\n## Renewal\n\n**Renewal**: Extending a loan.\n")
 
-	hits, err := Recall(a, "netting", 20)
+	hits, err := Recall(a, "renewal", 20)
 	if err != nil {
 		t.Fatal(err)
 	}

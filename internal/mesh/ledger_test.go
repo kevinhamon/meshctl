@@ -129,7 +129,7 @@ func confirmKB(t *testing.T, a *Agent, rels ...string) {
 
 func TestLedger_ConfirmedIffHashMatches(t *testing.T) {
 	dir := meshRoot(t)
-	a := newTestAgent(t, dir, "grid-expert", true, nil)
+	a := newTestAgent(t, dir, "catalog-expert", true, nil)
 	writeKB(t, a, "playbooks/release.md", "# Release\n\nTag then push.\n")
 	StateSet(a, "## Now\n\nShipping.\n\n## Open questions\n\n- none\n", ledgerNow)
 
@@ -167,7 +167,7 @@ func TestLedger_ConfirmedIffHashMatches(t *testing.T) {
 
 func TestLedger_OnboardScaffoldsEmptyTrackedLedger(t *testing.T) {
 	dir := meshRoot(t)
-	a := newTestAgent(t, dir, "grid-expert", true, nil)
+	a := newTestAgent(t, dir, "catalog-expert", true, nil)
 	b, err := os.ReadFile(LedgerPath(a.Dir()))
 	if err != nil || string(b) != "{}\n" {
 		t.Fatalf("new peer must carry an empty ledger: %q %v", b, err)

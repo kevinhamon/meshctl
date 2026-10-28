@@ -1,7 +1,7 @@
 # Reference
 
 Distilled, **cited** knowledge from external source-of-record documents (meshctl ADR-0019) — standards,
-protocols, vendor/ISO specs, tariffs, manuals. One note per topic (`kebab-title.md`).
+vendor specs, API references, manuals. One note per topic (`kebab-title.md`).
 
 This is the deliberate tier over a **disposable, gitignored corpus**: raw fetched docs stay out of
 git (big, versioned, re-fetchable); only distilled, cited notes are committed and indexed by

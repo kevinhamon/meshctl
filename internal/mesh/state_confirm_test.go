@@ -82,24 +82,24 @@ func TestStateSetConfirmed_WritesDigestLedgerAndConfirmCommit(t *testing.T) {
 func TestStateSetConfirmed_EditedSectionRecallsUnconfirmed(t *testing.T) {
 	a := stateFixture(t)
 	sum := writeSummary(t, a, "sess-1", stateSummary)
-	body := "## Settlement cadence\n\nDaily.\n\n## Settlement owners\n\nOps.\n"
+	body := "## Circulation cadence\n\nDaily.\n\n## Circulation owners\n\nOps.\n"
 	if _, err := StateSetConfirmed(a, body, StateSetOptions{SummaryFile: sum, Session: "sess-1", Now: finishNow}); err != nil {
 		t.Fatalf("state set: %v", err)
 	}
-	hits, _ := Recall(a, "settlement", 20)
-	if cad, own := kbHit(hits, "settlement-cadence"), kbHit(hits, "settlement-owners"); cad == nil || own == nil || !cad.Confirmed || !own.Confirmed {
+	hits, _ := Recall(a, "circulation", 20)
+	if cad, own := kbHit(hits, "circulation-cadence"), kbHit(hits, "circulation-owners"); cad == nil || own == nil || !cad.Confirmed || !own.Confirmed {
 		t.Fatalf("both sections confirmed after state set: cadence=%+v owners=%+v", cad, own)
 	}
 	// A later edit outside state set (a raw rewrite) unconfirms only its section.
-	if err := StateSet(a, "## Settlement cadence\n\nWeekly.\n\n## Settlement owners\n\nOps.\n", finishNow); err != nil {
+	if err := StateSet(a, "## Circulation cadence\n\nWeekly.\n\n## Circulation owners\n\nOps.\n", finishNow); err != nil {
 		t.Fatal(err)
 	}
-	hits, _ = Recall(a, "settlement", 20)
-	cad, own := kbHit(hits, "settlement-cadence"), kbHit(hits, "settlement-owners")
+	hits, _ = Recall(a, "circulation", 20)
+	cad, own := kbHit(hits, "circulation-cadence"), kbHit(hits, "circulation-owners")
 	if cad == nil || own == nil || cad.Confirmed || !own.Confirmed {
 		t.Fatalf("edited section unconfirmed, untouched confirmed: cadence=%+v owners=%+v", cad, own)
 	}
-	if md := RecallMarkdown(hits); !strings.Contains(md, "·unconfirmed] settlement-cadence") {
+	if md := RecallMarkdown(hits); !strings.Contains(md, "·unconfirmed] circulation-cadence") {
 		t.Fatalf("edited section must render unconfirmed:\n%s", md)
 	}
 }

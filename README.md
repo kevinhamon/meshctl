@@ -150,7 +150,7 @@ with `--force`. After updating, run `meshctl pool upgrade --check` in each pool.
 `pool upgrade` records the version that ran it, so the console and `doctor` say when an
 installed meshctl is newer than the pool's wiring.
 
-**The console ([ADR-0077](docs/decisions/0077-mesh-console.md)).** `meshctl console` serves
+**The console (ADR-0077).** `meshctl console` serves
 a live view of the whole pool at `http://127.0.0.1:7717/`: every peer's pending
 work with the phrase to say and to which agent, doctor findings (with a re-check button),
 pool notices such as a pending upgrade, and the open agent sessions with their scheduled
@@ -161,7 +161,7 @@ switcher in the header moves between them and shows which other pools need atten
 pool has its own address (`#/pool/<name>`). An agent's page also shows its documents
 (designs, reports and mockups it keeps in `docs/` or folders its manifest lists under
 `docs:`, rendered with mermaid diagrams, sandboxed), its knowledge base and its recent
-history ([ADR-0078](docs/decisions/0078-agent-documents.md)). Home (`#/`) shows a card per
+history (ADR-0078). Home (`#/`) shows a card per
 pool with what needs attention. Two layouts share one frame: **Classic**, a grid of agent
 cards, and **Workspace**, the agent list beside the selected agent so the pool stays in view;
 an agent's page is a content area with a sidebar of sections, and scheduled jobs read in plain
@@ -172,7 +172,7 @@ sessions first, then agents that need you) or by name. The things it changes in 
 are its own settings, doctor's automatic repairs, `pool upgrade` for a pool that needs
 one, a push of the pool repo when it is ahead of its remote, and a commit or push of an agent's
 repo when doctor finds uncommitted or unpushed work (never forced; agents cannot call them), each run from a button after you see what it will do
-([ADR-0079](docs/decisions/0079-console-runs-doctor-repairs.md)). Pin
+(ADR-0079). Pin
 the page as a browser app window to keep it beside your terminals. `meshctl console install`
 starts it at login (macOS LaunchAgent; `meshctl update` restarts it on the new binary);
 `--print-url` prints the address with its token. It listens on 127.0.0.1 only and every
@@ -262,7 +262,7 @@ added to the caller's `.claude/settings.local.json` `additionalDirectories` (mac
 git-ignored) so the peer can read its own workspace. Session start lists the installed
 peers.
 
-**In-session dispatch (opencode V2) ([ADR-0076](docs/decisions/0076-opencode-in-session-peers.md)).**
+**In-session dispatch (opencode V2) (ADR-0076).**
 The same command works from an opencode 2.x caller. Peers are rendered into
 `.opencode/agents/mesh-<peer>[-work].md` (`mode: subagent`; no nested subagents, and no
 edit tools in a consult) and `ask --in-session` prints the `subagent` tool call (`agent:
@@ -278,7 +278,7 @@ without a claim. Delegating work to a `mutates` peer goes through opencode's own
 is needed (V2 lets a session reach outside its project; the gates draw the line). opencode
 V1 keeps the headless `ask`.
 
-**Delegated work — the hub session ([ADR-0063](docs/decisions/0063-hub-session-delegated-peer-work.md)).** Add `--work` and the peer does the work
+**Delegated work — the hub session (ADR-0063).** Add `--work` and the peer does the work
 instead of advising: `meshctl ask <peer> <type> "…" --in-session --work` prints
 `subagent_type: mesh-<peer>-work`, a write-capable definition (Read/Grep/Glob/Bash/Edit/
 Write, no Agent) rendered for every work-delegable peer — dispatchable, or declaring
@@ -424,8 +424,7 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
 Releases follow semantic versioning against meshctl's contract: the CLI and its flags,
 `--json` output, on-disk formats, the wiring version and console URLs. Major breaks something
 `pool upgrade` cannot migrate. Minor adds a capability, and any wiring change is at least
-minor. Patch only fixes what already exists. See
-[ADR-0080](docs/decisions/0080-semantic-versioning.md).
+minor. Patch only fixes what already exists (ADR-0080).
 
 ## License
 

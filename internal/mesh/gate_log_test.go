@@ -36,7 +36,7 @@ func editAt(a *Agent, session, tool, path string) HookPayload {
 func TestGate_StepAsideForSubagentCalls(t *testing.T) {
 	dir := meshRoot(t)
 	hub := newTestAgent(t, dir, "architect", true, nil)
-	writeKBNote(t, hub, "experience/tokens.md", tokenRuleNote)
+	writeKBNote(t, hub, "experience/migrations.md", migrateRuleNote)
 	sub := func(p HookPayload) HookPayload { p.AgentID = "a7437b6161a9857dc"; return p }
 	intake := filepath.Join(hub.Dir(), IntakeDir, "req.md")
 
@@ -48,7 +48,7 @@ func TestGate_StepAsideForSubagentCalls(t *testing.T) {
 		mode  string
 	}{
 		{"subagent id, no peer flag: KB rule is not the hub's to apply",
-			sub(bash(hub, "s1", "git remote -v")), false, GateCheckNone, GateModeStepAside},
+			sub(bash(hub, "s1", "migrate --env prod")), false, GateCheckNone, GateModeStepAside},
 		{"subagent id, no peer flag: competing memory store still denied",
 			sub(editAt(hub, "s1", "Write", "/Users/k/.claude/projects/p/memory/note.md")), true, GateCheckPath, GateModeStepAside},
 		{"subagent id, no peer flag: hand-written intake still denied",
@@ -56,7 +56,7 @@ func TestGate_StepAsideForSubagentCalls(t *testing.T) {
 		{"subagent id, no peer flag: shell write to intake still denied",
 			sub(bash(hub, "s1", "echo hi > "+intake)), true, GateCheckShellWrite, GateModeStepAside},
 		{"no subagent id: KB rule applies exactly as today",
-			bash(hub, "s2", "git remote -v"), true, GateCheckKBRule, GateModeSession},
+			bash(hub, "s2", "migrate --env prod"), true, GateCheckKBRule, GateModeSession},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -80,14 +80,14 @@ func TestGate_StepAsideForSubagentCalls(t *testing.T) {
 // passes.
 func TestGate_PeerFlagEvaluatesInFull(t *testing.T) {
 	dir, caller, arch := inSessionPool(t)
-	writeKBNote(t, arch, "experience/tokens.md", tokenRuleNote)
-	p := bash(caller, "hub-session", "git remote -v")
+	writeKBNote(t, arch, "experience/migrations.md", migrateRuleNote)
+	p := bash(caller, "hub-session", "migrate --env prod")
 	p.AgentID = "a7437b6161a9857dc"
 	p.PeerAgent = arch.Name
 	p.InSession = true
 
 	d := GatePreToolUse(dir, p)
-	if !d.Deny || d.Check != GateCheckKBRule || !strings.Contains(d.Reason, "never flag them") {
+	if !d.Deny || d.Check != GateCheckKBRule || !strings.Contains(d.Reason, "never apply one straight to prod") {
 		t.Fatalf("peer-flagged call must get the peer's KB rule, got %+v", d)
 	}
 	line := lastGateLogLine(t, arch)
@@ -114,13 +114,13 @@ func TestGate_PeerFlagEvaluatesInFull(t *testing.T) {
 func TestGate_DecisionLogNamesTheDecidingCheck(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, []string{"tracker"})
-	writeKBNote(t, a, "experience/tokens.md", tokenRuleNote)
+	writeKBNote(t, a, "experience/migrations.md", migrateRuleNote)
 
-	if d := GatePreToolUse(dir, bash(a, "s1", "git remote -v")); !d.Deny || d.Check != GateCheckKBRule {
+	if d := GatePreToolUse(dir, bash(a, "s1", "migrate --env prod")); !d.Deny || d.Check != GateCheckKBRule {
 		t.Fatalf("first call: want kb-rule deny, got %+v", d)
 	}
 	first := lastGateLogLine(t, a)
-	if d := GatePreToolUse(dir, bash(a, "s1", "git remote -v")); d.Deny || d.Check != GateCheckNone {
+	if d := GatePreToolUse(dir, bash(a, "s1", "migrate --env prod")); d.Deny || d.Check != GateCheckNone {
 		t.Fatalf("retry: want untouched allow, got %+v", d)
 	}
 	second := lastGateLogLine(t, a)

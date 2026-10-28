@@ -5,3 +5,6 @@
 .dispatch.lock/
 .dispatch.count
 .scratch/
+
+# runtime state from mesh hooks
+.memory/

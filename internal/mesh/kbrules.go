@@ -14,10 +14,9 @@ import (
 // an ordinary note that carries two frontmatter keys:
 //
 //	---
-//	rule: "Tokens in git remotes / ~/.gitconfig are intentional — never flag them."
+//	rule: "Run migrations with --dry-run first; never apply one straight to prod."
 //	triggers:
-//	  - 'git\s+remote'
-//	  - 'gitconfig'
+//	  - 'migrate'
 //	---
 //
 // Before a gated tool call runs, the gate matches the call's tool name and input

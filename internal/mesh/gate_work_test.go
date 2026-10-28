@@ -95,7 +95,7 @@ func TestGate_InSessionPeerWorkContract(t *testing.T) {
 	for _, p := range []string{
 		filepath.Join(caller.Dir(), "CLAUDE.md"),
 		"notes.md", // relative to the caller's cwd
-		filepath.Join(dir, "grid-expert", "knowledge", "x.md"),
+		filepath.Join(dir, "catalog-expert", "knowledge", "x.md"),
 		filepath.Join(arch.Dir(), IntakeDir, "x.md"), // still meshctl-owned
 		// Confirmed knowledge on the main checkout changes only via kb finish (ticket 33).
 		filepath.Join(arch.Dir(), "knowledge", "playbooks", "x.md"),

@@ -178,7 +178,7 @@ func TestGate_InSessionPeerContract(t *testing.T) {
 	deny := []string{
 		"meshctl ask pm guidance 'x'",
 		"meshctl msg send pm fyi 'x'",
-		"cd ../architect && meshctl ask grid guidance x",
+		"cd ../architect && meshctl ask catalog guidance x",
 		"meshctl kb begin --agent architect",
 		"meshctl handoff set --agent architect <<'EOF'\nx\nEOF",
 		"git -C ../architect commit -am x",
@@ -232,10 +232,10 @@ func TestGate_InSessionPeerKBRulesAreThePeers(t *testing.T) {
 	dir, caller, arch := inSessionPool(t)
 	// A standing rule in the PEER's KB (not the caller's) must apply to the
 	// peer subagent, which runs with the caller's cwd.
-	rule := "---\nrule: \"never query prod directly\"\ntriggers: ['warehouse.*prod']\n---\n# rule\n"
+	rule := "---\nrule: \"never query prod directly\"\ntriggers: ['depot.*prod']\n---\n# rule\n"
 	_ = os.MkdirAll(filepath.Join(arch.Dir(), KnowledgeDir, "experience"), 0o755)
 	_ = os.WriteFile(filepath.Join(arch.Dir(), KnowledgeDir, "experience", "prod.md"), []byte(rule), 0o644)
-	in, _ := json.Marshal(map[string]string{"command": "warehouse --account prod -q 'select 1'"})
+	in, _ := json.Marshal(map[string]string{"command": "depot --account prod -q 'select 1'"})
 	p := HookPayload{Cwd: caller.Dir(), ToolName: "Bash", ToolInput: in, SessionID: "sess-1", PeerAgent: "architect", InSession: true}
 	d := GatePreToolUse(dir, p)
 	if !d.Deny || !strings.Contains(d.Reason, "never query prod directly") {

@@ -12,13 +12,13 @@ import (
 // gate_promotion_related_test.go — related canonical entries, coherence,
 // ownership routing and inbound links at the promotion ask (ADR-0065,
 // ADR-0069; spec decisions 31 and 32). Fixture: a four-peer pool — architect
-// (the promoter, a git repo with KB session sess-1) and grid canonical,
-// market canonical owning `settlement`, critic perspective.
+// (the promoter, a git repo with KB session sess-1) and catalog canonical,
+// lending canonical owning `circulation`, critic perspective.
 
 type relatedPool struct {
-	root                       string
-	arch, grid, market, critic *Agent
-	wt                         string
+	root                           string
+	arch, catalog, lending, critic *Agent
+	wt                             string
 }
 
 func newRelatedPool(t *testing.T, mainKB map[string]string) relatedPool {
@@ -32,13 +32,13 @@ func newRelatedPool(t *testing.T, mainKB map[string]string) relatedPool {
 	if err != nil {
 		t.Fatalf("kb begin: %v", err)
 	}
-	grid := newTestAgent(t, root, "grid", false, nil)
-	market := owningAgent(t, root, "market", "settlement")
+	catalog := newTestAgent(t, root, "catalog", false, nil)
+	lending := owningAgent(t, root, "lending", "circulation")
 	newTestAgent(t, root, "critic", false, nil)
 	critic := setManifestKnowledge(t, root, "critic", KnowledgePerspective)
-	writeKB(t, market, "architecture/settlement-rules.md", "# Settlement window rules\n\nMarket nets daily.\n")
-	writeKB(t, critic, "architecture/settlement-critique.md", "# Settlement window critique\n\nHourly is better.\n")
-	return relatedPool{root: root, arch: arch, grid: grid, market: market, critic: critic, wt: wt}
+	writeKB(t, lending, "architecture/circulation-rules.md", "# Circulation window rules\n\nLending renews daily.\n")
+	writeKB(t, critic, "architecture/circulation-critique.md", "# Circulation window critique\n\nHourly is better.\n")
+	return relatedPool{root: root, arch: arch, catalog: catalog, lending: lending, critic: critic, wt: wt}
 }
 
 // commitKBBody writes kb-relative files with the given bodies into a worktree
@@ -66,18 +66,18 @@ func gitRun(t *testing.T, dir string, args ...string) {
 	}
 }
 
-const settlementSummary = `## Intent
-Record the architect's view of the settlement window.
+const circulationSummary = `## Intent
+Record the architect's view of the circulation window.
 
 ## Grounding
-- settlement.yaml:3 sets a daily window.
+- circulation.yaml:3 sets a daily window.
 
 ## Precedent
 - recalled the canonical scope.
 
 ## Changes
-### architecture/settlement-window.md
-+ the settlement window is daily
+### architecture/circulation-window.md
++ the circulation window is daily
 `
 
 func finishAsk(t *testing.T, p relatedPool, summary string) GateDecision {
@@ -92,12 +92,12 @@ func finishAsk(t *testing.T, p relatedPool, summary string) GateDecision {
 
 func TestPromotion_RelatedCanonicalEntriesWithoutCoherence(t *testing.T) {
 	p := newRelatedPool(t, nil)
-	commitKBBody(t, p.wt, map[string]string{"architecture/settlement-window.md": "# Settlement window\n\nDaily.\n"})
-	d := finishAsk(t, p, settlementSummary)
+	commitKBBody(t, p.wt, map[string]string{"architecture/circulation-window.md": "# Circulation window\n\nDaily.\n"})
+	d := finishAsk(t, p, circulationSummary)
 
 	for _, want := range []string{
 		"Related canonical entries:",
-		"mesh://market/architecture/settlement-rules.md — Settlement window rules",
+		"mesh://lending/architecture/circulation-rules.md — Circulation window rules",
 		"coherence not stated",
 	} {
 		if !strings.Contains(d.Reason, want) {
@@ -114,12 +114,12 @@ func TestPromotion_RelatedCanonicalEntriesWithoutCoherence(t *testing.T) {
 
 func TestPromotion_CoherenceClassificationsReproducedAndConflictStillAsks(t *testing.T) {
 	p := newRelatedPool(t, nil)
-	commitKBBody(t, p.wt, map[string]string{"architecture/settlement-window.md": "# Settlement window\n\nDaily.\n"})
-	d := finishAsk(t, p, settlementSummary+`
+	commitKBBody(t, p.wt, map[string]string{"architecture/circulation-window.md": "# Circulation window\n\nDaily.\n"})
+	d := finishAsk(t, p, circulationSummary+`
 ## Coherence
-- mesh://market/architecture/settlement-rules.md: conflict — market nets weekly in one paragraph
+- mesh://lending/architecture/circulation-rules.md: conflict — lending renews weekly in one paragraph
 `)
-	if !strings.Contains(d.Reason, "mesh://market/architecture/settlement-rules.md — Settlement window rules · conflict") {
+	if !strings.Contains(d.Reason, "mesh://lending/architecture/circulation-rules.md — Circulation window rules · conflict") {
 		t.Errorf("ask must reproduce the classification:\n%s", d.Reason)
 	}
 	if strings.Contains(d.Reason, "coherence not stated") {
@@ -129,18 +129,18 @@ func TestPromotion_CoherenceClassificationsReproducedAndConflictStillAsks(t *tes
 
 func TestPromotion_CoherenceSectionPresentButEntryUnclassified(t *testing.T) {
 	p := newRelatedPool(t, nil)
-	commitKBBody(t, p.wt, map[string]string{"architecture/settlement-window.md": "# Settlement window\n\nDaily.\n"})
-	d := finishAsk(t, p, settlementSummary+"\n## Coherence\n- nothing related that I saw\n")
-	if !strings.Contains(d.Reason, "Settlement window rules · not classified") {
+	commitKBBody(t, p.wt, map[string]string{"architecture/circulation-window.md": "# Circulation window\n\nDaily.\n"})
+	d := finishAsk(t, p, circulationSummary+"\n## Coherence\n- nothing related that I saw\n")
+	if !strings.Contains(d.Reason, "Circulation window rules · not classified") {
 		t.Errorf("an entry the coherence section does not name is marked:\n%s", d.Reason)
 	}
 }
 
 func TestPromotion_OwnershipLineNamesOwner(t *testing.T) {
 	p := newRelatedPool(t, nil)
-	commitKBBody(t, p.wt, map[string]string{"architecture/settlement-window.md": "# Settlement window\n\nDaily.\n"})
-	d := finishAsk(t, p, settlementSummary)
-	want := "architecture/settlement-window.md falls under `market`'s owns `settlement`"
+	commitKBBody(t, p.wt, map[string]string{"architecture/circulation-window.md": "# Circulation window\n\nDaily.\n"})
+	d := finishAsk(t, p, circulationSummary)
+	want := "architecture/circulation-window.md falls under `lending`'s owns `circulation`"
 	if !strings.Contains(d.Reason, want) || !strings.Contains(d.Reason, "candidate") {
 		t.Errorf("ask lacks the ownership line %q:\n%s", want, d.Reason)
 	}
@@ -149,8 +149,8 @@ func TestPromotion_OwnershipLineNamesOwner(t *testing.T) {
 func TestPromotion_PerspectivePeerHasNoRelatedOrOwnership(t *testing.T) {
 	p := newRelatedPool(t, nil)
 	setManifestKnowledge(t, p.root, "architect", KnowledgePerspective)
-	commitKBBody(t, p.wt, map[string]string{"architecture/settlement-window.md": "# Settlement window\n\nDaily.\n"})
-	d := finishAsk(t, p, settlementSummary)
+	commitKBBody(t, p.wt, map[string]string{"architecture/circulation-window.md": "# Circulation window\n\nDaily.\n"})
+	d := finishAsk(t, p, circulationSummary)
 	for _, not := range []string{"Related canonical entries", "coherence not stated", "falls under"} {
 		if strings.Contains(d.Reason, not) {
 			t.Errorf("a perspective peer's ask has no %q:\n%s", not, d.Reason)
@@ -164,16 +164,16 @@ func TestPromotion_RemovalAndRenameListInboundLinks(t *testing.T) {
 		"playbooks/old-name.md":     "# Old name playbook\n",
 		"playbooks/unreferenced.md": "# Unreferenced\n",
 	})
-	writeKB(t, p.grid, "architecture/uses.md", "# Uses\n\nSee mesh://architect/decisions/0001-gone.md and mesh://architect/playbooks/old-name.md#step-one.\n")
+	writeKB(t, p.catalog, "architecture/uses.md", "# Uses\n\nSee mesh://architect/decisions/0001-gone.md and mesh://architect/playbooks/old-name.md#step-one.\n")
 	writeKB(t, p.critic, "architecture/notes.md", "# Notes\n\nmesh://architect/decisions/0001-gone.md\n")
 	gitRun(t, p.wt, "rm", "-q", "knowledge/decisions/0001-gone.md", "knowledge/playbooks/unreferenced.md")
 	gitRun(t, p.wt, "mv", "knowledge/playbooks/old-name.md", "knowledge/playbooks/new-name.md")
 	gitCommitAll(t, p.wt, "remove and rename")
 
-	d := finishAsk(t, p, settlementSummary)
+	d := finishAsk(t, p, circulationSummary)
 	for _, want := range []string{
 		"removes decisions/0001-gone.md — inbound links:",
-		"grid/knowledge/architecture/uses.md",
+		"catalog/knowledge/architecture/uses.md",
 		"critic/knowledge/architecture/notes.md",
 		"renames playbooks/old-name.md → playbooks/new-name.md — inbound links:",
 		"mesh://architect/playbooks/old-name.md#step-one",
@@ -192,9 +192,9 @@ func TestPromotion_RemovalAndRenameListInboundLinks(t *testing.T) {
 // roster view apply, with no hub exemption.
 func TestPromotion_HubInSessionUsesPeersKindAndRoster(t *testing.T) {
 	root, hub := poolGateFixture(t) // architect: the hub, canonical
-	writeKB(t, hub, "architecture/settlement-hub.md", "# Settlement window hub view\n")
-	market := owningAgent(t, root, "market", "settlement")
-	writeKB(t, market, "architecture/settlement-rules.md", "# Settlement window rules\n")
+	writeKB(t, hub, "architecture/circulation-hub.md", "# Circulation window hub view\n")
+	lending := owningAgent(t, root, "lending", "circulation")
+	writeKB(t, lending, "architecture/circulation-rules.md", "# Circulation window rules\n")
 
 	run := func(peer *Agent) GateDecision {
 		gitInit(t, peer.Dir())
@@ -202,8 +202,8 @@ func TestPromotion_HubInSessionUsesPeersKindAndRoster(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		commitKBBody(t, wt, map[string]string{"architecture/settlement-window.md": "# Settlement window\n"})
-		sum := writeSummary(t, peer, "sess-1", settlementSummary)
+		commitKBBody(t, wt, map[string]string{"architecture/circulation-window.md": "# Circulation window\n"})
+		sum := writeSummary(t, peer, "sess-1", circulationSummary)
 		pl := bash(hub, "sess-1", "meshctl kb finish --summary-file "+sum)
 		pl.PeerAgent = peer.Name
 		d := GatePreToolUse(root, pl)
@@ -213,14 +213,14 @@ func TestPromotion_HubInSessionUsesPeersKindAndRoster(t *testing.T) {
 		return d
 	}
 
-	grid := newTestAgent(t, root, "grid", false, nil)
-	d := run(grid)
-	if !strings.Contains(d.Reason, "mesh://architect/architecture/settlement-hub.md") ||
-		!strings.Contains(d.Reason, "mesh://market/architecture/settlement-rules.md") {
-		t.Errorf("grid's roster view includes the hub's and market's entries:\n%s", d.Reason)
+	catalog := newTestAgent(t, root, "catalog", false, nil)
+	d := run(catalog)
+	if !strings.Contains(d.Reason, "mesh://architect/architecture/circulation-hub.md") ||
+		!strings.Contains(d.Reason, "mesh://lending/architecture/circulation-rules.md") {
+		t.Errorf("catalog's roster view includes the hub's and lending's entries:\n%s", d.Reason)
 	}
-	if !strings.Contains(d.Reason, "into `grid`'s knowledge") {
-		t.Errorf("the ask is grid's:\n%s", d.Reason)
+	if !strings.Contains(d.Reason, "into `catalog`'s knowledge") {
+		t.Errorf("the ask is catalog's:\n%s", d.Reason)
 	}
 
 	newTestAgent(t, root, "critic", false, nil)
@@ -232,14 +232,14 @@ func TestPromotion_HubInSessionUsesPeersKindAndRoster(t *testing.T) {
 
 func TestPromotion_ThreeRelatedEntriesUnder1200AndLogged(t *testing.T) {
 	p := newRelatedPool(t, nil)
-	writeKB(t, p.grid, "architecture/settlement-grid.md", "# Settlement window on the grid side\n\nGrid.\n")
-	writeKB(t, p.market, "decisions/0007-settlement-window-daily.md", "---\nstatus: accepted\n---\n# 0007. Settlement window is daily for every market participant\n")
-	commitKBBody(t, p.wt, map[string]string{"architecture/settlement-window.md": "# Settlement window\n\nDaily.\n"})
-	d := finishAsk(t, p, settlementSummary+`
+	writeKB(t, p.catalog, "architecture/circulation-catalog.md", "# Circulation window on the catalog side\n\nCatalog.\n")
+	writeKB(t, p.lending, "decisions/0007-circulation-window-daily.md", "---\nstatus: accepted\n---\n# 0007. Circulation window is daily for every lending patron\n")
+	commitKBBody(t, p.wt, map[string]string{"architecture/circulation-window.md": "# Circulation window\n\nDaily.\n"})
+	d := finishAsk(t, p, circulationSummary+`
 ## Coherence
-- mesh://market/architecture/settlement-rules.md: consistent
-- mesh://market/decisions/0007-settlement-window-daily.md: consistent
-- mesh://grid/architecture/settlement-grid.md: judgment — grid frames it per feeder
+- mesh://lending/architecture/circulation-rules.md: consistent
+- mesh://lending/decisions/0007-circulation-window-daily.md: consistent
+- mesh://catalog/architecture/circulation-catalog.md: judgment — catalog frames it per shelf
 `)
 	if n := strings.Count(d.Reason, "\n- mesh://"); n != 3 {
 		t.Fatalf("want three related entries, got %d:\n%s", n, d.Reason)

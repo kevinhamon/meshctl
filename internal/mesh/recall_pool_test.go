@@ -10,12 +10,12 @@ import (
 // marked `via pool`, ranked and budgeted like the peer's own current tier, and
 // confirmed unless the pool repo is dirty (ADR-0066, spec decision 15).
 
-const settlementGlossary = `# Pool glossary
+const circulationGlossary = `# Pool glossary
 
-## Market
+## Lending
 
-**Settlement window**: The period over which trades are netted before invoicing.
-_Avoid_: "billing cycle" — that is the invoicing cadence, not the netting period.
+**Circulation window**: The period over which loans are renewed before billing.
+_Avoid_: "billing cycle" — that is the billing cadence, not the renewal period.
 
 **Dispatch**: A headless run of a peer against one request.
 `
@@ -24,7 +24,7 @@ func commitPoolGlossary(t *testing.T, root, body string) {
 	t.Helper()
 	writePoolGlossary(t, root, body)
 	gitOut(t, PoolDir(root), "add", "-A")
-	gitOut(t, PoolDir(root), "commit", "-q", "-m", "glossary: settlement window")
+	gitOut(t, PoolDir(root), "commit", "-q", "-m", "glossary: circulation window")
 }
 
 func poolHits(hits []RecallHit) []RecallHit {
@@ -39,13 +39,13 @@ func poolHits(hits []RecallHit) []RecallHit {
 
 func TestRecall_PoolGlossaryIsCurrentTierViaPool(t *testing.T) {
 	root := migratedRoot(t)
-	commitPoolGlossary(t, root, settlementGlossary)
-	a := newTestAgent(t, root, "grid-expert", true, nil)
-	writeKB(t, a, "architecture/settlement.md", "# Settlement window\n\nDaily since 0002.\n")
-	writeKB(t, a, "decisions/0002-settlement-window-daily.md", "---\nstatus: accepted\n---\n# 0002. Settlement window is daily\n")
-	confirmKB(t, a, "architecture/settlement.md", "decisions/0002-settlement-window-daily.md") // own entries confirmed (ADR-0067)
+	commitPoolGlossary(t, root, circulationGlossary)
+	a := newTestAgent(t, root, "catalog-expert", true, nil)
+	writeKB(t, a, "architecture/circulation.md", "# Circulation window\n\nDaily since 0002.\n")
+	writeKB(t, a, "decisions/0002-circulation-window-daily.md", "---\nstatus: accepted\n---\n# 0002. Circulation window is daily\n")
+	confirmKB(t, a, "architecture/circulation.md", "decisions/0002-circulation-window-daily.md") // own entries confirmed (ADR-0067)
 
-	hits, err := Recall(a, "settlement window", 20)
+	hits, err := Recall(a, "circulation window", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestRecall_PoolGlossaryIsCurrentTierViaPool(t *testing.T) {
 	if p.Kind != "kb" || p.Tier != TierCurrent || !p.Confirmed {
 		t.Fatalf("pool hit must be a confirmed current-tier kb hit: %+v", p)
 	}
-	if len(p.Where) != 1 || p.Where[0] != "mesh://pool/glossary.md#settlement-window" {
+	if len(p.Where) != 1 || p.Where[0] != "mesh://pool/glossary.md#circulation-window" {
 		t.Fatalf("pool hit must point at the knowledge reference: %+v", p.Where)
 	}
 	if p.Date == "" {
@@ -91,22 +91,22 @@ func TestRecall_PoolGlossaryIsCurrentTierViaPool(t *testing.T) {
 
 	// Rendering and bodies: `via pool` label, body inlined within the budget
 	// like an own current-tier hit, and budget 0 leaves pointers.
-	withBodies, err := RecallWithBodies(a, "settlement window", 20, 200)
+	withBodies, err := RecallWithBodies(a, "circulation window", 20, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pb := poolHits(withBodies)
-	if len(pb) != 1 || !strings.Contains(pb[0].Body, "netted before invoicing") || strings.Contains(pb[0].Body, "Dispatch") {
+	if len(pb) != 1 || !strings.Contains(pb[0].Body, "renewed before billing") || strings.Contains(pb[0].Body, "Dispatch") {
 		t.Fatalf("pool body must be the term's entry: %+v", pb)
 	}
 	md := RecallMarkdown(withBodies)
-	if !strings.Contains(md, "[kb/current·via pool] settlement-window") || strings.Contains(md, "unconfirmed") {
+	if !strings.Contains(md, "[kb/current·via pool] circulation-window") || strings.Contains(md, "unconfirmed") {
 		t.Fatalf("markdown:\n%s", md)
 	}
 	if !strings.Contains(md, "- [kb/current] ") {
 		t.Fatalf("own current hit renders as before:\n%s", md)
 	}
-	plain, _ := RecallWithBodies(a, "settlement window", 20, 0)
+	plain, _ := RecallWithBodies(a, "circulation window", 20, 0)
 	for _, h := range poolHits(plain) {
 		if h.Body != "" {
 			t.Fatal("budget 0 must not inline pool bodies")
@@ -115,11 +115,11 @@ func TestRecall_PoolGlossaryIsCurrentTierViaPool(t *testing.T) {
 
 	// A query the glossary does not answer yields no pool hit; activity-only
 	// recall never includes the glossary.
-	none, _ := Recall(a, "invoice cadence", 20)
+	none, _ := Recall(a, "bill cadence", 20)
 	if len(poolHits(none)) != 0 {
 		t.Fatalf("terms match on their name, not their definition: %+v", none)
 	}
-	act, _ := RecallActivity(a, "settlement window", 20)
+	act, _ := RecallActivity(a, "circulation window", 20)
 	if len(poolHits(act)) != 0 {
 		t.Fatalf("activity recall must not index the glossary: %+v", act)
 	}
@@ -127,16 +127,16 @@ func TestRecall_PoolGlossaryIsCurrentTierViaPool(t *testing.T) {
 
 func TestRecall_PoolGlossaryDirtyIsUnconfirmed(t *testing.T) {
 	root := migratedRoot(t)
-	commitPoolGlossary(t, root, settlementGlossary)
-	a := newTestAgent(t, root, "grid-expert", true, nil)
-	writeKB(t, a, "architecture/settlement.md", "# Settlement window\n")
-	confirmKB(t, a, "architecture/settlement.md") // own entry confirmed (ADR-0067)
+	commitPoolGlossary(t, root, circulationGlossary)
+	a := newTestAgent(t, root, "catalog-expert", true, nil)
+	writeKB(t, a, "architecture/circulation.md", "# Circulation window\n")
+	confirmKB(t, a, "architecture/circulation.md") // own entry confirmed (ADR-0067)
 
 	// An uncommitted edit to the glossary: the hit stays, unconfirmed.
-	if err := os.WriteFile(PoolGlossaryPath(root), []byte(settlementGlossary+"\n**Netting**: Offsetting positions.\n"), 0o644); err != nil {
+	if err := os.WriteFile(PoolGlossaryPath(root), []byte(circulationGlossary+"\n**Renewal**: Extending a loan.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	hits, err := RecallWithBodies(a, "settlement window", 20, 200)
+	hits, err := RecallWithBodies(a, "circulation window", 20, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestRecall_PoolGlossaryDirtyIsUnconfirmed(t *testing.T) {
 	if len(pool) != 1 || pool[0].Confirmed || pool[0].Tier != TierCurrent {
 		t.Fatalf("dirty glossary must recall as an unconfirmed current hit: %+v", pool)
 	}
-	if md := RecallMarkdown(hits); !strings.Contains(md, "[kb/current·via pool·unconfirmed] settlement-window") {
+	if md := RecallMarkdown(hits); !strings.Contains(md, "[kb/current·via pool·unconfirmed] circulation-window") {
 		t.Fatalf("markdown:\n%s", md)
 	}
 	// Own entries are untouched by the pool's state.
@@ -157,11 +157,11 @@ func TestRecall_PoolGlossaryDirtyIsUnconfirmed(t *testing.T) {
 
 func TestRecall_LegacyPoolGlossaryIsConfirmedViaPool(t *testing.T) {
 	root := meshRoot(t) // hidden legacy pool dir, no repo
-	writePoolGlossary(t, root, settlementGlossary)
-	a := newTestAgent(t, root, "grid-expert", true, nil)
-	writeKB(t, a, "architecture/settlement.md", "# Settlement window\n")
+	writePoolGlossary(t, root, circulationGlossary)
+	a := newTestAgent(t, root, "catalog-expert", true, nil)
+	writeKB(t, a, "architecture/circulation.md", "# Circulation window\n")
 
-	hits, err := Recall(a, "settlement window", 20)
+	hits, err := Recall(a, "circulation window", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestRecall_LegacyPoolGlossaryIsConfirmedViaPool(t *testing.T) {
 	if len(pool) != 1 || !pool[0].Confirmed || pool[0].Date == "" {
 		t.Fatalf("legacy pool glossary must recall confirmed via pool: %+v", pool)
 	}
-	if md := RecallMarkdown(hits); !strings.Contains(md, "[kb/current·via pool] settlement-window") {
+	if md := RecallMarkdown(hits); !strings.Contains(md, "[kb/current·via pool] circulation-window") {
 		t.Fatalf("markdown:\n%s", md)
 	}
 }

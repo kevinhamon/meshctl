@@ -148,25 +148,25 @@ func TestKBReconcileWorksheet_RefusesPerspectivePeer(t *testing.T) {
 func TestKBReconcileWorksheet_EntriesInWalkOrderWithEvidence(t *testing.T) {
 	root, p := reconcilePool(t)
 	a := p["alpha"]
-	if err := StateSet(a, "## Now\n\nShipping the settlement window.\n\n## Active\n\n- settlement\n", time.Now()); err != nil {
+	if err := StateSet(a, "## Now\n\nShipping the circulation window.\n\n## Active\n\n- circulation\n", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	writeKB(t, a, "handoff.md", "# Handoff\n\nPick up settlement.\n")
-	writeKB(t, a, "glossary.md", "# Glossary\n\n## Settlement window\n\n**Settlement window**: the netting period.\n")
-	writeKB(t, a, "decisions/0001-settlement-daily.md", "---\nstatus: accepted\n---\n# 0001. Settlement is daily\n")
-	writeKB(t, a, "architecture/settlement-flow.md", "# Settlement flow\n\nNets daily.\n")
-	writeKB(t, a, "reference/netting.md", "# Netting\n\nDaily netting.\n")
-	writeKB(t, a, "playbooks/run-settlement.md", "# Run settlement\n")
-	writeKB(t, a, "experience/2026-10-01-settlement-slip.md", "# Settlement slip\n")
-	writeKB(t, a, "candidates/settlement-weekly.md", "# Settlement weekly?\n")
-	writeKB(t, p["bravo"], "architecture/settlement-window.md", "# Settlement window\n\nBravo nets weekly.\n")
-	writeKB(t, p["echo"], "architecture/settlement-window.md", "# Settlement window critique\n")
+	writeKB(t, a, "handoff.md", "# Handoff\n\nPick up circulation.\n")
+	writeKB(t, a, "glossary.md", "# Glossary\n\n## Circulation window\n\n**Circulation window**: the renewal period.\n")
+	writeKB(t, a, "decisions/0001-circulation-daily.md", "---\nstatus: accepted\n---\n# 0001. Circulation is daily\n")
+	writeKB(t, a, "architecture/circulation-flow.md", "# Circulation flow\n\nRenews daily.\n")
+	writeKB(t, a, "reference/renewal.md", "# Renewal\n\nDaily renewal.\n")
+	writeKB(t, a, "playbooks/run-circulation.md", "# Run circulation\n")
+	writeKB(t, a, "experience/2026-10-01-circulation-slip.md", "# Circulation slip\n")
+	writeKB(t, a, "candidates/circulation-weekly.md", "# Circulation weekly?\n")
+	writeKB(t, p["bravo"], "architecture/circulation-window.md", "# Circulation window\n\nBravo renews weekly.\n")
+	writeKB(t, p["echo"], "architecture/circulation-window.md", "# Circulation window critique\n")
 	// Doctrine and standing orders sharing the term.
 	if err := os.WriteFile(filepath.Join(DoctrinePath(root), "local.md"),
-		[]byte("# Local\n\nThe settlement window is set by the market operator.\n\nUnrelated house rule.\n"), 0o644); err != nil {
+		[]byte("# Local\n\nThe circulation window is set by the lending operator.\n\nUnrelated house rule.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	appendFile(t, filepath.Join(a.Dir(), "CLAUDE.md"), "\n\nAlways quote the settlement window from the operator feed.\n")
+	appendFile(t, filepath.Join(a.Dir(), "CLAUDE.md"), "\n\nAlways quote the circulation window from the operator feed.\n")
 
 	now := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
 	path, err := KBReconcileWorksheet(root, "alpha", now)
@@ -182,9 +182,9 @@ func TestKBReconcileWorksheet_EntriesInWalkOrderWithEvidence(t *testing.T) {
 	}
 	ws := string(b)
 	order := []string{
-		"## state.md#now", "## state.md#active", "## handoff.md", "## glossary.md#settlement-window",
-		"## decisions/0001-settlement-daily.md", "## architecture/settlement-flow.md", "## reference/netting.md",
-		"## playbooks/run-settlement.md", "## experience/2026-10-01-settlement-slip.md",
+		"## state.md#now", "## state.md#active", "## handoff.md", "## glossary.md#circulation-window",
+		"## decisions/0001-circulation-daily.md", "## architecture/circulation-flow.md", "## reference/renewal.md",
+		"## playbooks/run-circulation.md", "## experience/2026-10-01-circulation-slip.md",
 	}
 	last := -1
 	for _, h := range order {
@@ -203,15 +203,15 @@ func TestKBReconcileWorksheet_EntriesInWalkOrderWithEvidence(t *testing.T) {
 	if strings.Contains(ws, "candidates/") || strings.Contains(ws, "README.md") {
 		t.Fatalf("candidates and directory indexes are not entries:\n%s", ws)
 	}
-	flow := worksheetSection(ws, "## architecture/settlement-flow.md")
-	if !strings.Contains(flow, "Nets daily.") {
+	flow := worksheetSection(ws, "## architecture/circulation-flow.md")
+	if !strings.Contains(flow, "Renews daily.") {
 		t.Fatalf("entry body missing:\n%s", flow)
 	}
-	if !strings.Contains(flow, "mesh://bravo/architecture/settlement-window.md") || strings.Contains(flow, "mesh://echo/") {
+	if !strings.Contains(flow, "mesh://bravo/architecture/circulation-window.md") || strings.Contains(flow, "mesh://echo/") {
 		t.Fatalf("canonical hits (bravo, never echo) missing:\n%s", flow)
 	}
-	if !strings.Contains(flow, "The settlement window is set by the market operator.") ||
-		!strings.Contains(flow, "Always quote the settlement window") || strings.Contains(flow, "Unrelated house rule") {
+	if !strings.Contains(flow, "The circulation window is set by the lending operator.") ||
+		!strings.Contains(flow, "Always quote the circulation window") || strings.Contains(flow, "Unrelated house rule") {
 		t.Fatalf("doctrine and standing-order passages sharing the term expected, unrelated ones not:\n%s", flow)
 	}
 }
@@ -269,10 +269,10 @@ func TestKBReconcileWorksheet_CitationsMarkedWithoutFetching(t *testing.T) {
 func TestKBReconcileWorksheet_SkipsPairsConfirmedOnBothSides(t *testing.T) {
 	root, p := reconcilePool(t)
 	a, b := p["alpha"], p["bravo"]
-	writeKB(t, a, "architecture/settlement-flow.md", "# Settlement flow\n\nNets daily.\n")
-	writeKB(t, b, "architecture/settlement-flow.md", "# Settlement flow\n\nBravo nets weekly.\n")
+	writeKB(t, a, "architecture/circulation-flow.md", "# Circulation flow\n\nRenews daily.\n")
+	writeKB(t, b, "architecture/circulation-flow.md", "# Circulation flow\n\nBravo renews weekly.\n")
 	now := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
-	const entry = "## architecture/settlement-flow.md"
+	const entry = "## architecture/circulation-flow.md"
 
 	ws := func() string {
 		t.Helper()
@@ -282,23 +282,23 @@ func TestKBReconcileWorksheet_SkipsPairsConfirmedOnBothSides(t *testing.T) {
 		}
 		return w.Markdown()
 	}
-	if s := worksheetSection(ws(), entry); !strings.Contains(s, "mesh://bravo/architecture/settlement-flow.md") {
+	if s := worksheetSection(ws(), entry); !strings.Contains(s, "mesh://bravo/architecture/circulation-flow.md") {
 		t.Fatalf("first pass must list the pair:\n%s", s)
 	}
-	confirmKB(t, a, "architecture/settlement-flow.md")
+	confirmKB(t, a, "architecture/circulation-flow.md")
 	if s := worksheetSection(ws(), entry); s == "" {
 		t.Fatal("one side confirmed: the pair is still open")
 	}
-	confirmKB(t, b, "architecture/settlement-flow.md")
+	confirmKB(t, b, "architecture/circulation-flow.md")
 	if got := ws(); strings.Contains(got, entry) {
 		t.Fatalf("both sides confirmed and unchanged: the pair must be skipped:\n%s", got)
 	}
-	writeKB(t, b, "architecture/settlement-flow.md", "# Settlement flow\n\nBravo nets monthly now.\n")
-	if s := worksheetSection(ws(), entry); !strings.Contains(s, "mesh://bravo/architecture/settlement-flow.md") {
+	writeKB(t, b, "architecture/circulation-flow.md", "# Circulation flow\n\nBravo renews monthly now.\n")
+	if s := worksheetSection(ws(), entry); !strings.Contains(s, "mesh://bravo/architecture/circulation-flow.md") {
 		t.Fatalf("an edit on the other side brings the pair back:\n%s", s)
 	}
-	confirmKB(t, b, "architecture/settlement-flow.md")
-	writeKB(t, a, "architecture/settlement-flow.md", "# Settlement flow\n\nNets twice daily.\n")
+	confirmKB(t, b, "architecture/circulation-flow.md")
+	writeKB(t, a, "architecture/circulation-flow.md", "# Circulation flow\n\nRenews twice daily.\n")
 	if s := worksheetSection(ws(), entry); s == "" {
 		t.Fatal("an edit on this side brings the pair back")
 	}
