@@ -1,5 +1,6 @@
-// Package console is `meshctl console`: a read-only, near-real-time view of a
-// pool, served on localhost (spec: .scratch/mesh-console, decisions C1–C9).
+// Package console is `meshctl console`: a near-real-time view of a pool,
+// served on localhost (spec: .scratch/mesh-console, decisions C1–C9). It is
+// read-only except for doctor's automatic repairs (ADR-0079).
 //
 // The engine keeps one snapshot of the pool and recomputes it when the
 // pool's state files change. Files are the source of truth and the "message
@@ -62,6 +63,7 @@ type Engine struct {
 	subs map[chan []byte]struct{}
 
 	recheck chan struct{}
+	fixing  sync.Mutex // one doctor repair at a time
 
 	// OnUpdate, when set before Run, is called after each new snapshot is
 	// published (outside the engine's lock): the hub's cue to tell every
@@ -167,6 +169,26 @@ func (e *Engine) RefreshPending() {
 	sessions := Sessions(e.dir, now)
 	roster := Roster(e.dir)
 	e.update(func(s *Snapshot) { s.Pending, s.Notices, s.Sessions, s.Agents = rep, notices, sessions, roster })
+}
+
+// Fix applies doctor's automatic repairs, as `meshctl doctor --fix` does,
+// and publishes the report that follows. ran is false when a repair is
+// already running for this pool.
+func (e *Engine) Fix() (fixed, failed []string, ran bool) {
+	if !e.fixing.TryLock() {
+		return nil, nil, false
+	}
+	defer e.fixing.Unlock()
+	now := e.now()
+	findings, ok, fixed, errs := mesh.DoctorWithHygiene(e.dir, true, now)
+	rep := mesh.NewDoctorReport(findings, ok, mesh.OutboundWiringLines(e.dir), now)
+	e.update(func(s *Snapshot) { s.Doctor = &rep })
+	e.RefreshPending() // a repair can drop stale claims
+	failed = []string{}
+	for _, err := range errs {
+		failed = append(failed, err.Error())
+	}
+	return append([]string{}, fixed...), failed, true
 }
 
 // RefreshDoctor runs doctor (with the hygiene items, never --fix).

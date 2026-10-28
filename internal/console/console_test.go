@@ -297,3 +297,62 @@ func TestEngine_UpgradeNotice(t *testing.T) {
 		t.Fatalf("current pool ⇒ no notice: %+v", ns)
 	}
 }
+
+func TestServer_DoctorFixRepairsFixableItems(t *testing.T) {
+	dir, a := testPool(t)
+	retired := filepath.Join(a.Dir(), mesh.MemoryDir, mesh.MemoryIndexFile)
+	_ = os.MkdirAll(filepath.Dir(retired), 0o755)
+	if err := os.WriteFile(retired, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEngine(dir, "test")
+	e.RefreshDoctor()
+	fixable := func() int {
+		n := 0
+		for _, f := range e.Snapshot().Doctor.Findings {
+			if f.Fixable {
+				n++
+			}
+		}
+		return n
+	}
+	if fixable() == 0 {
+		t.Fatal("the retired index should be a fixable finding")
+	}
+	h := (&Server{Engine: e, Settings: Settings{Port: 7717, Token: "secret"}}).Handler()
+	post := func(token, origin string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/api/doctor/fix", nil)
+		r.Host = "127.0.0.1:7717"
+		if token != "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if w := post("", "http://127.0.0.1:7717"); w.Code != http.StatusUnauthorized {
+		t.Errorf("no token: %d", w.Code)
+	}
+	if w := post("secret", "https://evil.example"); w.Code != http.StatusForbidden {
+		t.Errorf("foreign origin: %d", w.Code)
+	}
+	e.fixing.Lock()
+	if w := post("secret", "http://127.0.0.1:7717"); w.Code != http.StatusConflict {
+		t.Errorf("a second run while one runs: %d", w.Code)
+	}
+	e.fixing.Unlock()
+	w := post("secret", "http://127.0.0.1:7717")
+	var res FixResult
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &res) != nil || len(res.Fixed) == 0 || res.Failed == nil {
+		t.Fatalf("fix: %d %s", w.Code, w.Body)
+	}
+	if _, err := os.Stat(retired); !os.IsNotExist(err) {
+		t.Errorf("retired index still there: %v", err)
+	}
+	if n := fixable(); n != 0 {
+		t.Errorf("%d fixable findings after the repair", n)
+	}
+}

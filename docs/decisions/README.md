@@ -57,3 +57,4 @@ CLI's earlier name, `agentmesh` (renamed `meshctl` in [0034](0034-rename-meshctl
 | [0076](0076-opencode-in-session-peers.md) | opencode V2 in-session peers: rendered subagents, one plugin maps child sessions to the peer gate | accepted |
 | [0077](0077-mesh-console.md) | The mesh console: a live, read-only view of the pool served by meshctl | accepted |
 | [0078](0078-agent-documents.md) | Agent documents live in the workspace's `docs/` and are shown sandboxed in the console | accepted |
+| [0079](0079-console-runs-doctor-repairs.md) | The console can run doctor's automatic repairs | accepted |

@@ -126,6 +126,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("GET /api/item", s.item)
 	mux.HandleFunc("POST /api/doctor/recheck", s.recheck)
+	mux.HandleFunc("POST /api/doctor/fix", s.fix)
 	mux.HandleFunc("POST /api/focus", s.focus)
 	mux.HandleFunc("GET /api/docs", s.docs)
 	mux.HandleFunc("GET /api/agent", s.agentView)
@@ -277,6 +278,29 @@ func (s *Server) recheck(w http.ResponseWriter, r *http.Request) {
 	}
 	e.Recheck()
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// FixResult is POST /api/doctor/fix: what was repaired and what failed.
+type FixResult struct {
+	Fixed  []string `json:"fixed"`
+	Failed []string `json:"failed"`
+}
+
+// fix runs doctor's automatic repairs: the console's one action that changes
+// the pool (ADR-0079). The POST guard (token, Host, Origin) applies.
+func (s *Server) fix(w http.ResponseWriter, r *http.Request) {
+	e, ok := s.engine(w, r)
+	if !ok {
+		return
+	}
+	fixed, failed, ran := e.Fix()
+	if !ran {
+		http.Error(w, "a repair is already running for this pool", http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(FixResult{Fixed: fixed, Failed: failed})
 }
 
 // ListenAndServe serves on 127.0.0.1 only, never another interface.

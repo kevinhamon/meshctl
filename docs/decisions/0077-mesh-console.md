@@ -29,7 +29,7 @@ Verified while building (2026-10-26):
 ## Decision
 
 - **`meshctl console`, in the binary.** One process watches, recomputes and serves on `127.0.0.1` (default port 7717). It is always the same version as meshctl and needs no daemon; `meshctl console install` adds a macOS login item that runs it from login, and `meshctl update` restarts that item on the new binary. Doctor warns when the item's program is gone or nothing answers on the port.
-- **Read-only.** No endpoint changes pool state. The one local action is bringing a session's terminal tab to the front.
+- **Read-only.** No endpoint changes pool state. The one local action is bringing a session's terminal tab to the front. (Narrowed by ADR-0079: the console can also run doctor's automatic repairs.)
 - **Guarded.** Every request must name the console in its Host header and carry the token stored in the user's config directory (traded on first visit for an HttpOnly, SameSite=Strict cookie); a non-GET request must also come from the console's own origin. Any local program or website can reach a localhost port, so all three apply.
 - **Files are the bus.** The console watches state directories only: the pool directory and its worktrees and runtime state, and per peer the workspace root, inbox, presence, runtime state, knowledge top level and candidates, and the git files that name branches. Inside `.git` only `HEAD`, `packed-refs` and `config` count; the index and locks change on every git command, including the console's own, and would loop. Pending is recomputed on any relevant change (debounced 250 ms); doctor at start, every 10 minutes, on the re-check button, and on change at most once a minute; a minute tick covers state that changes with time alone.
 - **Machine-readable reports.** `meshctl pending --json` and `meshctl doctor --json` emit versioned reports (`schema`), each pending line with its status-line phrases, so agents and the console read the same data and the line and the report cannot disagree.
@@ -63,3 +63,8 @@ A machine can hold several pools, and people who use several want them in one pl
 ## Amendment (2026-10-27, v1.9.0): documents are served without the token
 
 Two paths are exempt from the token, never from the Host check: `/c/...`, where a capability admits one folder of one agent's documents, and `/vendor/...`, the public viewer libraries. Sandboxed documents fetch both without the cookie. See ADR-0078.
+
+## Amendment (2026-10-28, v1.9.1): sorting, and doctor's repairs
+
+- **Sort.** The pool page sorts by **Activity** (default) or **Name**, remembered per browser. Activity puts agents with an open session first, most recently active first by the session badge's idle time; then agents that need the person (Needs you, Waiting, Doctor error, most pending first); then the rest by name.
+- **Repairs.** The console can run doctor's automatic repairs, confirmed first. See ADR-0079.

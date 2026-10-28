@@ -125,7 +125,7 @@ meshctl state   show | template | set --summary-file <summary>   (the ≤40-line
 meshctl intuition recall "<q>"
 meshctl hook    session-start | user-prompt | session-beat | session-end | pre-tool-use | post-tool-use | status-line   (wired per-agent; not run by hand)
 meshctl doctor  [--fix] [--json]     # manifests, wiring, KB consistency, pool hygiene
-meshctl console [--open] [--print-url] | install | uninstall   # live read-only view of this machine's pools on localhost
+meshctl console [--open] [--print-url] | install | uninstall   # live view of this machine's pools on localhost
 meshctl ask … | send …               (top-level aliases for msg ask|send)
 ```
 
@@ -151,7 +151,7 @@ with `--force`. After updating, run `meshctl pool upgrade --check` in each pool.
 installed meshctl is newer than the pool's wiring.
 
 **The console ([ADR-0077](docs/decisions/0077-mesh-console.md)).** `meshctl console` serves
-a live, read-only view of the whole pool at `http://127.0.0.1:7717/`: every peer's pending
+a live view of the whole pool at `http://127.0.0.1:7717/`: every peer's pending
 work with the phrase to say and to which agent, doctor findings (with a re-check button),
 pool notices such as a pending upgrade, and the open agent sessions with their scheduled
 jobs (Claude Code reports them at the end of every turn). A link beside each session brings
@@ -162,7 +162,10 @@ pool has its own address (`#/pool/<name>`). An agent's page also shows its docum
 (designs, reports and mockups it keeps in `docs/` or folders its manifest lists under
 `docs:`, rendered with mermaid diagrams, sandboxed), its knowledge base and its recent
 history ([ADR-0078](docs/decisions/0078-agent-documents.md)). It watches the pool's state
-files, so the view moves within a moment of a change; nothing in it changes the pool. Pin
+files, so the view moves within a moment of a change. Cards sort by activity (open
+sessions first, then agents that need you) or by name. The one thing it changes in the pool
+is doctor's automatic repairs, run from a button after you confirm the list
+([ADR-0079](docs/decisions/0079-console-runs-doctor-repairs.md)). Pin
 the page as a browser app window to keep it beside your terminals. `meshctl console install`
 starts it at login (macOS LaunchAgent; `meshctl update` restarts it on the new binary);
 `--print-url` prints the address with its token. It listens on 127.0.0.1 only and every

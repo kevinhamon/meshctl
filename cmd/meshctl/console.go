@@ -18,10 +18,10 @@ func consoleCmd() *cobra.Command {
 	var open, printURL bool
 	c := &cobra.Command{
 		Use:   "console",
-		Short: "Serve a live, read-only view of this machine's pools on localhost (pending work, doctor, notices)",
+		Short: "Serve a live view of this machine's pools on localhost (pending work, doctor, notices)",
 		Long: "Runs until stopped, serving each pool's pending work, doctor findings and pool notices at\n" +
-			"http://127.0.0.1:<port>/, updated within moments of the pool's files changing. It never changes\n" +
-			"a pool. It serves every live pool in the registry (`meshctl pool list`) and the pool it is\n" +
+			"http://127.0.0.1:<port>/, updated within moments of the pool's files changing. The only change it\n" +
+			"makes to a pool is doctor's automatic repairs, run from a button you confirm. It serves every live pool in the registry (`meshctl pool list`) and the pool it is\n" +
 			"started from, opening on that one (or the first registered pool outside any pool); the page\n" +
 			"switches between them. Settings (port, the secret token every request carries) live in the user config\n" +
 			"directory (meshctl/console.json), created on first run. --print-url prints the address with\n" +

@@ -106,6 +106,16 @@
   .fix { color: var(--faint); font-size: 12px; }
   details.pool { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; }
   details.pool > summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+  .repairbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; margin-bottom: 12px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg > button { border: 0; border-radius: 0; }
+  .seg > button + button { border-left: 1px solid var(--line); }
+  .seg > button.on { background: var(--hover); font-weight: 600; }
+  dialog .body { padding: 12px 16px; font-size: 13px; max-height: calc(100vh - 220px); overflow: auto; }
+  dialog .body ul { margin: 6px 0 12px; padding-left: 18px; }
+  dialog .body .err { color: var(--red); }
+  dialog .foot { padding: 0 16px 14px; justify-content: flex-end; }
 
   .switch { position: relative; }
   .switch > button { display: flex; gap: 8px; align-items: center; font-size: 13.5px; font-weight: 600; padding: 4px 10px; }
@@ -184,6 +194,11 @@
   <div class="head"><div><div id="viewer-title"></div><div class="path" id="viewer-path"></div></div>
     <div class="actions"><a id="viewer-tab" target="_blank" rel="noopener noreferrer">Open in new tab</a><button id="viewer-close">Close</button></div></div>
 </dialog>
+<dialog id="repair">
+  <div class="head"><div><div>Repair with doctor</div><div class="path">Runs meshctl doctor --fix for this pool. Items that need a person are left alone.</div></div><button id="repair-close">Close</button></div>
+  <div class="body" id="repair-body"></div>
+  <div class="actions foot" id="repair-actions"></div>
+</dialog>
 <dialog id="item">
   <div class="head"><div><div id="item-title"></div><div class="path" id="item-path"></div></div><button id="item-close">Close</button></div>
   <pre id="item-text"></pre>
@@ -199,6 +214,8 @@ let poolKey = null;  // the pool on screen
 let es = null;
 let attentionOnly = false;
 try { attentionOnly = localStorage.getItem("attentionOnly") === "1"; } catch (e) {}
+let sortBy = "activity"; // or "name"
+try { if (localStorage.getItem("sortBy") === "name") sortBy = "name"; } catch (e) {}
 
 const ago = (iso) => {
   if (!iso) return "";
@@ -240,7 +257,13 @@ function model() {
     return { info, pending: p, sessions: ss, findings: fs, errors, warns: fs.length - errors, status,
       jobs: ss.reduce((n, s) => n + s.jobs.length, 0) };
   });
-  agents.sort((a, b) => a.status.rank - b.status.rank || b.pending.total - a.pending.total || a.info.name.localeCompare(b.info.name));
+  const byName = (a, b) => a.info.name.localeCompare(b.info.name);
+  // Activity: open sessions first, by their badge's idle time; then what
+  // needs the person (status, then most pending); then the rest by name.
+  const idle = (a) => a.sessions.length ? Math.min(...a.sessions.map(s => s.idle_seconds)) : Infinity;
+  agents.sort(sortBy === "name" ? byName : (a, b) =>
+    (b.sessions.length > 0) - (a.sessions.length > 0) || (a.sessions.length ? idle(a) - idle(b) : 0) ||
+    a.status.rank - b.status.rank || b.pending.total - a.pending.total || byName(a, b));
   return { agents, poolFindings };
 }
 
@@ -286,6 +309,15 @@ function renderGrid(m) {
     root.append(d);
   }
 
+  const fixable = snap.doctor ? snap.doctor.findings.filter(f => f.fixable) : [];
+  if (fixable.length) {
+    const rb = el("div", "repairbar");
+    const go = el("button", null, "Repair…");
+    go.addEventListener("click", () => openRepair(fixable));
+    rb.append(el("span", null, "Doctor can repair " + plural(fixable.length, "item") + " automatically."), go);
+    root.append(rb);
+  }
+
   const bar = el("div", "toolbar");
   const lab = el("label");
   const cb = el("input"); cb.type = "checkbox"; cb.checked = attentionOnly;
@@ -293,7 +325,16 @@ function renderGrid(m) {
   lab.append(cb, document.createTextNode("Only agents that need attention"));
   const recheck = el("button", null, "Re-check doctor");
   recheck.addEventListener("click", () => doRecheck(recheck));
-  bar.append(lab, el("span", "spacer"), el("span", "meta", snap.doctor ? "doctor checked " + ago(snap.doctor.generated) : "doctor running…"), recheck);
+  const seg = el("div", "seg");
+  seg.setAttribute("role", "group");
+  seg.setAttribute("aria-label", "Sort agents");
+  for (const [k, label] of [["activity", "Activity"], ["name", "Name"]]) {
+    const b = el("button", sortBy === k ? "on" : null, label);
+    b.setAttribute("aria-pressed", String(sortBy === k));
+    b.addEventListener("click", () => { sortBy = k; try { localStorage.setItem("sortBy", k); } catch (e) {} render(); });
+    seg.append(b);
+  }
+  bar.append(el("span", "meta", "Sort"), seg, lab, el("span", "spacer"), el("span", "meta", snap.doctor ? "doctor checked " + ago(snap.doctor.generated) : "doctor running…"), recheck);
   root.append(bar);
 
   const grid = el("div", "grid");
@@ -635,6 +676,44 @@ async function focusSession(agent, session, button) {
   }
 }
 
+// Doctor's automatic repairs (ADR-0079): list them, run on confirm, report.
+function openRepair(items) {
+  const body = $("repair-body");
+  const list = el("ul");
+  for (const f of items) list.append(el("li", null, "[" + f.agent + "] " + f.message));
+  body.replaceChildren(el("div", null, "These items will be repaired:"), list);
+  const go = el("button", null, "Repair " + plural(items.length, "item"));
+  go.addEventListener("click", () => doRepair(go));
+  $("repair-actions").replaceChildren(go);
+  $("repair").showModal();
+}
+
+async function doRepair(b) {
+  b.disabled = true;
+  b.textContent = "Repairing…";
+  const body = $("repair-body");
+  const section = (title, lines, cls) => {
+    if (!lines.length) return;
+    const list = el("ul", cls);
+    for (const l of lines) list.append(el("li", null, l));
+    body.append(el("div", cls, title), list);
+  };
+  try {
+    const r = await fetch("/api/doctor/fix?" + new URLSearchParams({ pool: poolKey }), { method: "POST" });
+    if (!r.ok) { body.replaceChildren(el("div", "err", await r.text())); return; }
+    const res = await r.json();
+    body.replaceChildren();
+    if (!res.fixed.length && !res.failed.length) body.append(el("div", null, "Nothing needed repairing."));
+    section("Repaired:", res.fixed);
+    section("Failed:", res.failed, "err");
+  } catch (e) {
+    body.replaceChildren(el("div", "err", "The console did not answer."));
+  } finally {
+    $("repair-actions").replaceChildren();
+  }
+}
+$("repair-close").addEventListener("click", () => $("repair").close());
+
 async function doRecheck(b) {
   b.disabled = true;
   b.textContent = "Checking…";
@@ -774,7 +853,7 @@ function onRoute() {
 }
 
 window.addEventListener("hashchange", onRoute);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && route().agent && !$("item").open && !$("viewer").open) location.hash = poolHash(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && route().agent && !$("item").open && !$("viewer").open && !$("repair").open) location.hash = poolHash(); });
 setInterval(() => { if (snap) $("updated").textContent = "updated " + ago(snap.pending.generated); }, 1000);
 
 function setLive(live, text) {
