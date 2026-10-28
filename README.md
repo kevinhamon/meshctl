@@ -426,9 +426,10 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
 
 Hit friction, a missing capability, a bug, or have an idea? Open an issue with the matching
 form at <https://github.com/kevinhamon/meshctl/issues/new/choose>: **Friction**, **Gap**,
-**Suggestion** or **Bug**. Agents may file on a person's behalf once the person says yes;
-the shipped doctrine tells them how. Describe meshctl's behaviour only, not your
-organization's work. `meshctl --help` ends with the same link.
+**Suggestion** or **Bug**. Describe meshctl's behaviour only, not your organization's work.
+`meshctl --help` ends with the same link. Inside a pool, agents send what they hit to the
+steward (`meshctl send steward fyi "meshctl …"`); when you ask, the steward merges the
+reports, reads them to you as a decision round, and files the ones you confirm.
 
 ## Versioning
 

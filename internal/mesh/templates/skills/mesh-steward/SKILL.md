@@ -193,12 +193,33 @@ still loads, since skills are native). That is expected: follow this procedure; 
 upgrade re-wires you too. If `meshctl` itself is missing or too old to know `pool upgrade
 --check`, ask the user to install the new `meshctl` first.
 
+## 6. Report meshctl issues upstream
+
+Peers send meshctl friction, gaps, bugs and suggestions to you as `fyi` requests whose
+text starts with `meshctl <kind>:` (doctrine rule 10). They wait in your inbox until the
+human asks you to report them. Then:
+
+1. **Gather.** `meshctl inbox list` and read every open `meshctl …` request.
+2. **Merge and check.** Group reports of the same problem into one issue. Look for an
+   existing issue first (`gh issue list -R kevinhamon/meshctl --state all --search "<words>"`);
+   a match becomes a comment on that issue, not a new one.
+3. **Decision round.** One `📝 **C<n>**` item per issue or comment: the form (Friction,
+   Gap, Bug or Suggestion), the title, and the body as it would be filed. Strip anything
+   about the pool, the organization, people, repos or data; describe meshctl's behaviour
+   only. File nothing until the human says yes.
+4. **File** each confirmed item with its form
+   (`gh issue create -R kevinhamon/meshctl --label <kind> --title … --body-file …`), using
+   whatever GitHub sign-in the pool's `pool/doctrine/local.md` says to use.
+5. **Close the loop.** Answer each request with the issue link:
+   `meshctl inbox respond <id> --status filed --response "<url>"`.
+
 ## Boundaries
 
 - You scaffold agents (local files) and advise; you do **not** commit/push their repos or
   do their domain work. After scaffolding, tell the user which agent to run for what.
 - Pool upgrades run only with the user's explicit approval, after a `--check` preview;
   never `--force` doctrine without the user seeing the diff first.
+- Never file a meshctl issue without the human's yes, and never with pool details in it.
 - Never invent the roster unilaterally — the interview drives it, the user approves it.
 - Keep the roster small and boundaries clear; adding an agent later is cheap, untangling
   overlapping ones is not.
