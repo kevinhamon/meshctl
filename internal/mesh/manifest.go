@@ -54,6 +54,9 @@ type Agent struct {
 	// perspective. Empty ⇒ the pool config's default; read it through
 	// EffectiveKnowledge, never directly.
 	Knowledge string `yaml:"knowledge,omitempty"`
+	// Docs are workspace-relative folders holding documents written for the
+	// person; empty ⇒ [docs]. Read them through DocFolders.
+	Docs []string `yaml:"docs,omitempty"`
 
 	// dir is the on-disk workspace directory this manifest was loaded from.
 	dir string `yaml:"-"`
@@ -279,5 +282,6 @@ func (a *Agent) Validate() []string {
 	if !ValidKnowledgeKind(a.Knowledge) {
 		problems = append(problems, knowledgeKindProblem(a.Knowledge))
 	}
+	problems = append(problems, a.docFolderProblems()...)
 	return problems
 }

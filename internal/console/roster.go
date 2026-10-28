@@ -15,6 +15,10 @@ type AgentInfo struct {
 	Harness string `json:"harness"`
 	Badge   string `json:"badge,omitempty"`
 	Color   string `json:"color,omitempty"` // CSS rgb() from the manifest badge
+	// Docs and DocsNewest summarize the agent's documents, so a page knows
+	// when to refetch its list (GET /api/docs).
+	Docs       int    `json:"docs"`
+	DocsNewest string `json:"docs_newest,omitempty"`
 }
 
 // Roster lists the pool's peers for the cards, in roster order.
@@ -26,6 +30,11 @@ func Roster(dir string) []AgentInfo {
 	}
 	for _, a := range agents {
 		info := AgentInfo{Name: a.Name, Title: a.Title, Role: firstSentence(a.Role, 160), Harness: a.HarnessName(), Badge: a.Badge.Label}
+		docs := ListDocs(a)
+		info.Docs = len(docs.Docs) + docs.More
+		if len(docs.Docs) > 0 {
+			info.DocsNewest = docs.Docs[0].Modified
+		}
 		if a.Badge.R+a.Badge.G+a.Badge.B > 0 {
 			c := func(v float64) int { return int(v*255 + 0.5) }
 			info.Color = fmt.Sprintf("rgb(%d, %d, %d)", c(a.Badge.R), c(a.Badge.G), c(a.Badge.B))

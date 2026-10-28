@@ -59,3 +59,7 @@ A machine can hold several pools, and people who use several want them in one pl
 - **Switcher.** The page header lists every pool with its state (agents that need you, doctor errors, waiting items, open sessions, a pending upgrade) and says when another pool needs attention. A page's address names its pool (`#/pool/<key>`, `#/pool/<key>/agent/<name>`); the key is the registry name made URL-safe, with `-2`, `-3` for a repeated name in registry order. A link to a pool no longer served falls back to the default pool.
 - **API.** Every endpoint takes `?pool=<key>`; without it, the default pool. Snapshots gain `pool_key` and `pools` (each pool's summary), both additive, so a reader of a single-pool snapshot is unaffected.
 - **Visibility across pools.** The console now shows several pools to anything holding its token, and agents can read the token (see Consequences above). An agent in one pool can therefore read another pool's view through the console. This is read-only and shows nothing the same user's processes cannot already read from disk. meshctl commands still act only on the pool they run in, so ADR-0029's separation of pools, which is about what meshctl routes and changes, holds.
+
+## Amendment (2026-10-27, v1.9.0): documents are served without the token
+
+Two paths are exempt from the token, never from the Host check: `/c/...`, where a capability admits one folder of one agent's documents, and `/vendor/...`, the public viewer libraries. Sandboxed documents fetch both without the cookie. See ADR-0078.

@@ -406,6 +406,7 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 
 	// Peer glossaries retire (ADR-0066): leftover file, `owns` coupling.
 	findings = append(findings, glossaryFindings(a, poolTerms, poolGlossary)...)
+	findings = append(findings, docFolderFindings(a)...)
 
 	// Inbox exists?
 	if !dirExists(a.InboxPath()) {

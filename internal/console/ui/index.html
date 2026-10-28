@@ -31,6 +31,7 @@
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); margin-right: 6px; vertical-align: 1px; }
   .dot.live { background: var(--green); }
   .spacer { flex: 1; }
+  #pool { max-width: 42ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   main { max-width: 1240px; margin: 0 auto; padding: 16px 20px 48px; }
 
   .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
@@ -124,6 +125,35 @@
   .opt .path { color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .opt .facts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
 
+  .doc { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .doc:first-of-type { border-top: 0; }
+  .doc .kind { flex: none; width: 38px; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; color: var(--muted); text-align: center;
+    border: 1px solid var(--line); border-radius: 4px; padding: 0 3px; }
+  .doc .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc a.nm { color: var(--accent); cursor: pointer; text-decoration: none; }
+  .doc a.nm:hover { text-decoration: underline; }
+  .doc .age { color: var(--muted); white-space: nowrap; }
+  .folder { color: var(--faint); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; margin: 10px 0 2px; }
+  .folder:first-child { margin-top: 0; }
+  details.area { border-top: 1px solid var(--line); padding: 5px 0; font-size: 13px; }
+  details.area:first-of-type { border-top: 0; }
+  details.area > summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; list-style: none; }
+  details.area > summary::-webkit-details-marker { display: none; }
+  details.area > summary::before { content: "▸"; color: var(--faint); font-size: 11px; width: 10px; }
+  details.area[open] > summary::before { content: "▾"; }
+  details.area > summary .nm { flex: 1; font-weight: 600; }
+  details.area .doc { padding-left: 18px; }
+  .hist { font-size: 13px; padding: 3px 0; display: flex; gap: 8px; align-items: baseline; }
+  .hist .hash { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); }
+  .hist .sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hist .age { color: var(--muted); white-space: nowrap; }
+  h4.sub { font-size: 12px; color: var(--muted); font-weight: 600; margin: 12px 0 4px; }
+  dialog.viewer { width: min(1100px, calc(100vw - 32px)); height: calc(100vh - 48px); max-height: none; display: none; flex-direction: column; }
+  dialog.viewer[open] { display: flex; }
+  dialog.viewer iframe { flex: 1; width: 100%; border: 0; background: var(--panel); }
+  dialog .actions { display: flex; gap: 8px; align-items: center; flex: none; }
+  dialog .actions a { font-size: 12.5px; color: var(--accent); }
+
   dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text);
     width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; }
   dialog::backdrop { background: rgba(0,0,0,.35); }
@@ -150,6 +180,10 @@
   </div>
 </header>
 <main id="main"></main>
+<dialog id="viewer" class="viewer">
+  <div class="head"><div><div id="viewer-title"></div><div class="path" id="viewer-path"></div></div>
+    <div class="actions"><a id="viewer-tab" target="_blank" rel="noopener noreferrer">Open in new tab</a><button id="viewer-close">Close</button></div></div>
+</dialog>
 <dialog id="item">
   <div class="head"><div><div id="item-title"></div><div class="path" id="item-path"></div></div><button id="item-close">Close</button></div>
   <pre id="item-text"></pre>
@@ -303,6 +337,7 @@ function card(a) {
     foot.append(el("span", "pill on", plural(a.sessions.length, "session") + " · " + idleText(idle)));
   }
   if (a.jobs) foot.append(el("span", "pill on", plural(a.jobs, "job")));
+  if (a.info.docs) foot.append(el("span", "pill", plural(a.info.docs, "doc")));
   if (a.errors) foot.append(el("span", "pill err", plural(a.errors, "error")));
   else if (a.warns) foot.append(el("span", "pill", plural(a.warns, "warning")));
   c.append(foot);
@@ -323,6 +358,7 @@ function renderDetail(m, name) {
   back.addEventListener("click", () => { location.hash = poolHash(); });
   root.append(back);
   if (!a) { root.append(el("div", "empty", "No agent named " + name + " in this pool.")); return; }
+  ensureAgentData(a);
 
   const hero = el("div", "hero");
   const sw = el("div", "swatch");
@@ -368,7 +404,7 @@ function renderDetail(m, name) {
     }
     wp.append(line);
   }
-  left.append(wp);
+  left.append(wp, docsPanel(a), kbPanel(a));
 
   const sp = panel("Sessions and scheduled jobs", a.sessions.length ? plural(a.sessions.length, "open") : "");
   if (!a.sessions.length) sp.append(el("div", "empty", "No open session."));
@@ -411,11 +447,149 @@ function renderDetail(m, name) {
     more.addEventListener("click", () => { rest.hidden = false; more.remove(); });
     dp.append(rest, more);
   }
-  right.append(dp);
+  right.append(dp, historyPanel());
 
   cols.append(left, right);
   root.append(cols);
 }
+
+// --- agent data fetched on demand (documents, knowledge, history) ---
+
+const agentData = { key: null, docs: null, view: null, docsSig: null, viewAt: 0 };
+
+function ensureAgentData(a) {
+  const key = poolKey + "/" + a.info.name;
+  const sig = a.info.docs + "|" + (a.info.docs_newest || "");
+  if (agentData.key !== key) Object.assign(agentData, { key, docs: null, view: null, docsSig: null, viewAt: 0 });
+  if (agentData.docsSig !== sig) { agentData.docsSig = sig; fetchAgentJSON("/api/docs", a.info.name, key, "docs"); }
+  if (Date.now() - agentData.viewAt > 30000) { agentData.viewAt = Date.now(); fetchAgentJSON("/api/agent", a.info.name, key, "view"); }
+}
+
+async function fetchAgentJSON(path, agent, key, slot) {
+  try {
+    const r = await fetch(path + "?" + new URLSearchParams({ pool: poolKey, agent }));
+    if (!r.ok || agentData.key !== key) return;
+    agentData[slot] = await r.json();
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+  } catch (e) {}
+}
+
+const kindLabel = { markdown: "MD", html: "HTML", pdf: "PDF", image: "IMG", text: "TXT", other: "FILE" };
+
+function docRow(d, label, title) {
+  const row = el("div", "doc");
+  row.append(el("span", "kind", kindLabel[d.kind] || "FILE"));
+  if (d.url) {
+    const link = el("a", "nm", label);
+    link.title = d.path;
+    link.addEventListener("click", () => openViewer(title || label, d.path, d.url, d.kind));
+    row.append(link);
+  } else {
+    const nm = el("span", "nm", label);
+    nm.title = d.path + (d.kind === "other" ? " (not shown here)" : " (too large to show here)");
+    row.append(nm);
+  }
+  row.append(el("span", "age", ago(d.modified)));
+  return row;
+}
+
+function docsPanel(a) {
+  const l = agentData.docs;
+  const p = panel("Documents", l ? (l.docs.length + l.more ? plural(l.docs.length + l.more, "document") : "") : "loading…");
+  if (!l) return p;
+  if (!l.docs.length) {
+    p.append(el("div", "empty", "No documents yet. Agents write them in " + l.folders.map(f => f + "/").join(", ") + "."));
+    return p;
+  }
+  const grouped = l.folders.length > 1;
+  const box = el("div");
+  let folder = null, shown = 0;
+  const rest = el("div");
+  rest.hidden = true;
+  const order = grouped ? [...l.docs].sort((x, y) => l.folders.indexOf(x.folder) - l.folders.indexOf(y.folder)) : l.docs;
+  for (const d of order) {
+    const target = shown < 12 ? box : rest;
+    if (grouped && d.folder !== folder) { folder = d.folder; target.append(el("div", "folder", folder + "/")); }
+    target.append(docRow(d, d.path.slice(d.folder.length + 1)));
+    shown++;
+  }
+  p.append(box);
+  if (shown > 12) {
+    const more = el("button", null, "Show all " + shown);
+    more.addEventListener("click", () => { rest.hidden = false; more.remove(); });
+    p.append(rest, more);
+  }
+  if (l.more) p.append(el("div", "detail", l.more + " older documents not listed."));
+  return p;
+}
+
+function kbPanel(a) {
+  const v = agentData.view;
+  const health = a.pending.lines.find(l => l.kind === "kb-health");
+  const p = panel("Knowledge base", health ? lineSummary(health) : "");
+  if (!v) { p.lastChild.append(el("span", "note", " loading…")); return p; }
+  if (!v.kb.length) { p.append(el("div", "empty", "No knowledge base.")); return p; }
+  const files = v.kb.filter(k => !k.folder), folders = v.kb.filter(k => k.folder);
+  // The digest first: it is the agent's own summary of where things stand.
+  files.sort((x, y) => (y.name === "state.md") - (x.name === "state.md"));
+  for (const k of files) p.append(docRow({ kind: "markdown", path: k.files[0].path, url: k.files[0].url, modified: k.modified }, k.name));
+  for (const k of folders) {
+    const d = el("details", "area");
+    const sum = el("summary");
+    sum.append(el("span", "nm", k.name + "/"), el("span", "age", k.count ? plural(k.count, "file") + " · " + ago(k.modified) : "empty"));
+    d.append(sum);
+    for (const f of k.files) d.append(docRow({ kind: "markdown", path: f.path, url: f.url, modified: f.modified }, f.path.slice(("knowledge/" + k.name + "/").length)));
+    if (k.count > k.files.length) d.append(el("div", "detail", (k.count - k.files.length) + " older files not listed."));
+    p.append(d);
+  }
+  return p;
+}
+
+function historyPanel() {
+  const v = agentData.view;
+  const p = panel("Recent history", "");
+  if (!v) { p.append(el("div", "empty", "loading…")); return p; }
+  p.append(el("h4", "sub", "Commits"));
+  if (!v.commits.length) p.append(el("div", "empty", "No commits."));
+  for (const c of v.commits) {
+    const row = el("div", "hist");
+    row.append(el("span", "hash", c.hash), el("span", "sub", c.subject), el("span", "age", ago(c.when)));
+    row.title = c.subject;
+    p.append(row);
+  }
+  p.append(el("h4", "sub", "Closed requests"));
+  if (!v.closed.length) p.append(el("div", "empty", "None archived."));
+  for (const c of v.closed) {
+    const row = el("div", "hist");
+    row.append(el("span", "sub", c.title || c.id), el("span", "age", c.from + " · " + ago(c.closed)));
+    row.title = c.id;
+    p.append(row);
+  }
+  return p;
+}
+
+// The viewer frames a document from its capability path. Everything but a
+// PDF is sandboxed by the frame and by the server's CSP; Chrome will not
+// show a PDF in a sandboxed frame, and the server only serves real PDFs.
+function openViewer(title, path, url, kind) {
+  const dlg = $("viewer");
+  dlg.querySelector("iframe")?.remove();
+  const f = document.createElement("iframe");
+  if (kind !== "pdf") f.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox");
+  f.setAttribute("referrerpolicy", "no-referrer");
+  f.src = url;
+  dlg.append(f);
+  $("viewer-title").textContent = title;
+  $("viewer-path").textContent = path;
+  $("viewer-tab").href = url;
+  dlg.showModal();
+}
+$("viewer-close").addEventListener("click", () => $("viewer").close());
+// The close event arrives after close() returns, possibly after the next
+// document opened: only an unopened viewer drops its frame.
+$("viewer").addEventListener("close", () => { if (!$("viewer").open) $("viewer").querySelector("iframe")?.remove(); });
 
 function panel(title, note) {
   const s = el("section", "panel");
@@ -579,6 +753,7 @@ function render() {
   renderSwitcher();
   if (!snap) return;
   $("pool").textContent = snap.pool;
+  $("pool").title = snap.pool;
   $("version").textContent = "meshctl " + snap.version;
   $("updated").textContent = "updated " + ago(snap.pending.generated);
   const m = model();
@@ -599,7 +774,7 @@ function onRoute() {
 }
 
 window.addEventListener("hashchange", onRoute);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && route().agent && !$("item").open) location.hash = poolHash(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && route().agent && !$("item").open && !$("viewer").open) location.hash = poolHash(); });
 setInterval(() => { if (snap) $("updated").textContent = "updated " + ago(snap.pending.generated); }, 1000);
 
 function setLive(live, text) {

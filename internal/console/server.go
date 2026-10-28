@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -100,6 +101,8 @@ type Server struct {
 	Engine   *Engine
 	Settings Settings
 	UI       http.Handler // the page (ticket 04); nil serves a placeholder
+
+	caps caps // document capabilities (docs.go)
 }
 
 // engine is the request's pool's engine; false (and a 404 written) when
@@ -124,6 +127,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/item", s.item)
 	mux.HandleFunc("POST /api/doctor/recheck", s.recheck)
 	mux.HandleFunc("POST /api/focus", s.focus)
+	mux.HandleFunc("GET /api/docs", s.docs)
+	mux.HandleFunc("GET /api/agent", s.agentView)
+	mux.HandleFunc("GET /c/", s.capDoc)
+	mux.HandleFunc("GET /vendor/", s.vendor)
 	ui := s.UI
 	if ui == nil {
 		ui = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -144,6 +151,13 @@ func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.allowedHosts()[r.Host] {
 			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		// Documents and the viewer's libraries are fetched by sandboxed
+		// documents, which carry no cookie: a capability admits the first,
+		// the second is public code. Both are GET only.
+		if (strings.HasPrefix(r.URL.Path, "/c/") || strings.HasPrefix(r.URL.Path, "/vendor/")) && r.Method == http.MethodGet {
+			next.ServeHTTP(w, r)
 			return
 		}
 		if q := r.URL.Query().Get("token"); q != "" {

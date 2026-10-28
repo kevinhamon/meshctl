@@ -301,6 +301,11 @@ func WatchPaths(dir string) []string {
 		}
 		add(filepath.Join(d, mesh.KnowledgeDir))
 		add(filepath.Join(d, mesh.KnowledgeDir, "candidates"))
+		for _, f := range a.DocFolders() { // documents (top level; sub-folders on the tick)
+			if root, ok := docRoot(d, f); ok {
+				add(root)
+			}
+		}
 		add(filepath.Join(d, ".git"))
 		refs := filepath.Join(d, ".git", "refs", "heads")
 		add(refs)

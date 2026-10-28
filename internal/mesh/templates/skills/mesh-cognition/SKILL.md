@@ -306,6 +306,15 @@ Rules — that is all there is to decide:
   with a missing section, a leftover placeholder or over budget — fix and resend
   (`--force` writes it anyway).
 
+## Documents for the person — `docs/`
+
+When the human asks for a design, report, brief or mockup, write it in `docs/` in your
+workspace, never in a repo you work on (it would be committed and pushed with that repo).
+Name it `YYYY-MM-DD-<slug>.<ext>`. Designs are markdown; draw diagrams in `mermaid` code
+fences, which the console renders. Put anything that must never leave the machine in
+`docs/local/` (ignored). If `agent.yaml` lists other folders under `docs:`, those count too.
+A document is for reading, not knowledge: distill what should last into `candidates/`.
+
 ## Repo hygiene — knowledge is only safe once pushed (meshctl ADR-0039)
 
 Your workspace must be its own git repo **with a remote**. `knowledge/` (KB + handoff)

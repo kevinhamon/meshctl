@@ -198,6 +198,17 @@ from the mesh `intake/`). The agent **contract** stays in `CLAUDE.md` + `agent.y
 (single source — no `knowledge/contract.md`). `meshctl agent onboard` scaffolds
 missing areas add-only.
 
+**Documents** — what an agent writes *for the person* (designs written before a piece
+of work, reports, briefs, mockups) lives in the agent's `docs/` folder, never in a repo
+the agent works on, where it could be committed and pushed by accident. Name each
+`YYYY-MM-DD-<slug>.<ext>`; write designs in markdown with diagrams as mermaid fences.
+`docs/` is committed with the workspace; `docs/local/` is ignored, for documents that
+must never leave the machine. An agent with existing folders lists them under `docs:` in
+`agent.yaml` (workspace-relative; default `[docs]`). A document is not knowledge: what
+it teaches that should last goes through `candidates/` like any other learning. The
+mesh console lists and renders every agent's documents (markdown with mermaid, HTML,
+PDF, images), read-only and sandboxed.
+
 **Decision records are machine-readable.** Every ADR carries YAML frontmatter —
 `status:` (`proposed | accepted | rejected | deprecated | superseded`), `date:`,
 `supersedes:` / `superseded_by:` (numbers), and `updates:` (the current-tier docs the

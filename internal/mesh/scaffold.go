@@ -151,20 +151,27 @@ func refreshPoolPointers(poolRoot string, paths ...string) (int, error) {
 // KB, not in git). intake/README.md stays tracked. Idempotent via a marker line.
 const gitignoreMarker = "# meshctl-managed ignores"
 
+// gitignoreEnd closes the managed block.
+const gitignoreEnd = "# end meshctl-managed ignores"
+
+// managedIgnores are the managed block's lines, in order.
+var managedIgnores = []string{
+	".memory/",             // generated, disposable (meshctl memory rebuild)
+	IntakeArchiveDir + "/", // archived closed requests (ADR-0043)
+	"intake/*.md",          // ephemeral inbox traffic
+	"!intake/README.md",    // …but keep the inbox doc
+	"intake/*.claim",       // runtime claim locks (ADR-0011)
+	DocsLocalDir + "/",     // documents that must never leave the machine
+}
+
 func ensureMemoryIgnored(dest string) error {
 	const marker = gitignoreMarker
 	gi := filepath.Join(dest, ".gitignore")
 	b, _ := os.ReadFile(gi)
 	if strings.Contains(string(b), marker) {
-		return nil
+		return addMissingIgnores(gi, string(b))
 	}
-	block := "\n" + marker + " — do not edit\n" +
-		".memory/\n" + // generated, disposable (meshctl memory rebuild)
-		IntakeArchiveDir + "/\n" + // archived closed requests (ADR-0043)
-		"intake/*.md\n" + // ephemeral inbox traffic
-		"!intake/README.md\n" + // …but keep the inbox doc
-		"intake/*.claim\n" + // runtime claim locks (ADR-0011)
-		"# end meshctl-managed ignores\n"
+	block := "\n" + marker + " — do not edit\n" + strings.Join(managedIgnores, "\n") + "\n" + gitignoreEnd + "\n"
 	f, err := os.OpenFile(gi, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
@@ -225,6 +232,9 @@ func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error)
 		return "", err
 	}
 	if _, err := scaffoldLedger(dest); err != nil {
+		return "", err
+	}
+	if _, err := scaffoldDocs(dest); err != nil {
 		return "", err
 	}
 	if err := ensureMemoryIgnored(dest); err != nil {
@@ -403,6 +413,11 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 		return nil, err
 	} else if added {
 		res.Notes = append(res.Notes, "scaffolded the confirmation ledger: "+KnowledgeDir+"/"+LedgerFile)
+	}
+	if added, err := scaffoldDocs(abs); err != nil {
+		return nil, err
+	} else if added {
+		res.Notes = append(res.Notes, "scaffolded the documents folder: "+DocsDir+"/")
 	}
 	if err := ensureMemoryIgnored(abs); err != nil {
 		return nil, err
@@ -833,6 +848,10 @@ Run the **` + "`mesh-cognition`" + ` skill** for the full procedure; its short f
   ` + "`meshctl state set --summary-file <summary>`" + ` (fixed template, ≤40 lines; a promotion).
 - **Handoff at end.** Fill in ` + "`meshctl handoff template`" + ` (fixed sections, ≤40 lines, facts only) and
   write it in one pass: ` + "`meshctl handoff set <<'EOF' … EOF`" + `.
+- **Documents for the person go in ` + "`docs/`" + `.** Designs, reports, briefs and mockups you
+  write for the human live in ` + "`docs/`" + ` in your workspace (or a folder ` + "`agent.yaml`" + ` lists under
+  ` + "`docs:`" + `), never in a repo you work on. Name them ` + "`YYYY-MM-DD-<slug>.<ext>`" + `; write designs in
+  markdown, diagrams as mermaid fences; ` + "`docs/local/`" + ` is never committed. The console shows them.
 - **Repo hygiene (your knowledge is only as safe as your remote).** Your workspace
   must be its own git repo **with a remote** — ` + "`knowledge/`" + ` is durable only
   once committed **and pushed**. If your dir is not a git repo, ` + "`git init`" + ` +
@@ -1126,4 +1145,30 @@ func doctrineVersion() string {
 		return fmt.Sprintf("comms-%db", len(b))
 	}
 	return "unknown"
+}
+
+// addMissingIgnores adds managed lines a block written by an older meshctl
+// lacks, just before its end marker. A block without an end marker (edited
+// by hand) is left alone.
+func addMissingIgnores(gi, text string) error {
+	start := strings.Index(text, gitignoreMarker)
+	end := strings.Index(text[start:], gitignoreEnd)
+	if end < 0 {
+		return nil
+	}
+	end += start
+	have := map[string]bool{}
+	for _, l := range strings.Split(text[start:end], "\n") {
+		have[strings.TrimSpace(l)] = true
+	}
+	var add string
+	for _, l := range managedIgnores {
+		if !have[l] {
+			add += l + "\n"
+		}
+	}
+	if add == "" {
+		return nil
+	}
+	return os.WriteFile(gi, []byte(text[:end]+add+text[end:]), 0o644)
 }

@@ -108,6 +108,10 @@ _Avoid_: inbox cleanup, sweep, backlog grooming
 An agent's per-request verdicts on one peer's open inbox, each with quoted grounding, which the human reads in a confirmation round; it is a hypothesis itself and closes nothing by itself.
 _Avoid_: triage list, stale report, findings
 
+**Document**:
+A file a peer writes for the human to read (a design, report, brief or mockup), kept in the peer's `docs/` folder or a folder its manifest declares, never in a repo it works on; it is not knowledge until distilled through candidates.
+_Avoid_: artifact, deliverable, output
+
 **Skill pack**:
 An optional, externally maintained set of skills that a pool may adopt and assign to peers; meshctl works with any pack or none.
 _Avoid_: plugin (the distribution mechanism, not the concept), toolkit

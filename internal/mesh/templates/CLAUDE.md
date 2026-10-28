@@ -84,6 +84,10 @@ Run the **`mesh-cognition` skill** for the full procedure; its short form:
 - **Record decisions & risks.** Consequential domain choices become ADRs in
   `knowledge/decisions/`; new risks get logged in `knowledge/risks.md`.
 - **Handoff at end.** Rewrite `knowledge/handoff.md` via `meshctl handoff set`.
+- **Documents for the person go in `docs/`.** Designs, reports, briefs and mockups you
+  write for the human live in `docs/` in your workspace (or a folder `agent.yaml` lists under
+  `docs:`), never in a repo you work on. Name them `YYYY-MM-DD-<slug>.<ext>`; write designs in
+  markdown, diagrams as mermaid fences; `docs/local/` is never committed. The console shows them.
 - **Repo hygiene.** Your workspace must be its own git repo **with a remote** — `knowledge/` is durable only once committed **and pushed**. If it's not a repo, `git init` + commit; then create a remote and push. Session start nags until a remote exists.
 
 Authoritative spec: your pool's `../__POOL_DIR__/doctrine/agent-comms.md` §Knowledge & Memory.
