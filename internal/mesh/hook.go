@@ -28,6 +28,9 @@ type HookPayload struct {
 	Prompt         string `json:"prompt"`
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
+	// SessionStart only: why the session started ("startup", "resume",
+	// "clear", "compact"). Empty when the harness does not say (opencode).
+	Source string `json:"source"`
 	// PreToolUse only: the tool about to run and its raw arguments. ToolInput is
 	// kept raw so the gate parses only the keys it needs (file_path), tolerant of
 	// per-tool input shapes.
@@ -170,6 +173,12 @@ func hookAgent(agentsDir, cwd string) *Agent {
 // HookSessionStart registers session presence (side effect) and returns the
 // handoff block to inject, prefixed with any live-session overlap warning.
 // Empty return ⇒ nothing to inject. Fail-open throughout.
+//
+// A resumed session (source "resume") already carries the identity, peer
+// line, tool reference, state digest and handoff in its transcript, so they
+// are not injected again: every resume would otherwise add them once more.
+// What can have changed since (overlap warning, repo nags, pending work) is
+// still injected. A compacted session gets everything: compaction drops it.
 func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) string {
 	a := hookAgent(agentsDir, p.Cwd)
 	// A headless distill run (SpawnPeerDistill) fires the same hooks; it must
@@ -186,10 +195,14 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 	handoff, _ := HandoffShow(a)
 	handoff = strings.TrimSpace(handoff)
 
+	resumed := p.Source == "resume"
+
 	var b strings.Builder
-	b.WriteString(IdentityLine(agentsDir, a))
-	b.WriteString("\n\n")
-	if line := PeerLine(a); line != "" {
+	if !resumed {
+		b.WriteString(IdentityLine(agentsDir, a))
+		b.WriteString("\n\n")
+	}
+	if line := PeerLine(a); line != "" && !resumed {
 		b.WriteString(line)
 		b.WriteString("\n\n")
 	}
@@ -220,6 +233,9 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 		}
 	}
 	// Tool reference (ADR-0042): mesh-wide + agent tools, self-serve --help.
+	if resumed {
+		return strings.TrimSpace(b.String())
+	}
 	if md := ToolsMarkdown(EffectiveTools(LoadPoolConfig(agentsDir), a)); md != "" {
 		b.WriteString(md)
 		b.WriteString("\n\n")

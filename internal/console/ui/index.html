@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent Mesh</title>
+<!-- The header's mark as the tab icon, in the accent colour of each theme. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cstyle%3Eg%7Bfill:%232f5fd0;stroke:%232f5fd0%7D@media (prefers-color-scheme:dark)%7Bg%7Bfill:%238aa8f0;stroke:%238aa8f0%7D%7D%3C/style%3E%3Cg stroke-width='1.6'%3E%3Cpath d='M6 7l12 0M6 7l6 11M18 7l-6 11'/%3E%3Ccircle cx='6' cy='7' r='2.6'/%3E%3Ccircle cx='18' cy='7' r='2.6'/%3E%3Ccircle cx='12' cy='18' r='2.6'/%3E%3C/g%3E%3C/svg%3E">
 <style>
   /* Design language (ui/DESIGN.md). Every size, space and radius below comes
      from these tokens; console_test.go keeps raw values out of the rest. */
@@ -240,6 +242,7 @@
   .finding .lvl { font-weight: var(--fw-b); }
   .finding.error .lvl { color: var(--red); }
   .finding.warn .lvl { color: var(--amber); }
+  .finding .act { margin-left: var(--s2); }
   .fix { color: var(--faint); font-size: var(--fs-sm); }
   .doc, .hist { display: flex; gap: var(--s2); align-items: baseline; padding: var(--s1) 0; border-top: 1px solid var(--line); }
   .doc:first-child, .hist:first-child, h4.sub + .hist { border-top: 0; }
@@ -280,6 +283,8 @@
   .acard .top { display: flex; justify-content: space-between; gap: var(--s2); align-items: baseline; }
   .acard .name { font-weight: var(--fw-b); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .acard .live { color: var(--green); }
+  .acard .todo { position: absolute; right: var(--s2); bottom: var(--s1); font-weight: var(--fw-b); color: var(--amber); line-height: 1; }
+  .acard.todo-on .sl { padding-right: var(--s3); }
   .acard .rail { display: none; }
   .ov { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: var(--s3); align-items: start; }
   .ov .head .st { font-size: var(--fs-sm); }
@@ -299,6 +304,7 @@
       border: 2px solid var(--line); background: var(--surface); font-size: var(--fs-sm); font-weight: var(--fw-b); }
     body.left-off .acard.on .rail { box-shadow: var(--focus); }
     body.left-off .rail .sdot { position: absolute; right: -3px; top: -3px; }
+    body.left-off .rail .todo { right: -2px; bottom: -3px; font-size: var(--fs-sm); }
   }
   @media (max-width: 900px) {
     body.ws #menu-btn { display: inline-grid; }
@@ -329,6 +335,8 @@
   dialog .body .err { color: var(--red); }
   dialog .body pre.out { margin: var(--s2) 0 0; padding: var(--s3); background: var(--surface-2); border-radius: var(--r-sm); max-height: 50vh; }
   dialog .body > div + div { margin-top: var(--s2); }
+  dialog .body .msg { resize: vertical; box-sizing: border-box; font: inherit; font-size: var(--fs-md); width: 100%; margin-top: var(--s1); padding: var(--s1) var(--s2);
+    border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--text); }
   .pcard .foot { justify-content: space-between; }
   dialog .actions { display: flex; gap: var(--s2); align-items: center; flex: none; }
   dialog .actions a { font-size: var(--fs-sm); }
@@ -378,6 +386,16 @@
   <div class="head"><div><div id="upgrade-title">Upgrade pool</div><div class="path">Runs meshctl pool upgrade for this pool, after you have seen what it changes. Nothing is pushed.</div></div><button id="upgrade-close">Close</button></div>
   <div class="body" id="upgrade-body"></div>
   <div class="actions foot" id="upgrade-actions"></div>
+</dialog>
+<dialog id="push">
+  <div class="head"><div><div>Push the pool repo</div><div class="path">Pushes the pool repo's branch to the remote it tracks, after you have seen what goes. Never forced.</div></div><button id="push-close">Close</button></div>
+  <div class="body" id="push-body"></div>
+  <div class="actions foot" id="push-actions"></div>
+</dialog>
+<dialog id="repo">
+  <div class="head"><div><div id="repo-title"></div><div class="path" id="repo-path"></div></div><button id="repo-close">Close</button></div>
+  <div class="body" id="repo-body"></div>
+  <div class="actions foot" id="repo-actions"></div>
 </dialog>
 <dialog id="item">
   <div class="head"><div><div id="item-title"></div><div class="path" id="item-path"></div></div><button id="item-close">Close</button></div>
@@ -440,6 +458,7 @@ function model() {
       : errors ? { cls: "red", word: "Doctor error", rank: 2 }
       : { cls: "green", word: "Clear", rank: 3 };
     return { info, pending: p, sessions: ss, findings: fs, errors, warns: fs.length - errors, status,
+      repo: fs.find(f => f.action === "commit" || f.action === "push") || null,
       jobs: ss.reduce((n, s) => n + s.jobs.length, 0) };
   });
   const byName = (a, b) => displayName(a.info).localeCompare(displayName(b.info));
@@ -710,6 +729,17 @@ function agentCardCompact(a, r) {
   if (a.info.color) rail.style.borderColor = a.info.color;
   rail.append(el("span", "sdot " + a.status.cls));
   c.append(stripe, top, line, rail);
+  // A repo action the console can run (Commit or Push) marks the card; the
+  // agent's page carries the button, since a link cannot hold one.
+  if (a.repo) {
+    const t = el("span", "todo", "!");
+    t.title = a.repo.action === "commit" ? "Unsaved work: Commit from the agent's page" : "Unpushed commits: Push from the agent's page";
+    c.title += " — " + t.title;
+    c.classList.add("todo-on");
+    c.append(t);
+    rail.append(t.cloneNode(true)); // the collapsed rail shows only its badge
+
+  }
   return c;
 }
 
@@ -894,6 +924,17 @@ function poolOverview(m) {
   lp.append(lh, lb);
   grid.append(np, lp);
 
+  // Agent repos with uncommitted or unpushed work, each with its button.
+  const unsaved = m.agents.filter(a => a.repo);
+  if (unsaved.length) {
+    const up = el("section", "panel");
+    const uh = el("div", "phead");
+    uh.append(el("h3", null, "Unsaved work"), el("span", "sums", plural(unsaved.length, "agent")));
+    const ub = el("div", "pbody");
+    for (const a of unsaved) ub.append(finding(a.repo, true));
+    up.append(uh, ub);
+    grid.append(up);
+  }
   if (m.poolFindings.length) {
     const fp = el("section", "panel");
     const fh = el("div", "phead");
@@ -958,6 +999,7 @@ function card(a) {
   if (a.info.docs) foot.append(el("span", "pill", plural(a.info.docs, "doc")));
   if (a.errors) foot.append(el("span", "pill err", plural(a.errors, "error")));
   else if (a.warns) foot.append(el("span", "pill", plural(a.warns, "warning")));
+  if (a.repo) foot.append(repoButton(a.repo));
   c.append(foot);
 
   const open = () => { location.hash = poolHash() + "/agent/" + encodeURIComponent(a.info.name); };
@@ -1121,7 +1163,8 @@ function overview(a) {
     body.append(line);
   }
   for (const f of a.findings.filter(f => f.level === "error")) body.append(finding(f, false));
-  if (!urgent.length && !a.errors) body.append(el("div", "empty", "Nothing needs you here."));
+  if (a.repo) body.append(finding(a.repo, false));
+  if (!urgent.length && !a.errors && !a.repo) body.append(el("div", "empty", "Nothing needs you here."));
   now.append(head, body);
   return [summary, now];
 }
@@ -1380,11 +1423,28 @@ $("viewer-close").addEventListener("click", () => $("viewer").close());
 // document opened: only an unopened viewer drops its frame.
 $("viewer").addEventListener("close", () => { if (!$("viewer").open) $("viewer").querySelector("iframe")?.remove(); });
 
+// repoButton opens an agent repo's Commit or Push dialog. It stops the click
+// so a card it sits on does not also open.
+function repoButton(f) {
+  const b = el("button", "act", f.action === "commit" ? "Commit" : "Push");
+  b.addEventListener("click", (e) => { e.stopPropagation(); openRepo(f.agent, f.action); });
+  b.addEventListener("keydown", (e) => e.stopPropagation());
+  return b;
+}
+
 function finding(f, withAgent) {
   const row = el("div", "finding " + f.level);
   row.append(el("span", "lvl", f.level === "error" ? "✗" : "⚠"));
   const body = el("span", null, (withAgent ? "[" + f.agent + "] " : "") + f.message);
   if (f.fixable) body.append(el("span", "fix", " (fixable by doctor --fix)"));
+  // The pool repo is ahead of its remote: the person can push it from here.
+  if (snap && snap.pool_push && f.message === snap.pool_push) {
+    const b = el("button", "act", "Push");
+    b.addEventListener("click", () => openPush(poolKey));
+    body.append(b);
+  }
+  // An agent repo with something to commit or push: the person does it from here.
+  if (f.action === "commit" || f.action === "push") body.append(repoButton(f));
   row.append(body);
   return row;
 }
@@ -1515,6 +1575,146 @@ async function runUpgrade(key, name, b) {
   }
 }
 $("upgrade-close").addEventListener("click", () => $("upgrade").close());
+
+// The Push button (ADR-0079 amendment): list the commits that would go, push
+// on confirm, then say what happened and what to do if it did not.
+async function openPush(key) {
+  const body = $("push-body"), acts = $("push-actions");
+  body.replaceChildren(el("div", null, "Reading what would be pushed…"));
+  acts.replaceChildren();
+  $("push").showModal();
+  try {
+    const r = await fetch("/api/pool/push/check?" + new URLSearchParams({ pool: key }), { method: "POST" });
+    if (!r.ok) { body.replaceChildren(el("div", "err", (await r.text()).trim())); return; }
+    const st = await r.json();
+    if (!st.ready) { body.replaceChildren(el("div", null, "Nothing to push: the pool repo is up to date with its remote, or has uncommitted changes.")); return; }
+    const list = el("ul");
+    for (const c of st.commits) list.append(el("li", null, c));
+    body.replaceChildren(el("div", null, plural(st.commits.length, "commit") + " will go to " + st.upstream + ":"), list);
+    const go = el("button", "primary", "Push " + plural(st.commits.length, "commit"));
+    go.addEventListener("click", () => runPush(key, go));
+    acts.replaceChildren(go);
+  } catch (e) {
+    body.replaceChildren(el("div", "err", "The console did not answer."));
+  }
+}
+
+async function runPush(key, b) {
+  b.disabled = true;
+  b.textContent = "Pushing…";
+  const body = $("push-body");
+  try {
+    const r = await fetch("/api/pool/push?" + new URLSearchParams({ pool: key }), { method: "POST" });
+    if (!r.ok) { body.replaceChildren(el("div", "err", (await r.text()).trim())); return; }
+    const res = await r.json();
+    const said = {
+      pushed: "Pushed.",
+      rejected: "Not pushed: the remote has commits this pool does not. Pull them first, then push from a terminal:",
+      auth: "Not pushed: git could not use your credentials without asking for them. Push from a terminal:",
+      failed: "Not pushed. Push from a terminal to see why:",
+    };
+    body.replaceChildren(el("div", res.outcome === "pushed" ? null : "err", said[res.outcome] || said.failed));
+    if (res.outcome !== "pushed") body.append(el("pre", "out", res.command));
+    if (res.output) body.append(el("pre", "out", res.output));
+  } catch (e) {
+    body.replaceChildren(el("div", "err", "The console did not answer."));
+  } finally {
+    $("push-actions").replaceChildren();
+  }
+}
+$("push-close").addEventListener("click", () => $("push").close());
+
+// An agent repo's Commit and Push buttons (ADR-0079 amendment). Commit lists
+// the paths it takes and asks for a message; the server refuses when the tree
+// changed since. After a commit that leaves the repo ahead, Push is offered
+// in the same dialog.
+async function openRepo(agent, action) {
+  const body = $("repo-body"), acts = $("repo-actions");
+  $("repo-title").textContent = (action === "commit" ? "Commit " : "Push ") + agent;
+  $("repo-path").textContent = action === "commit"
+    ? "Stages every change in the agent's repo and commits it, as you, after you have seen what goes."
+    : "Pushes the agent repo's branch to the remote it tracks, after you have seen what goes. Never forced.";
+  body.replaceChildren(el("div", null, "Reading the repo…"));
+  acts.replaceChildren();
+  if (!$("repo").open) $("repo").showModal();
+  try {
+    const r = await fetch("/api/agent/" + action + "/check?" + new URLSearchParams({ pool: poolKey, agent }), { method: "POST" });
+    if (!r.ok) { body.replaceChildren(el("div", "err", (await r.text()).trim())); return; }
+    const st = await r.json();
+    if (st.action !== action) {
+      body.replaceChildren(el("div", null, action === "commit" ? "Nothing to commit: the repo is clean."
+        : "Nothing to push: the repo is up to date with its remote, or has uncommitted changes."));
+      return;
+    }
+    if (action === "commit") {
+      const msg = el("textarea", "msg"); msg.value = st.suggested || "Update " + agent + " workspace";
+      msg.rows = Math.min(8, msg.value.split("\n").length + 1);
+      body.replaceChildren(el("div", null, plural(st.dirty.length, "path") + " will be committed:"),
+        el("pre", "out", st.dirty.join("\n")), el("div", null, "Message"), msg);
+      const go = el("button", "primary", "Commit " + plural(st.dirty.length, "path"));
+      go.addEventListener("click", () => runCommit(agent, msg.value, st.dirty, go));
+      acts.replaceChildren(go);
+      msg.focus();
+    } else {
+      const list = el("ul");
+      for (const c of st.commits) list.append(el("li", null, c));
+      body.replaceChildren(el("div", null, plural(st.commits.length, "commit") + " will go to " + st.upstream + ":"), list);
+      const go = el("button", "primary", "Push " + plural(st.commits.length, "commit"));
+      go.addEventListener("click", () => runRepoPush(agent, go));
+      acts.replaceChildren(go);
+    }
+  } catch (e) {
+    body.replaceChildren(el("div", "err", "The console did not answer."));
+  }
+}
+
+async function runCommit(agent, message, seen, b) {
+  b.disabled = true;
+  b.textContent = "Committing…";
+  const body = $("repo-body"), acts = $("repo-actions");
+  try {
+    const r = await fetch("/api/agent/commit?" + new URLSearchParams({ pool: poolKey, agent }),
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, seen }) });
+    if (!r.ok) { body.replaceChildren(el("div", "err", (await r.text()).trim())); acts.replaceChildren(); return; }
+    const res = await r.json();
+    body.replaceChildren(el("div", null, "Committed."));
+    if (res.output) body.append(el("pre", "out", res.output));
+    acts.replaceChildren();
+    if (res.after.action === "push") {
+      const go = el("button", "primary", "Push " + plural(res.after.commits.length, "commit") + " to " + res.after.upstream);
+      go.addEventListener("click", () => openRepo(agent, "push"));
+      acts.append(go);
+    }
+  } catch (e) {
+    body.replaceChildren(el("div", "err", "The console did not answer."));
+    acts.replaceChildren();
+  }
+}
+
+async function runRepoPush(agent, b) {
+  b.disabled = true;
+  b.textContent = "Pushing…";
+  const body = $("repo-body");
+  try {
+    const r = await fetch("/api/agent/push?" + new URLSearchParams({ pool: poolKey, agent }), { method: "POST" });
+    if (!r.ok) { body.replaceChildren(el("div", "err", (await r.text()).trim())); return; }
+    const res = await r.json();
+    const said = {
+      pushed: "Pushed.",
+      rejected: "Not pushed: the remote has commits this repo does not. Pull them first, then push from a terminal:",
+      auth: "Not pushed: git could not use your credentials without asking for them. Push from a terminal:",
+      failed: "Not pushed. Push from a terminal to see why:",
+    };
+    body.replaceChildren(el("div", res.outcome === "pushed" ? null : "err", said[res.outcome] || said.failed));
+    if (res.outcome !== "pushed") body.append(el("pre", "out", res.command));
+    if (res.output) body.append(el("pre", "out", res.output));
+  } catch (e) {
+    body.replaceChildren(el("div", "err", "The console did not answer."));
+  } finally {
+    $("repo-actions").replaceChildren();
+  }
+}
+$("repo-close").addEventListener("click", () => $("repo").close());
 
 async function doRecheck(b) {
   b.disabled = true;

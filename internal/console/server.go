@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kevinhamon/meshctl/internal/mesh"
 )
 
 // DefaultPort is the console's fixed port (decision C9: the login item and a
@@ -132,6 +134,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/settings", s.saveSettings)
 	mux.HandleFunc("POST /api/pool/upgrade/check", s.upgradeCheck)
 	mux.HandleFunc("POST /api/pool/upgrade", s.upgrade)
+	mux.HandleFunc("POST "+mesh.ConsolePoolPushPath+"/check", s.pushCheck)
+	mux.HandleFunc("POST "+mesh.ConsolePoolPushPath, s.push)
+	mux.HandleFunc("POST "+mesh.ConsoleAgentCommitPath+"/check", s.agentRepoCheck)
+	mux.HandleFunc("POST "+mesh.ConsoleAgentCommitPath, s.agentCommit)
+	mux.HandleFunc("POST "+mesh.ConsoleAgentPushPath+"/check", s.agentRepoCheck)
+	mux.HandleFunc("POST "+mesh.ConsoleAgentPushPath, s.agentPush)
 	mux.HandleFunc("POST /api/focus", s.focus)
 	mux.HandleFunc("GET /api/docs", s.docs)
 	mux.HandleFunc("GET /api/agent", s.agentView)

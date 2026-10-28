@@ -327,8 +327,23 @@ func poolPathTargets(agentsDir string, p HookPayload) poolTargets {
 }
 
 // gatePoolPathDeny is the deny half of the pool-knowledge rule: shell git in
-// the pool repo, and a pool write with no human at the prompt.
+// the pool repo, a shell call to the console's pool push or an agent repo's
+// Commit and Push buttons, and a pool write with no human at the prompt.
 func gatePoolPathDeny(agentsDir string, p HookPayload) GateDecision {
+	// The console's Push button is the person pushing (ADR-0079 amendment);
+	// an agent calling its endpoint is an agent pushing the pool repo.
+	if strings.Contains(shellCommandInput(p), ConsolePoolPushPath) {
+		return GateDecision{Deny: true, Check: GateCheckPoolPath, Reason: "mesh: this calls the console's pool push (`" +
+			ConsolePoolPushPath + "`) — agents never push the pool repo. The human pushes it, from the console or a terminal."}
+	}
+	// An agent repo's Commit and Push buttons are the person's too; an agent
+	// commits and pushes its own workspace with git.
+	for _, path := range []string{ConsoleAgentCommitPath, ConsoleAgentPushPath} {
+		if strings.Contains(shellCommandInput(p), path) {
+			return GateDecision{Deny: true, Check: GateCheckPoolPath, Reason: "mesh: this calls the console's agent repo buttons (`" +
+				path + "`) — those are the human's. Commit and push your own workspace with git."}
+		}
+	}
 	t := poolPathTargets(agentsDir, p)
 	if !t.any() {
 		return GateDecision{}

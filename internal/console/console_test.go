@@ -356,3 +356,73 @@ func TestServer_DoctorFixRepairsFixableItems(t *testing.T) {
 		t.Errorf("%d fixable findings after the repair", n)
 	}
 }
+
+func TestServer_PoolPushGuards(t *testing.T) {
+	dir, _ := testPool(t)
+	e := NewEngine(dir, "test")
+	h := (&Server{Engine: e, Settings: Settings{Port: 7717, Token: "secret"}}).Handler()
+	post := func(path, token string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", path, nil)
+		r.Host = "127.0.0.1:7717"
+		r.Header.Set("Origin", "http://127.0.0.1:7717")
+		if token != "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if w := post(mesh.ConsolePoolPushPath, ""); w.Code != http.StatusUnauthorized {
+		t.Errorf("no token: %d", w.Code)
+	}
+	var st mesh.PoolPushState
+	if w := post(mesh.ConsolePoolPushPath+"/check", "secret"); w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &st) != nil || st.Ready {
+		t.Errorf("check on a pool with nothing to push: %d %s", w.Code, w.Body)
+	}
+	if w := post(mesh.ConsolePoolPushPath, "secret"); w.Code != http.StatusConflict {
+		t.Errorf("nothing to push must refuse: %d %s", w.Code, w.Body)
+	}
+	e.pushing.Lock()
+	if w := post(mesh.ConsolePoolPushPath, "secret"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "already running") {
+		t.Errorf("a second push while one runs: %d %s", w.Code, w.Body)
+	}
+	e.pushing.Unlock()
+}
+
+func TestServer_AgentRepoGuards(t *testing.T) {
+	dir, _ := testPool(t)
+	e := NewEngine(dir, "test")
+	h := (&Server{Engine: e, Settings: Settings{Port: 7717, Token: "secret"}}).Handler()
+	post := func(path, token, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", path, strings.NewReader(body))
+		r.Host = "127.0.0.1:7717"
+		r.Header.Set("Origin", "http://127.0.0.1:7717")
+		if token != "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if w := post(mesh.ConsoleAgentCommitPath+"?agent=architect", "", "{}"); w.Code != http.StatusUnauthorized {
+		t.Errorf("no token: %d", w.Code)
+	}
+	if w := post(mesh.ConsoleAgentPushPath+"/check?agent=nobody", "secret", ""); w.Code != http.StatusNotFound {
+		t.Errorf("unknown agent: %d", w.Code)
+	}
+	var st mesh.AgentRepoState
+	if w := post(mesh.ConsoleAgentCommitPath+"/check?agent=architect", "secret", ""); w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &st) != nil || st.Action != "" {
+		t.Errorf("check on a repo with no remote: %d %s", w.Code, w.Body)
+	}
+	if w := post(mesh.ConsoleAgentCommitPath+"?agent=architect", "secret", `{"message":"m","seen":[]}`); w.Code != http.StatusConflict {
+		t.Errorf("nothing to commit must refuse: %d %s", w.Code, w.Body)
+	}
+	if w := post(mesh.ConsoleAgentPushPath+"?agent=architect", "secret", ""); w.Code != http.StatusConflict {
+		t.Errorf("nothing to push must refuse: %d %s", w.Code, w.Body)
+	}
+	e.repoGit.Lock()
+	if w := post(mesh.ConsoleAgentPushPath+"?agent=architect", "secret", ""); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "already running") {
+		t.Errorf("a second git action while one runs: %d %s", w.Code, w.Body)
+	}
+	e.repoGit.Unlock()
+}

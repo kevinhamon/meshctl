@@ -227,6 +227,9 @@ type DoctorFinding struct {
 	Message string
 	// Fixable marks a hygiene item `doctor --fix` repairs.
 	Fixable bool
+	// Action names the console button the finding carries: commit or push
+	// for an agent repo (ADR-0079 amendment); "" for none.
+	Action string
 }
 
 // reservedOwnerFindings errors on a workspace at the pool root whose name is
@@ -524,6 +527,8 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "workspace is not a git repo — `git init` + commit (knowledge/ unsafe until versioned + pushed)"})
 		} else if !h.HasRemote {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no git remote — create one and push (knowledge/ lives only on this machine)"})
+		} else if msg, action := AgentRepoFinding(a.Dir()); msg != "" {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg, Action: action})
 		}
 		// Tool reference (ADR-0042): referenced tools should be installed; an
 		// `avoid` tool being present is a nudge, not an error.

@@ -45,6 +45,9 @@ type Snapshot struct {
 	Sessions  []SessionReport        `json:"sessions"`
 	Agents    []AgentInfo            `json:"agents"`
 	Console   mesh.ConsoleSettings   `json:"console"` // how the console looks for this pool (pool/console.yaml)
+	// PoolPush is the doctor line the Push button sits on: the pool repo is
+	// clean and ahead of its remote. Empty otherwise.
+	PoolPush string `json:"pool_push,omitempty"`
 }
 
 // Notice is a pool-level message (ticket 06): not any one peer's work.
@@ -66,6 +69,8 @@ type Engine struct {
 	recheck   chan struct{}
 	fixing    sync.Mutex // one doctor repair at a time
 	upgrading sync.Mutex // one pool upgrade at a time
+	pushing   sync.Mutex // one pool push at a time
+	repoGit   sync.Mutex // one agent repo commit or push at a time
 
 	// OnUpdate, when set before Run, is called after each new snapshot is
 	// published (outside the engine's lock): the hub's cue to tell every
@@ -187,7 +192,8 @@ func (e *Engine) Fix() (fixed, failed []string, ran bool) {
 	now := e.now()
 	findings, ok, fixed, errs := mesh.DoctorWithHygiene(e.dir, true, now)
 	rep := mesh.NewDoctorReport(findings, ok, mesh.OutboundWiringLines(e.dir), now)
-	e.update(func(s *Snapshot) { s.Doctor = &rep })
+	push := mesh.PoolPushPreview(e.dir).Finding
+	e.update(func(s *Snapshot) { s.Doctor, s.PoolPush = &rep, push })
 	e.RefreshPending() // a repair can drop stale claims
 	failed = []string{}
 	for _, err := range errs {
@@ -201,7 +207,8 @@ func (e *Engine) RefreshDoctor() {
 	now := e.now()
 	findings, ok, _, _ := mesh.DoctorWithHygiene(e.dir, false, now)
 	rep := mesh.NewDoctorReport(findings, ok, mesh.OutboundWiringLines(e.dir), now)
-	e.update(func(s *Snapshot) { s.Doctor = &rep })
+	push := mesh.PoolPushPreview(e.dir).Finding
+	e.update(func(s *Snapshot) { s.Doctor, s.PoolPush = &rep, push })
 }
 
 // Run computes the first snapshot, then keeps it current until ctx ends.

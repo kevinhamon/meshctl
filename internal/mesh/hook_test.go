@@ -50,6 +50,32 @@ func TestHook_SessionStart_NoHandoffOnlyIdentity(t *testing.T) {
 	}
 }
 
+func TestHook_SessionStart_ResumeSkipsTranscriptBlocks(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	if err := HandoffSet(a, "current focus: wiring hooks", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// No remote: the repo nag is something that can change, so it stays.
+	ctx := HookSessionStart(dir, HookPayload{Cwd: a.Dir(), SessionID: "r", Source: "resume"}, 1, time.Now())
+	for _, gone := range []string{"# Mesh identity", "Session handoff"} {
+		if strings.Contains(ctx, gone) {
+			t.Fatalf("resume should not inject %q again, got %q", gone, ctx)
+		}
+	}
+	if !strings.Contains(ctx, "no git remote") {
+		t.Fatalf("resume should still carry the repo nag, got %q", ctx)
+	}
+	if len(SessionList(a, time.Now())) != 1 {
+		t.Fatalf("resume must still register presence")
+	}
+	// Compaction drops the transcript's copy, so everything comes back.
+	ctx = HookSessionStart(dir, HookPayload{Cwd: a.Dir(), SessionID: "r", Source: "compact"}, 1, time.Now())
+	if !strings.Contains(ctx, "# Mesh identity") || !strings.Contains(ctx, "Session handoff") {
+		t.Fatalf("compact should inject the full block, got %q", ctx)
+	}
+}
+
 func TestHook_SessionStart_RepoNagUntilRemote(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)

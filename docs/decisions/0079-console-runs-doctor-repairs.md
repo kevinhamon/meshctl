@@ -53,3 +53,29 @@ A pool whose last `pool upgrade` ran with an older meshctl shows **Needs upgrade
 - **Guarded like every POST.** An agent holding the token could start an upgrade, but any agent can already run `meshctl pool upgrade`, so the button grants nothing new.
 
 This is the console's third change to a pool.
+
+## Amendment (2026-10-28): the console can push the pool repo
+
+When the pool repo is clean and ahead of the remote branch it tracks, doctor's finding ("pool directory pool/ is N commit(s) ahead…") carries a **Push** button. Before, the person opened a terminal to run the `git push` the finding named. ADR-0066's "meshctl commits, humans push" stands: the button is the person pushing, from the page.
+
+- **Preview first.** The button lists the commits that would go and the branch they go to (`POST /api/pool/push/check?pool=`). Nothing runs until the person confirms.
+- **Narrow.** On confirm, `POST /api/pool/push?pool=` pushes only the pool repo's current branch to the branch it tracks. It never forces: when the remote has commits the pool does not, the push is refused and the result says to pull first. Agent repos get no button.
+- **Never waits for a password.** git runs with prompts off and no terminal, using the person's existing credentials (SSH key, keychain). Without usable credentials (for example a console started at login with no SSH agent) the result says so and shows the command to run in a terminal. One push runs at a time per pool.
+- **Agents cannot reach it.** Agents never run git in `pool/` (ADR-0066), so unlike the repairs and the upgrade, this endpoint would grant something new to an agent holding the token. The gate denies a shell command that names the endpoint, under the same check as git in `pool/`. The gate matches text, so this closes the plain route (`curl … /api/pool/push`), not every route.
+- **Guarded like every POST.** Host, token and Origin, as ADR-0077.
+
+This is the console's fourth change to a pool, and the first that leaves the machine.
+
+## Amendment (2026-10-28): the console can commit and push an agent repo
+
+ADR-0039 keeps a peer's knowledge safe only once committed and pushed, but doctor named only a workspace with no repo or no remote. Doctor now also warns, per agent, when a workspace with a remote has uncommitted paths ("N uncommitted path(s)…") or, once clean, commits its remote branch lacks ("N commit(s) ahead of origin/main…"). Each finding carries a button. This replaces the previous amendment's "Agent repos get no button."
+
+- **Commit** lists the paths a commit takes (`POST /api/agent/commit/check?pool=&agent=`) and asks for a message, pre-filled with a suggestion the person can edit (below). On confirm, `POST /api/agent/commit` stages everything and commits it as the person (their git identity). The request carries the status the person saw; when the tree changed since, nothing is committed and the person looks again. A commit that leaves the repo ahead offers Push in the same dialog.
+- **Push** works like the pool's: the commits that would go first, then a push of the current branch to the branch it tracks, never forced, prompts off, with the same outcomes (`POST /api/agent/push/check`, `POST /api/agent/push`).
+- **One at a time per pool**, across commits and pushes.
+- **Agents cannot reach it.** An agent commits and pushes its own workspace with git; the buttons are the person's. The gate denies a shell command naming either endpoint, with the same text-match limit as the pool push.
+- **Guarded like every POST.** Host, token and Origin, as ADR-0077.
+
+- **The suggested message names what changed.** Recall's git spine, session records and the console's recent commits all read commit subjects back, so a fixed "Update <agent> workspace" is useless to them. The check answers `suggested`, built from the paths and their diffs alone (no model call). Changes fall into three kinds. *Wiring* is a `mesh-*` skill, a file carrying the meshctl-managed marker, or `.gitignore` edits inside its managed block; CLAUDE.md, AGENTS.md, settings and template READMEs count only alongside one of those. It is named by the headings the skill diff adds, else by the meshctl version. *Knowledge* is a `knowledge/` entry, named by area and slug ("Add candidates: <slug>, …"). *Other* is anything else, named by its top-level path. The kind with the most paths is the subject, cut near 72 characters. The other kinds, plus the full list when the subject was cut, go in an "Also:" body, the same shape as the pool commit.
+
+This is the console's first change to an agent's workspace.

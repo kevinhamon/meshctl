@@ -44,3 +44,13 @@ func setProcGroup(cmd *exec.Cmd) {
 		return nil
 	}
 }
+
+// noTTY starts the child in a new session, with no controlling terminal, so a
+// tool that would ask for a password or a host key (ssh opens /dev/tty itself)
+// fails instead of waiting at a terminal nobody is watching.
+func noTTY(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setsid = true
+}

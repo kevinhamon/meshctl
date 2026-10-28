@@ -50,7 +50,8 @@ func gitStatusLines(dir string, paths ...string) []string {
 		return nil
 	}
 	var lines []string
-	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	// Trim only line ends: the porcelain status columns start with a space.
+	for _, ln := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
 		if ln != "" {
 			lines = append(lines, ln)
 		}

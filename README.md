@@ -169,8 +169,9 @@ words. Settings (layout, agent order, attention filter) are saved per pool in
 `pool/console.yaml`, committed by the console and never pushed. It watches the pool's state
 files, so the view moves within a moment of a change. Cards sort by activity (open
 sessions first, then agents that need you) or by name. The things it changes in the pool
-are its own settings, doctor's automatic repairs, and `pool upgrade` for a pool that needs
-one, each run from a button after you see what it will do
+are its own settings, doctor's automatic repairs, `pool upgrade` for a pool that needs
+one, a push of the pool repo when it is ahead of its remote, and a commit or push of an agent's
+repo when doctor finds uncommitted or unpushed work (never forced; agents cannot call them), each run from a button after you see what it will do
 ([ADR-0079](docs/decisions/0079-console-runs-doctor-repairs.md)). Pin
 the page as a browser app window to keep it beside your terminals. `meshctl console install`
 starts it at login (macOS LaunchAgent; `meshctl update` restarts it on the new binary);

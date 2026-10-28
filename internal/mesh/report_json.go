@@ -122,6 +122,7 @@ type DoctorFindingJSON struct {
 	Level   string `json:"level"` // error | warn
 	Message string `json:"message"`
 	Fixable bool   `json:"fixable"`
+	Action  string `json:"action,omitempty"` // the console button it carries: commit | push
 }
 
 // NewDoctorReport wraps findings in the versioned envelope.
@@ -129,7 +130,7 @@ func NewDoctorReport(findings []DoctorFinding, ok bool, info []string, now time.
 	r := DoctorReportJSON{Schema: ReportSchema, Generated: now.UTC().Format(time.RFC3339), OK: ok,
 		Info: append([]string{}, info...), Findings: []DoctorFindingJSON{}}
 	for _, f := range findings {
-		r.Findings = append(r.Findings, DoctorFindingJSON{Agent: f.Agent, Level: f.Level, Message: f.Message, Fixable: f.Fixable})
+		r.Findings = append(r.Findings, DoctorFindingJSON{Agent: f.Agent, Level: f.Level, Message: f.Message, Fixable: f.Fixable, Action: f.Action})
 	}
 	return r
 }
