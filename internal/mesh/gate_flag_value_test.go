@@ -248,3 +248,20 @@ func TestGate_PeerDenyListsSeeFlagsBeforeVerb(t *testing.T) {
 		}
 	}
 }
+
+// Issue #15: usage of a gated command passes; a real call beside it does not.
+func TestGate_HelpOnGatedCommandsPasses(t *testing.T) {
+	dir, a := poolGateFixture(t)
+	for cmd, want := range map[string]string{
+		"meshctl kb confirm --help":                          "allow",
+		"meshctl state set --help":                           "allow",
+		"meshctl kb finish -h":                               "allow",
+		"meshctl help state":                                 "allow",
+		"meshctl state set --help && meshctl state set":      "deny",
+		"meshctl kb confirm --help; meshctl kb confirm a.md": "deny",
+	} {
+		if got := gateVerdict(GatePreToolUse(dir, bash(a, "sess-1", cmd))); got != want {
+			t.Errorf("%q: want %s, got %s", cmd, want, got)
+		}
+	}
+}

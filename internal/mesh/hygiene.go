@@ -107,6 +107,37 @@ func poolLevelHygiene(agentsDir string, now time.Time) []HygieneItem {
 		pool(nag, nil)
 	}
 
+	// Member list (pool-clone C5): stale against disk ⇒ another machine would
+	// rebuild a different pool. Refreshing it is meshctl's own file, so fixable.
+	if IsPool(agentsDir) && !PoolDirIsLegacy(agentsDir) {
+		if drift, err := MembersDrift(agentsDir); err == nil && len(drift) > 0 {
+			pool("member list out of date ("+strings.Join(drift, "; ")+") — run `meshctl pool upgrade` to refresh "+
+				poolRel(agentsDir, MembersFile), func() error { _, err := RefreshMembers(agentsDir); return err })
+		}
+	}
+
+	// Members a clone left behind (kept in the list until they arrive).
+	if IsPool(agentsDir) {
+		kept := NotClonedHere(agentsDir)
+		paths := make([]string, 0, len(kept))
+		for p := range kept {
+			paths = append(paths, p)
+		}
+		sort.Strings(paths)
+		for _, p := range paths {
+			dest := filepath.Join(agentsDir, filepath.FromSlash(p))
+			why := "it has no git remote"
+			switch {
+			case dirExists(dest):
+				why = "a folder that is not this agent is already there — move it aside, then: git clone " + kept[p].Remote + " " + dest
+			case kept[p].Remote != "":
+				why = "its clone failed — retry: git clone " + kept[p].Remote + " " + dest
+			}
+			pool(fmt.Sprintf("%s is in the member list but was not cloned to this machine (%s) — copy it to %s; if it is retired, delete %s and run `meshctl pool upgrade` to drop it",
+				kept[p].Name, why, dest, cloneMissingPath(agentsDir)), nil)
+		}
+	}
+
 	// Doctrine leftovers.
 	doctrine := DoctrinePath(agentsDir)
 	if entries, err := os.ReadDir(doctrine); err == nil {

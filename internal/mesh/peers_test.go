@@ -201,7 +201,7 @@ func TestPeers_UpgradePlanAndDoctorFlagStaleSet(t *testing.T) {
 	if !found {
 		t.Fatal("doctor must flag the stale peer set")
 	}
-	if _, err := UpgradeAgents(dir); err != nil {
+	if _, err := UpgradeAgents(dir, "vtest"); err != nil {
 		t.Fatal(err)
 	}
 	for _, a := range []string{"developer", "architect", "catalog-expert", "pm"} {
@@ -387,7 +387,7 @@ func TestPeers_StaleMatcherRefreshesOnUpgrade(t *testing.T) {
 	if plan := PlanPeerAgents(dir, caller.Dir()); strings.Join(plan.Update, ",") != "architect" {
 		t.Fatalf("stale matcher must plan a refresh, got %+v", plan)
 	}
-	if _, err := UpgradeAgents(dir); err != nil {
+	if _, err := UpgradeAgents(dir, "vtest"); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = os.ReadFile(f)

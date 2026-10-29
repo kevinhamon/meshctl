@@ -1,8 +1,10 @@
 package mesh
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -164,18 +166,17 @@ func TestGate_ShellGitUnderPoolDenied(t *testing.T) {
 	writeSummary(t, a, "sess-1", poolSummary) // a summary never makes git in pool/ askable
 	pool := PoolDir(dir)
 	deny := []HookPayload{
-		bash(a, "sess-1", "git -C ../pool status"),
 		bash(a, "sess-1", "git -C "+pool+" add glossary.md && git -C "+pool+" commit -m x"),
 		bash(a, "sess-1", "cd ../pool && git add -A"),
-		bash(a, "sess-1", "cd "+pool+"; git log --oneline"),
 		bash(a, "sess-1", "git add "+pool+"/glossary.md"),
-		bash(a, "sess-1", "git diff ../pool/doctrine/local.md"),
-		{Cwd: pool, SessionID: "sess-1", ToolName: "Bash", PeerAgent: "architect", ToolInput: []byte(`{"command":"git status"}`)},
+		bash(a, "sess-1", "git -C ../pool -c core.pager=cat checkout -- glossary.md"),
+		bash(a, "sess-1", "git -C ../pool diff --output=/tmp/x.patch"),
+		{Cwd: pool, SessionID: "sess-1", ToolName: "Bash", PeerAgent: "architect", ToolInput: []byte(`{"command":"git stash"}`)},
 	}
 	for _, p := range deny {
 		d := GatePreToolUse(dir, p)
-		if !d.Deny || d.Check != GateCheckPoolPath || !strings.Contains(d.Reason, "never run git") {
-			t.Fatalf("%s: want deny (never run git in pool/), got %+v", string(p.ToolInput), d)
+		if !d.Deny || d.Check != GateCheckPoolPath || !strings.Contains(d.Reason, "never change git state") {
+			t.Fatalf("%s: want deny (never change git state in pool/), got %+v", string(p.ToolInput), d)
 		}
 	}
 	allow := []HookPayload{
@@ -183,6 +184,12 @@ func TestGate_ShellGitUnderPoolDenied(t *testing.T) {
 		bash(a, "sess-1", "git -C "+a.Dir()+" log --oneline"), // explicit own dir
 		bash(a, "sess-1", "grep -n 'git -C pool' notes.md"),   // a mention is not an invocation
 		bash(a, "sess-1", "cat ../pool/glossary.md"),
+		// Read-only git in pool/ (issue #8): checking meshctl's commit.
+		bash(a, "sess-1", "git -C ../pool status"),
+		bash(a, "sess-1", "cd "+pool+"; git log --oneline"),
+		bash(a, "sess-1", "git diff ../pool/doctrine/local.md"),
+		bash(a, "sess-1", "git -C ../pool -c core.pager=cat show HEAD"),
+		{Cwd: pool, SessionID: "sess-1", ToolName: "Bash", PeerAgent: "architect", ToolInput: []byte(`{"command":"git status"}`)},
 	}
 	for _, p := range allow {
 		if d := GatePreToolUse(dir, p); d.Deny || d.Ask {
@@ -265,5 +272,27 @@ func TestGate_ShellWriteTargetsAgreeAcrossRules(t *testing.T) {
 		if got := d.Deny && strings.Contains(d.Reason, KnowledgeDir); got != want {
 			t.Errorf("kb rule %q: denied=%v, want %v (%+v)", cmd, got, want, d)
 		}
+	}
+}
+
+// Issue #14: `tools:` written into the identity file is denied, naming the
+// config file; other pool.yaml edits and tools in config.yaml are asked as usual.
+func TestGate_ToolsIntoPoolMarkerDenied(t *testing.T) {
+	dir, a := poolGateFixture(t)
+	writeSummary(t, a, "sess-1", poolSummary)
+	pool := PoolDir(dir)
+	write := func(file, content string) HookPayload {
+		return HookPayload{Cwd: a.Dir(), SessionID: "sess-1", ToolName: "Write",
+			ToolInput: json.RawMessage(`{"file_path":` + strconv.Quote(filepath.Join(pool, file)) + `,"content":` + strconv.Quote(content) + `}`)}
+	}
+	d := GatePreToolUse(dir, write(PoolMarkerFile, "name: x\ntools:\n  - cmd: jq\n"))
+	if !d.Deny || !strings.Contains(d.Reason, PoolConfigFile) {
+		t.Fatalf("want deny naming %s, got %+v", PoolConfigFile, d)
+	}
+	if d := GatePreToolUse(dir, write(PoolConfigFile, "tools:\n  - cmd: jq\n")); !d.Ask {
+		t.Fatalf("tools in the config file must be asked, got %+v", d)
+	}
+	if d := GatePreToolUse(dir, write(PoolMarkerFile, "name: x\n")); !d.Ask {
+		t.Fatalf("a pool.yaml edit without tools must be asked, got %+v", d)
 	}
 }

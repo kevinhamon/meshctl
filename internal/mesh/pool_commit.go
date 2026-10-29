@@ -17,7 +17,7 @@ import (
 // gate asked, the tool ran), the PostToolUse hook commits exactly the files
 // that write touched, with the user's git identity (none is set here) and a
 // subject naming what changed: `glossary: <term>`, `doctrine: <section>`,
-// `config: <key>`. Agents never run git in pool/ (the gate denies it); meshctl's
+// `config: <key>`. Agents never change git state in pool/ (the gate denies it); meshctl's
 // own writes commit the same way (`doctrine: upgrade to <version>`). Ignored
 // runtime state is never staged.
 

@@ -98,6 +98,72 @@ func TestKBRules_MatchesMCPArgsAndSkipsKBEdits(t *testing.T) {
 	}
 }
 
+// Issue #2: a Write whose body discusses a rule's topic is not the action the
+// rule guards; the target path still matches.
+func TestKBRules_FileEditsMatchPathNotContent(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	writeKBNote(t, a, "experience/migrations.md", migrateRuleNote)
+
+	report := HookPayload{Cwd: a.Dir(), SessionID: "w1", ToolName: "Write",
+		ToolInput: json.RawMessage(`{"file_path":` + strconv.Quote(filepath.Join(a.Dir(), ".scratch/report.md")) + `,"content":"we never migrate prod without a dry run; see schema.sql"}`)}
+	if d := GatePreToolUse(dir, report); d.Deny {
+		t.Fatalf("a document mentioning a trigger must pass, got %+v", d)
+	}
+	schema := HookPayload{Cwd: a.Dir(), SessionID: "w2", ToolName: "Edit",
+		ToolInput: json.RawMessage(`{"file_path":` + strconv.Quote(filepath.Join(a.Dir(), "db/schema.sql")) + `,"new_string":"x"}`)}
+	if d := GatePreToolUse(dir, schema); !d.Deny {
+		t.Fatalf("an edit whose path matches must be denied once, got %+v", d)
+	}
+}
+
+// Issue #1: heredoc prose on a shell call is not what the command acts on.
+func TestKBRules_ShellMatchesOwnArgumentsOnly(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	writeKBNote(t, a, "experience/migrations.md", migrateRuleNote)
+
+	if d := GatePreToolUse(dir, bash(a, "h1", "cat > /tmp/notes.md <<'EOF'\nnever migrate prod blind\nEOF")); d.Deny {
+		t.Fatalf("a heredoc body must not match, got %+v", d)
+	}
+	if d := GatePreToolUse(dir, bash(a, "h2", "goose migrate prod up")); !d.Deny {
+		t.Fatalf("the command itself must still match, got %+v", d)
+	}
+}
+
+// Issue #2: candidates written in a `kb begin` worktree are KB edits too.
+func TestKBRules_SkipsKBWorktreeEdits(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	writeKBNote(t, a, "experience/migrations.md", migrateRuleNote)
+	wt := worktreePath(dir, a.Name, "s1")
+	if err := os.MkdirAll(filepath.Join(wt, KnowledgeDir, "candidates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	edit := HookPayload{Cwd: a.Dir(), SessionID: "k1", ToolName: "Write",
+		ToolInput: json.RawMessage(`{"file_path":` + strconv.Quote(filepath.Join(wt, KnowledgeDir, "candidates/schema.sql.md")) + `,"content":"x"}`)}
+	if d := GatePreToolUse(dir, edit); d.Deny {
+		t.Fatalf("a KB worktree edit must not be gated, got %+v", d)
+	}
+	other := worktreePath(dir, "developer", "s1")
+	edit.ToolInput = json.RawMessage(`{"file_path":` + strconv.Quote(filepath.Join(other, KnowledgeDir, "schema.sql")) + `,"content":"x"}`)
+	if d := GatePreToolUse(dir, edit); !d.Deny {
+		t.Fatalf("another agent's worktree is not this agent's KB, got %+v", d)
+	}
+}
+
+// Issue #3: the decision log names the note a kb-rule deny fired on.
+func TestKBRules_LogNamesRule(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	writeKBNote(t, a, "experience/migrations.md", migrateRuleNote)
+	GatePreToolUse(dir, bash(a, "l1", "goose migrate prod up"))
+	b, _ := os.ReadFile(GateLogPath(a.Dir()))
+	if !strings.Contains(string(b), "check=kb-rule") || !strings.Contains(string(b), "rule=knowledge/experience/migrations.md") {
+		t.Fatalf("log row must name the rule:\n%s", b)
+	}
+}
+
 func TestKBRules_MatchesToolName(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)

@@ -76,6 +76,32 @@ cd ~/myproject-mesh/steward
 Prefer to build the roster by hand? `meshctl pool init … --no-steward`, then
 `meshctl agent new <name> …` per agent.
 
+## Move a pool to another machine
+
+The pool repo lists its members in `pool/members.yaml` (each agent's folder, git remote and
+branch; meshctl keeps it current and commits it, you push). On the new machine, one command
+rebuilds the pool from the pool repo's URL:
+
+```sh
+meshctl pool clone git@forge.example:me/myproject-pool.git ~/myproject-mesh
+```
+
+It clones the pool repo into `~/myproject-mesh/pool`, every agent (and every extra listed
+under `extras:` in `pool/config.yaml`) beside it, registers the pool and runs
+`meshctl pool upgrade` for this machine's wiring. A folder already there is left alone; an
+agent with no remote is reported and the command exits non-zero.
+
+Before moving:
+
+1. `meshctl doctor` — every agent needs a git remote ("cannot be rebuilt on another
+   machine" otherwise), and the member list must be current (`doctor --fix` refreshes it).
+2. Push every agent repo and the pool repo.
+3. Answer or close open requests. Git ignores what is in flight, so these stay behind:
+   open requests (`intake/`) and their claims, the closed-request archive, `docs/local/`,
+   `.memory/` indexes, and pool runtime state (KB worktrees, the dispatch log).
+4. After the clone: clone any `workdirs` repos the agents work in, and install the harness
+   each agent runs on; `pool clone` lists both.
+
 ## The steward — your mesh's front door
 
 `pool init` scaffolds one special agent, the **steward**, into every fresh pool. It is
@@ -106,6 +132,7 @@ existing pool with `meshctl agent bootstrap`.
 ```
 meshctl pool    init [path] | upgrade [--check] [--force] [--doctrine-only] | list | teardown [--purge --yes] [--dry-run]
                 register [path] | forget <name|path> | migrate   # machine registry; legacy layout
+                clone <pool-repo-url> [dir]   # rebuild a pool on this machine from its pool repo
 meshctl agent   new <name> | onboard <name|path> | bootstrap | list | identity | brief --agent <peer> [--request <id>]
 meshctl msg     ask <target> <type> "…" [--in-session [--work] | --detach] | send <target> <type> "…"
 meshctl inbox   list [--all] | next [--claim] | claim <id> | release <id>   # list: open queue, priority then age
@@ -229,6 +256,7 @@ release workflow runs it before building.
 | In-session peers, consult and work (`ask --in-session [--work]`) | ✅ Agent tool | ✅ `subagent` tool; mutating peers asked by opencode | ✗ refused |
 | Distillation at a boundary | ✅ distiller subagent | ✅ at session end | ✅ at session end |
 | Status line | ✅ every 10s | ✗ none | ✗ none |
+| Rebuild a pool elsewhere: member list (`pool/members.yaml`), `pool clone` | ✅ | ✅ | ✅ |
 | Console: live pool view, open sessions (`meshctl console`) | ✅ with scheduled jobs | ✅ no scheduled jobs | ✅ no scheduled jobs |
 <!-- parity:end -->
 

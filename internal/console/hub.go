@@ -37,6 +37,9 @@ type PoolSummary struct {
 	Warnings int    `json:"warnings"`
 	Sessions int    `json:"sessions"`
 	Upgrade  bool   `json:"upgrade"`
+	// Unrestorable counts agents doctor says could not be rebuilt on another
+	// machine (no repo or no remote; pool-clone C6).
+	Unrestorable int `json:"unrestorable"`
 }
 
 // Frame is what a page receives: its pool's snapshot, which pool that is,
@@ -312,6 +315,9 @@ func Summarize(r PoolRef, s Snapshot) PoolSummary {
 				ps.Errors++
 			} else {
 				ps.Warnings++
+			}
+			if f.Kind == mesh.FindingNotRestorable {
+				ps.Unrestorable++
 			}
 		}
 	}

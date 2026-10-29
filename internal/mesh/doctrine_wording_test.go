@@ -80,7 +80,8 @@ func templateTexts(t *testing.T) map[string]string {
 			if err != nil {
 				t.Fatal(err)
 			}
-			out[p] = string(b)
+			// As scaffolded: the Cognition stanza arrives through its token.
+			out[p] = strings.ReplaceAll(string(b), cognitionToken, cognitionSection)
 		}
 	}
 	walk("templates")

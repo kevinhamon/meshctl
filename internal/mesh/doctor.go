@@ -230,7 +230,14 @@ type DoctorFinding struct {
 	// Action names the console button the finding carries: commit or push
 	// for an agent repo (ADR-0079 amendment); "" for none.
 	Action string
+	// Kind tags a finding the console counts: FindingNotRestorable for an
+	// agent that could not be rebuilt on another machine; "" for the rest.
+	Kind string
 }
+
+// FindingNotRestorable marks an agent with no repo or no remote: `pool clone`
+// cannot rebuild it elsewhere (pool-clone C5, C6).
+const FindingNotRestorable = "not-restorable"
 
 // reservedOwnerFindings errors on a workspace at the pool root whose name is
 // the reserved owner `pool` (any case) and which carries an agent manifest: a
@@ -513,6 +520,8 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 		}
 		if b, err := os.ReadFile(claude); err == nil && !hasCognitionSection(string(b)) {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md missing the Cognition standing-order stanza (ADR-0026) — run `meshctl agent onboard " + a.Name + "`"})
+		} else if err == nil && cognitionStanzaUnrecognized(string(b)) {
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md Cognition stanza has no ending meshctl recognises, so onboard cannot refresh it — replace it by hand with the current stanza"})
 		}
 		// Harness wiring present? (ADR-0032)
 		if a.HarnessName() == HarnessOpencode && !fileExists(filepath.Join(a.Dir(), "opencode.json")) {
@@ -524,9 +533,9 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 		findings = append(findings, sessionSignalFindings(a)...)
 		// Repo hygiene (ADR-0039): knowledge is only safe once pushed to a remote.
 		if h := AgentRepoHygiene(a.Dir()); !h.IsRepo {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "workspace is not a git repo — `git init` + commit (knowledge/ unsafe until versioned + pushed)"})
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Kind: FindingNotRestorable, Message: "workspace is not a git repo — `git init` + commit (knowledge/ unsafe until versioned + pushed; it cannot be rebuilt on another machine)"})
 		} else if !h.HasRemote {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no git remote — create one and push (knowledge/ lives only on this machine)"})
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Kind: FindingNotRestorable, Message: "no git remote — create one and push (knowledge/ lives only on this machine, and it cannot be rebuilt on another machine)"})
 		} else if msg, action := AgentRepoFinding(a.Dir()); msg != "" {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg, Action: action})
 		}

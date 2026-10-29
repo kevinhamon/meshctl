@@ -13,7 +13,7 @@ import (
 
 const oldCognitionStanza = `## Cognition — maintain your own knowledge base (standing order)
 
-You own a git-tracked ` + "`knowledge/`" + ` KB.
+You own a git-tracked ` + "`knowledge/`" + ` KB. Run the ` + "`mesh-cognition`" + ` skill.
 
 - **Distill as you learn.** OLD-STANZA-LINE run kb finish without a summary.
 
@@ -131,5 +131,77 @@ func TestOnboard_RefreshesStaleInboundOrderInPlace(t *testing.T) {
 	}
 	if p := planAgent(a, finishNow); strings.Contains(strings.Join(p.Actions, "\n"), "Inbound order") {
 		t.Fatalf("a current CLAUDE.md still plans an Inbound refresh: %v", p.Actions)
+	}
+}
+
+// legacyCognitionStanza is the stanza the retired templates/ tree wrote: no
+// ADR closing line, and no docs/ bullet (issue #11).
+const legacyCognitionStanza = `## Cognition — maintain your own knowledge base (standing order)
+
+Run the **` + "`mesh-cognition`" + ` skill** for the full procedure; its short form:
+
+- **Handoff at end.** Rewrite ` + "`knowledge/handoff.md`" + ` via ` + "`meshctl handoff set`" + `.
+- **Repo hygiene.** Your workspace must be its own git repo **with a remote**. Session start nags until a remote exists.
+
+Authoritative spec: your pool's ` + "`../pool/doctrine/agent-comms.md`" + ` §Knowledge & Memory.
+`
+
+func TestOnboard_RefreshesLegacyCognitionStanza(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", false, nil)
+	claude := filepath.Join(a.Dir(), "CLAUDE.md")
+	b, _ := os.ReadFile(claude)
+	cur := string(b)
+	start := strings.Index(cur, "## Cognition — ")
+	end := strings.Index(cur[start:], "(ADR-0014–0018).\n") + start + len("(ADR-0014–0018).\n")
+	stale := cur[:start] + legacyCognitionStanza + "\n## Human notes\n\nHUMAN-TRAILER keep me.\n" + cur[end:]
+	if err := os.WriteFile(claude, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if p := planAgent(a, finishNow); !strings.Contains(strings.Join(p.Actions, "\n"), "refresh Cognition stanza") {
+		t.Fatalf("plan must name the legacy stanza, got actions %v warnings %v", p.Actions, p.Warnings)
+	}
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(claude)
+	got := string(b)
+	if strings.Contains(got, "Session start nags") || !strings.Contains(got, "Documents for the person go in") {
+		t.Fatalf("legacy stanza not replaced with the current one:\n%s", got)
+	}
+	if n := strings.Count(got, "## Cognition — "); n != 1 || !strings.Contains(got, "HUMAN-TRAILER keep me.") {
+		t.Fatalf("want one stanza and the human text kept:\n%s", got)
+	}
+}
+
+// A stanza whose ending meshctl does not know is warned about, never called current.
+func TestPoolUpgradePlan_WarnsOnUnrecognizedCognitionStanza(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", false, nil)
+	claude := filepath.Join(a.Dir(), "CLAUDE.md")
+	b, _ := os.ReadFile(claude)
+	cur := string(b)
+	start := strings.Index(cur, "## Cognition — ")
+	end := strings.Index(cur[start:], "(ADR-0014–0018).\n") + start + len("(ADR-0014–0018).\n")
+	edited := cur[:start] + "## Cognition — maintain your own knowledge base (standing order)\n\nRun the mesh-cognition skill. Hand-rewritten, no known ending.\n" + cur[end:]
+	if err := os.WriteFile(claude, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := planAgent(a, finishNow)
+	if !strings.Contains(strings.Join(p.Warnings, "\n"), "no ending meshctl recognises") {
+		t.Fatalf("plan must warn, got actions %v warnings %v", p.Actions, p.Warnings)
+	}
+}
+
+// A fresh workspace's stanza is the one onboard refreshes to: nothing to plan.
+func TestScaffold_FreshCognitionStanzaIsCurrent(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", false, nil)
+	b, _ := os.ReadFile(filepath.Join(a.Dir(), "CLAUDE.md"))
+	if strings.Contains(string(b), cognitionToken) || !strings.Contains(string(b), "Align before you act") {
+		t.Fatalf("fresh CLAUDE.md lacks the current stanza:\n%s", b)
+	}
+	if p := planAgent(a, finishNow); strings.Contains(strings.Join(p.Actions, "\n"), "Cognition") {
+		t.Fatalf("a fresh workspace plans a Cognition change: %v", p.Actions)
 	}
 }

@@ -27,6 +27,10 @@ const (
 	poolConfigAddCommit   = "config: add " + PoolConfigFile
 )
 
+// poolIgnoreMemoryCommit is the subject of the commit adding .memory/ to an
+// ignore block written before it was one of the block's lines.
+const poolIgnoreMemoryCommit = "pool: ignore " + MemoryDir + "/"
+
 // poolIgnoreBlock is the meshctl-managed block of the pool repo's ignore file:
 // runtime state never enters the pool's history. Doctrine merge scratch
 // (`.upstream`, `.bak-*`) is meshctl's, not knowledge, so it stays out too.
@@ -37,6 +41,8 @@ var poolIgnoreBlock = "\n" + gitignoreMarker + " — do not edit\n" +
 	DispatchLockFile + "\n" +
 	DispatchLockFile + ".*\n" +
 	WorktreesDirName + "/\n" +
+	"# machine-local markers and the upgrade stamp, disposable\n" +
+	MemoryDir + "/\n" +
 	"# doctrine merge scratch written by `meshctl pool upgrade`\n" +
 	DoctrineDirName + "/*" + upstreamSuffix + "\n" +
 	DoctrineDirName + "/*.bak-*\n" +
@@ -45,18 +51,19 @@ var poolIgnoreBlock = "\n" + gitignoreMarker + " — do not edit\n" +
 // poolDirState is what PlanPoolDir and UpgradePoolDir both read, so the
 // preview and the apply can never disagree about what is left to do.
 type poolDirState struct {
-	legacy          bool // still in the hidden directory
-	foreign         bool // legacy, and a `pool/` that is not the pool already sits at the root
-	staleLegacy     bool // migrated, but the hidden directory is still there beside pool/
-	markerMissing   bool
-	configMissing   bool
-	splitTools      splitToolsState // tools still in the identity file (config split, decision 10)
-	splitCmds       []string
-	glossaryMissing bool
-	repoMissing     bool
-	ignoreMissing   bool
-	commitMissing   bool
-	worktrees       int // live worktree links the rename must repair
+	legacy              bool // still in the hidden directory
+	foreign             bool // legacy, and a `pool/` that is not the pool already sits at the root
+	staleLegacy         bool // migrated, but the hidden directory is still there beside pool/
+	markerMissing       bool
+	configMissing       bool
+	splitTools          splitToolsState // tools still in the identity file (config split, decision 10)
+	splitCmds           []string
+	glossaryMissing     bool
+	repoMissing         bool
+	ignoreMissing       bool
+	memoryIgnoreMissing bool // the block predates its .memory/ line
+	commitMissing       bool
+	worktrees           int // live worktree links the rename must repair
 }
 
 func readPoolDirState(poolRoot string) poolDirState {
@@ -73,6 +80,10 @@ func readPoolDirState(poolRoot string) poolDirState {
 	st.repoMissing = !poolRepoPresent(dir)
 	if b, _ := os.ReadFile(filepath.Join(dir, PoolIgnoreFile)); !strings.Contains(string(b), gitignoreMarker) {
 		st.ignoreMissing = true
+	} else if !hasIgnoreLine(string(b), MemoryDir+"/") {
+		// Blocks written before .memory/ joined them (the upgrade stamp
+		// lives there, so the repo was left dirty after every upgrade).
+		st.memoryIgnoreMissing = true
 	}
 	if st.repoMissing {
 		st.commitMissing = true
@@ -99,7 +110,17 @@ func poolRepoPresent(dir string) bool {
 
 func (st poolDirState) pending() bool {
 	return st.legacy || st.markerMissing || st.configMissing || st.splitTools == splitAuto ||
-		st.glossaryMissing || st.repoMissing || st.ignoreMissing || st.commitMissing
+		st.glossaryMissing || st.repoMissing || st.ignoreMissing || st.memoryIgnoreMissing || st.commitMissing
+}
+
+// hasIgnoreLine reports whether an ignore file carries line on a line of its own.
+func hasIgnoreLine(body, line string) bool {
+	for _, l := range strings.Split(body, "\n") {
+		if strings.TrimSpace(l) == line {
+			return true
+		}
+	}
+	return false
 }
 
 // configCommit is the subject of the commit the config steps need on a pool
@@ -159,8 +180,14 @@ func PlanPoolDir(poolRoot string) (steps, warnings []string) {
 	if st.ignoreMissing {
 		steps = append(steps, "write "+cur+PoolIgnoreFile+" (ignore dispatch runtime files and worktrees)")
 	}
+	if st.memoryIgnoreMissing {
+		steps = append(steps, "add "+MemoryDir+"/ to "+cur+PoolIgnoreFile+" (machine-local state)")
+	}
 	if st.commitMissing {
 		steps = append(steps, "first commit in "+cur+" with your git identity (`"+poolInitialCommit+"`)")
+	}
+	if drift, err := MembersDrift(poolRoot); err == nil && len(drift) > 0 && !st.foreign {
+		steps = append(steps, "refresh "+cur+MembersFile+" ("+strings.Join(drift, "; ")+")")
 	}
 	return steps, warnings
 }
@@ -178,7 +205,7 @@ func UpgradePoolDir(poolRoot string, now time.Time) ([]string, error) {
 	}
 	st := readPoolDirState(abs)
 	if !st.pending() {
-		return nil, nil
+		return refreshMembersStep(abs, nil)
 	}
 	var did []string
 	cur, legacy := filepath.Join(abs, CurrentPoolDir), filepath.Join(abs, LegacyPoolDir)
@@ -242,7 +269,22 @@ func UpgradePoolDir(poolRoot string, now time.Time) ([]string, error) {
 		}
 		did = append(did, "wrote "+poolRel(abs, PoolIgnoreFile))
 	}
+	if st.memoryIgnoreMissing {
+		if err := ensureGitignoreLine(dir, MemoryDir+"/"); err != nil {
+			return did, err
+		}
+		did = append(did, "added "+MemoryDir+"/ to "+poolRel(abs, PoolIgnoreFile))
+		if !st.commitMissing {
+			if _, err := commitPoolPaths(dir, []string{PoolIgnoreFile}, poolIgnoreMemoryCommit, ""); err != nil {
+				return did, fmt.Errorf("commit in %s/ failed (%v) — set git user.name and user.email, then rerun `meshctl pool upgrade`", PoolDirName(abs), err)
+			}
+		}
+	}
 	if st.commitMissing {
+		// The member list goes in the first commit with the rest.
+		if did, err = refreshMembersStep(abs, did); err != nil {
+			return did, err
+		}
 		if _, err := git(dir, "add", "-A"); err != nil {
 			return did, err
 		}
@@ -261,7 +303,17 @@ func UpgradePoolDir(poolRoot string, now time.Time) ([]string, error) {
 		}
 		did = append(did, "committed "+poolRel(abs)+"/ (`"+subject+"`)")
 	}
-	return did, nil
+	return refreshMembersStep(abs, did)
+}
+
+// refreshMembersStep is the member-list step of the pool directory upgrade
+// (pool-clone C1): rewrite and commit members.yaml when it differs from disk.
+func refreshMembersStep(poolRoot string, did []string) ([]string, error) {
+	changed, err := RefreshMembers(poolRoot)
+	if changed {
+		did = append(did, "member list: "+poolRel(poolRoot, MembersFile))
+	}
+	return did, err
 }
 
 // repairWorktreeLinks re-points the peer repos' worktree metadata at the

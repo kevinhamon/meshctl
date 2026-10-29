@@ -214,7 +214,10 @@ func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error)
 	}
 
 	// Rendered template files.
-	repl := strings.NewReplacer("__NAME__", spec.Name, "__DIR__", spec.Name, "__BADGE__", spec.Badge.Label, poolDirToken, PoolDirName(agentsDir))
+	// The Cognition stanza has one source, cognitionSection, so a fresh
+	// workspace gets exactly the text onboard refreshes (issue #11).
+	repl := strings.NewReplacer("__NAME__", spec.Name, "__DIR__", spec.Name, "__BADGE__", spec.Badge.Label, poolDirToken, PoolDirName(agentsDir),
+		cognitionToken, strings.TrimLeft(renderPoolTokens(agentsDir, cognitionSection), "\n"))
 	if err := renderTemplate("templates/CLAUDE.md", filepath.Join(dest, "CLAUDE.md"), repl); err != nil {
 		return "", err
 	}
@@ -865,25 +868,54 @@ Authoritative spec: ` + "`../__POOL_DIR__/doctrine/agent-comms.md`" + ` §Knowle
 // cognitionStanzaHeading and cognitionStanzaEnd bound the managed stanza
 // every onboard has written: from its heading line through its closing
 // ADR line. Text before or after is the human's.
+//
+// cognitionStanzaLegacyEnd closes the stanza the retired templates/ tree
+// wrote (`Authoritative spec: your pool's … §Knowledge & Memory.`, no ADR
+// line); peers onboarded from it carry it still (issue #11).
 const (
-	cognitionStanzaHeading = "## Cognition — maintain your own knowledge base (standing order)"
-	cognitionStanzaEnd     = "(ADR-0014–0018).\n"
+	cognitionToken           = "__COGNITION__" // where templates/CLAUDE.md takes the stanza
+	cognitionStanzaHeading   = "## Cognition — maintain your own knowledge base (standing order)"
+	cognitionStanzaEnd       = "(ADR-0014–0018).\n"
+	cognitionStanzaLegacyEnd = "§Knowledge & Memory.\n"
 )
+
+// cognitionStanzaBounds locates the managed stanza: from its heading line
+// through the first closing line of either form. ok=false when the heading
+// is not at a line start or no closing line follows it.
+func cognitionStanzaBounds(claude string) (start, end int, ok bool) {
+	start = strings.Index(claude, cognitionStanzaHeading)
+	if start < 0 || (start > 0 && claude[start-1] != '\n') {
+		return 0, 0, false
+	}
+	end = -1
+	for _, e := range []string{cognitionStanzaEnd, cognitionStanzaLegacyEnd} {
+		if n := strings.Index(claude[start:], e); n >= 0 && (end < 0 || start+n+len(e) < end) {
+			end = start + n + len(e)
+		}
+	}
+	return start, end, end >= 0
+}
+
+// cognitionStanzaUnrecognized reports a CLAUDE.md that has the stanza's
+// heading but no closing line meshctl knows: the refresh cannot bound it, so
+// it is left alone and must be reported rather than called current.
+func cognitionStanzaUnrecognized(claude string) bool {
+	if !strings.Contains(claude, cognitionStanzaHeading) {
+		return false
+	}
+	_, _, ok := cognitionStanzaBounds(claude)
+	return !ok
+}
 
 // refreshedCognitionSection returns claude with its managed Cognition stanza
 // replaced by the current one; stale=false when it is already current or the
 // stanza's bounds cannot be found (a hand-edited heading or ending is left
-// alone).
+// alone, and reported: cognitionStanzaUnrecognized).
 func refreshedCognitionSection(claude, poolRoot string) (fresh string, stale bool) {
-	start := strings.Index(claude, cognitionStanzaHeading)
-	if start < 0 || (start > 0 && claude[start-1] != '\n') {
+	start, end, ok := cognitionStanzaBounds(claude)
+	if !ok {
 		return claude, false
 	}
-	n := strings.Index(claude[start:], cognitionStanzaEnd)
-	if n < 0 {
-		return claude, false
-	}
-	end := start + n + len(cognitionStanzaEnd)
 	want := strings.TrimLeft(renderPoolTokens(poolRoot, cognitionSection), "\n")
 	if claude[start:end] == want {
 		return claude, false

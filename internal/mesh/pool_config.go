@@ -39,6 +39,7 @@ type PoolSettings struct {
 	Outbound  map[string]OutboundSurface `yaml:"outbound"`
 	Reconcile ReconcileSettings          `yaml:"reconcile"`
 	Tools     []ToolRef                  `yaml:"tools"`
+	Extras    []PoolExtra                `yaml:"extras"` // non-agent folders `pool clone` also clones (pool-clone C4)
 }
 
 // poolIdentity is the parsed identity file (PoolMarkerPath). `tools` is read

@@ -516,6 +516,12 @@ function homePage() {
   return out;
 }
 
+// unrestorableText is the line for agents with no git remote: `pool clone`
+// could not rebuild them on another machine.
+function unrestorableText(n) {
+  return n === 1 ? "1 agent can't be rebuilt elsewhere" : n + " agents can't be rebuilt elsewhere";
+}
+
 // poolCard is one pool on Home: its state and numbers; a click opens it.
 function poolCard(p) {
   const c = el("a", "card pcard");
@@ -536,6 +542,7 @@ function poolCard(p) {
     r("Waiting", p.pending ? plural(p.pending, "item") : "nothing");
     r("Sessions", p.sessions ? p.sessions + " open" + (p.jobs ? " · " + plural(p.jobs, "job") : "") : "none open");
     r("Doctor", (p.errors ? plural(p.errors, "error") + " · " : "") + plural(p.warnings, "warning"), p.errors ? "red" : "");
+    if (p.unrestorable) r("Rebuild", unrestorableText(p.unrestorable), "amber");
   } else rows.append(el("div", "empty", "starting…"));
   const foot = el("div", "foot");
   if (p.upgrade) {
@@ -759,6 +766,7 @@ function poolCounts(m) {
     sessions: (snap.sessions || []).length,
     jobs: (snap.sessions || []).reduce((n, s) => n + s.jobs.length, 0),
     errors: snap.doctor ? snap.doctor.findings.filter(f => f.level === "error").length : 0,
+    unrestorable: snap.doctor ? snap.doctor.findings.filter(f => f.kind === "not-restorable").length : 0,
   };
 }
 
@@ -784,6 +792,11 @@ function renderFooterStats(m) {
     stat("errors", snap.doctor ? c.errors : "…", c.errors === 1 ? "doctor error" : "doctor errors", "red"),
     el("span", "spacer"),
     el("span", "meta", snap.doctor ? "doctor checked " + ago(snap.doctor.generated) : "doctor running…"));
+  if (c.unrestorable) {
+    const u = el("span", "st amber", unrestorableText(c.unrestorable));
+    u.title = "These agents have no git remote: give each one and push, or meshctl pool clone cannot rebuild them on another machine.";
+    box.insertBefore(u, box.lastChild);
+  }
   const recheck = el("button", null, "Re-check doctor");
   recheck.addEventListener("click", () => doRecheck(recheck));
   box.append(recheck);

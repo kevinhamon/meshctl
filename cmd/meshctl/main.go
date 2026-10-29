@@ -137,6 +137,7 @@ func updateCmd() *cobra.Command {
 }
 
 func main() {
+	mesh.WriterVersion = resolveVersion()
 	if err := rootCmd().Execute(); err != nil {
 		var ce *mesh.CodedError
 		if errors.As(err, &ce) {
@@ -178,7 +179,7 @@ func rootCmd() *cobra.Command {
 
 func poolCmd() *cobra.Command {
 	c := &cobra.Command{Use: "pool", Short: "Pool lifecycle: init, upgrade doctrine, list/register/forget"}
-	c.AddCommand(poolInitCmd(), poolUpgradeCmd(), poolListCmd(), poolRegisterCmd(), poolForgetCmd(), poolMigrateCmd(), poolTeardownCmd())
+	c.AddCommand(poolInitCmd(), poolUpgradeCmd(), poolCloneCmd(), poolListCmd(), poolRegisterCmd(), poolForgetCmd(), poolMigrateCmd(), poolTeardownCmd())
 	return c
 }
 
@@ -504,6 +505,9 @@ func poolInitCmd() *cobra.Command {
 				for _, n := range snotes {
 					fmt.Println("  " + n)
 				}
+				if err := refreshMembers(abs); err != nil {
+					return err
+				}
 				fmt.Printf("next: cd %s && run your harness on the steward — it will interview you and build the roster\n", sdir)
 				return nil
 			}
@@ -525,7 +529,8 @@ func poolUpgradeCmd() *cobra.Command {
 		Long: "Brings the whole pool up to this meshctl and the harness versions installed here, in three steps:\n" +
 			"  0. pool directory — moves a legacy hidden pool directory to pool/, makes it a git repo on main with an\n" +
 			"     ignore file for runtime state, writes pool/config.yaml (human-owned settings) and moves any `tools`\n" +
-			"     still in pool/pool.yaml into it, and commits with your git identity (ADR-0066).\n" +
+			"     still in pool/pool.yaml into it, refreshes pool/members.yaml (the agents and their remotes, for\n" +
+			"     `pool clone`), and commits with your git identity (ADR-0066, ADR-0081).\n" +
 			"  1. doctrine — replaces doctrine files unchanged since meshctl wrote them. A file edited locally is\n" +
 			"     left alone: the new version is written beside it as <file>.upstream for a manual merge, and the\n" +
 			"     command exits non-zero. --force overwrites edited files after backing each up to <file>.bak-<timestamp>.\n" +
@@ -550,86 +555,193 @@ func poolUpgradeCmd() *cobra.Command {
 				}
 				return nil
 			}
-			fmt.Printf("pool: %s\n", dir)
-			// Pool directory first: doctrine and agents are written into its result.
-			moved, err := mesh.UpgradePoolDir(dir, time.Now())
-			for _, d := range moved {
-				fmt.Println("  " + d)
-			}
-			if err != nil {
-				return err
-			}
-			res, err := mesh.UpgradeDoctrine(dir, force, time.Now())
-			if err != nil {
-				return err
-			}
-			if len(res.Did) == 0 && len(res.Conflicts) == 0 {
-				fmt.Println("  doctrine already current")
-			}
-			for _, d := range res.Did {
-				fmt.Println("  " + d)
-			}
-			for _, c := range res.Conflicts {
-				p := filepath.Join(dir, c)
-				fmt.Printf("  ✗ %s has local edits — left untouched; new version at %s.upstream\n", c, c)
-				fmt.Printf("      merge: diff -u %s %s.upstream\n", p, p)
-			}
-			if !doctrineOnly {
-				agents, err := mesh.UpgradeAgents(dir)
-				for _, a := range agents {
-					if len(a.Actions) == 0 {
-						fmt.Printf("  %s: already current\n", a.Name)
-						continue
-					}
-					fmt.Printf("  %s (%s):\n", a.Name, a.Harness)
-					for _, n := range a.Actions {
-						fmt.Println("    · " + n)
-					}
-				}
-				if err != nil {
-					return err
-				}
-				fmt.Println("restart every open agent session — running harnesses keep the old wiring until restarted")
-				// Record which meshctl upgraded the pool, so a newer one can say
-				// the pool is behind (console and doctor).
-				if err := mesh.WriteUpgradeStamp(dir, resolveVersion(), time.Now()); err != nil {
-					fmt.Println("  (could not record the upgrade stamp: " + err.Error() + ")")
-				}
-				if p, err := console.LoginItemPath(); err == nil && runtime.GOOS == "darwin" {
-					if _, err := os.Stat(p); err != nil {
-						fmt.Println("tip: `meshctl console install` keeps a live view of this pool running from login")
-					}
-				}
-			}
-			// Hygiene last: an upgraded pool should also be a clean one. Automatic
-			// repairs are applied; anything needing a human is listed.
-			hyg := mesh.PoolHygiene(dir, time.Now())
-			fixed, errs := mesh.ApplyHygiene(hyg)
-			manual := mesh.ManualItems(hyg)
-			if len(fixed) > 0 || len(errs) > 0 || len(manual) > 0 {
-				fmt.Println("hygiene:")
-				for _, f := range fixed {
-					fmt.Println("  ✓ " + f)
-				}
-				for _, e := range errs {
-					fmt.Println("  ✗ " + e.Error())
-				}
-				for _, m := range manual {
-					fmt.Printf("  ⚠ [%s] %s\n", m.Agent, m.Message)
-				}
-			}
-			if len(res.Conflicts) == 0 && len(manual) == 0 && len(errs) == 0 {
-				fmt.Println("pool clean ✓")
-				return nil
-			}
-			n := len(res.Conflicts) + len(manual) + len(errs)
-			return &mesh.CodedError{Code: 1, Msg: fmt.Sprintf("%d item(s) need a human (listed above); the pool is upgraded but not yet clean", n)}
+			return runPoolUpgrade(dir, force, doctrineOnly)
 		},
 	}
 	c.Flags().BoolVar(&force, "force", false, "overwrite locally-edited doctrine (each is backed up first)")
 	c.Flags().BoolVar(&check, "check", false, "preview the upgrade without writing anything (exit 1 if one is pending)")
 	c.Flags().BoolVar(&doctrineOnly, "doctrine-only", false, "upgrade the pool doctrine only; leave agent wiring alone")
 	return c
+}
+
+func poolCloneCmd() *cobra.Command {
+	var name string
+	c := &cobra.Command{
+		Use:   "clone <pool-repo-url> [dir]",
+		Short: "Rebuild a pool on this machine from its pool repo: clone it and every member, register, upgrade",
+		Long: "Rebuilds a pool from the URL of its pool repo (the repo at <root>/pool):\n" +
+			"  1. clones the pool repo into [dir]/pool ([dir] defaults to the repo name without -pool);\n" +
+			"  2. clones every agent listed in pool/members.yaml, and every extra in pool/config.yaml `extras:`,\n" +
+			"     beside it — a folder already there is left alone, an agent listed without a remote is reported;\n" +
+			"  3. registers the pool on this machine and runs `meshctl pool upgrade` (hooks, plugins, settings);\n" +
+			"  4. lists what did not travel (open requests, docs/local/, .memory/) and what to do by hand.\n" +
+			"Exits non-zero when any member could not be cloned. Never pushes, never forces.",
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			url := args[0]
+			target := mesh.DefaultCloneDir(url)
+			if len(args) == 2 {
+				target = args[1]
+			}
+			if target == "" {
+				return fmt.Errorf("cannot name a folder from %q — pass one: meshctl pool clone <url> <dir>", url)
+			}
+			res, err := mesh.ClonePool(url, target)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("cloned pool repo into %s\n", filepath.Join(res.Root, mesh.CurrentPoolDir))
+			if res.Behind != "" {
+				fmt.Printf("⚠ %s was written by meshctl %s, newer than this one (%s) — run `meshctl update` first, then `meshctl pool upgrade`\n",
+					mesh.MembersFile, res.Behind, resolveVersion())
+			}
+			if res.NoList {
+				fmt.Printf("⚠ the pool repo has no %s (it was last upgraded before the list existed) — clone each agent beside %s by hand, "+
+					"then run `meshctl pool upgrade` there; on the old machine, `meshctl pool upgrade` writes the list (push the pool repo after)\n",
+					mesh.MembersFile, mesh.CurrentPoolDir)
+			}
+			printCloned := func(label string, cs []mesh.ClonedRepo) {
+				if len(cs) == 0 {
+					return
+				}
+				fmt.Println(label + ":")
+				for _, c := range cs {
+					switch c.State {
+					case mesh.CloneCloned:
+						fmt.Printf("  ✓ %s → %s\n", c.Name, c.Path)
+					case mesh.CloneExisting:
+						fmt.Printf("  · %s: %s already exists — left untouched\n", c.Name, c.Path)
+					case mesh.CloneNoRemote:
+						fmt.Printf("  ✗ %s: not restorable — it had no git remote on the old machine; copy %s across by hand\n", c.Name, c.Path)
+					default:
+						fmt.Printf("  ✗ %s: %s\n", c.Name, c.Err)
+					}
+				}
+			}
+			printCloned("members", res.Members)
+			printCloned("extras", res.Extras)
+			if _, err := mesh.RegisterPool(res.Root, name, time.Now()); err != nil {
+				return err
+			}
+			fmt.Printf("registered pool: %s\n", res.Root)
+			// An older binary would put its older doctrine over the pool's.
+			var upErr error
+			if res.Behind == "" {
+				upErr = runPoolUpgrade(res.Root, false, false)
+			} else {
+				upErr = &mesh.CodedError{Code: 1, Msg: "pool upgrade skipped: this meshctl is older than the pool's — `meshctl update`, then `meshctl pool upgrade` in " + res.Root}
+			}
+			fmt.Println("did not travel (git ignores it):")
+			for _, l := range mesh.CloneDoesNotTravel {
+				fmt.Println("  · " + l)
+			}
+			if todo := mesh.CloneLeftovers(res.Root); len(todo) > 0 {
+				fmt.Println("to do by hand on this machine:")
+				for _, l := range todo {
+					fmt.Println("  ⚠ " + l)
+				}
+			}
+			if res.Incomplete() {
+				return &mesh.CodedError{Code: 1, Msg: "some members could not be cloned (listed above); the rest of the pool is rebuilt"}
+			}
+			return upErr
+		},
+	}
+	c.Flags().StringVar(&name, "name", "", "registry name (default: dir basename)")
+	return c
+}
+
+// runPoolUpgrade applies `pool upgrade` to the pool at dir: pool directory,
+// doctrine, every agent's wiring (unless doctrineOnly), the member list, then
+// hygiene. `pool clone` runs it on the pool it just rebuilt.
+func runPoolUpgrade(dir string, force, doctrineOnly bool) error {
+	fmt.Printf("pool: %s\n", dir)
+	// Pool directory first: doctrine and agents are written into its result.
+	moved, err := mesh.UpgradePoolDir(dir, time.Now())
+	for _, d := range moved {
+		fmt.Println("  " + d)
+	}
+	if err != nil {
+		return err
+	}
+	res, err := mesh.UpgradeDoctrine(dir, force, time.Now())
+	if err != nil {
+		return err
+	}
+	if len(res.Did) == 0 && len(res.Conflicts) == 0 {
+		fmt.Println("  doctrine already current")
+	}
+	for _, d := range res.Did {
+		fmt.Println("  " + d)
+	}
+	for _, c := range res.Conflicts {
+		p := filepath.Join(dir, c)
+		fmt.Printf("  ✗ %s has local edits — left untouched; new version at %s.upstream\n", c, c)
+		fmt.Printf("      merge: diff -u %s %s.upstream\n", p, p)
+	}
+	if !doctrineOnly {
+		agents, err := mesh.UpgradeAgents(dir, resolveVersion())
+		for _, a := range agents {
+			if len(a.Actions) == 0 {
+				fmt.Printf("  %s: already current\n", a.Name)
+				continue
+			}
+			fmt.Printf("  %s (%s):\n", a.Name, a.Harness)
+			for _, n := range a.Actions {
+				fmt.Println("    · " + n)
+			}
+			for _, w := range a.Warnings {
+				fmt.Println("    ⚠ " + w)
+			}
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Println("restart every open agent session — running harnesses keep the old wiring until restarted")
+		// Record which meshctl upgraded the pool, so a newer one can say
+		// the pool is behind (console and doctor).
+		if err := mesh.WriteUpgradeStamp(dir, resolveVersion(), time.Now()); err != nil {
+			fmt.Println("  (could not record the upgrade stamp: " + err.Error() + ")")
+		}
+		if p, err := console.LoginItemPath(); err == nil && runtime.GOOS == "darwin" {
+			if _, err := os.Stat(p); err != nil {
+				fmt.Println("tip: `meshctl console install` keeps a live view of this pool running from login")
+			}
+		}
+	}
+	// Hygiene last: an upgraded pool should also be a clean one. Automatic
+	// repairs are applied; anything needing a human is listed.
+	hyg := mesh.PoolHygiene(dir, time.Now())
+	fixed, errs := mesh.ApplyHygiene(hyg)
+	manual := mesh.ManualItems(hyg)
+	if len(fixed) > 0 || len(errs) > 0 || len(manual) > 0 {
+		fmt.Println("hygiene:")
+		for _, f := range fixed {
+			fmt.Println("  ✓ " + f)
+		}
+		for _, e := range errs {
+			fmt.Println("  ✗ " + e.Error())
+		}
+		for _, m := range manual {
+			fmt.Printf("  ⚠ [%s] %s\n", m.Agent, m.Message)
+		}
+	}
+	if len(res.Conflicts) == 0 && len(manual) == 0 && len(errs) == 0 {
+		fmt.Println("pool clean ✓")
+		return nil
+	}
+	n := len(res.Conflicts) + len(manual) + len(errs)
+	return &mesh.CodedError{Code: 1, Msg: fmt.Sprintf("%d item(s) need a human (listed above); the pool is upgraded but not yet clean", n)}
+}
+
+// refreshMembers brings the pool's member list up to date with the agents on
+// disk and commits it (pool-clone C1), saying so when it changed.
+func refreshMembers(poolRoot string) error {
+	changed, err := mesh.RefreshMembers(poolRoot)
+	if changed {
+		fmt.Println("  refreshed " + filepath.Join(mesh.PoolDirName(poolRoot), mesh.MembersFile))
+	}
+	return err
 }
 
 // printUpgradePlan renders a `pool upgrade --check` preview.
@@ -822,6 +934,9 @@ func newCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("scaffolded %s\n", dest)
+			if err := refreshMembers(dir); err != nil {
+				return err
+			}
 			fmt.Println("next: (1) flesh out CLAUDE.md body  (2) cd " + dest +
 				" && task install  (3) create its git remote  (4) for a per-agent terminal badge, " +
 				"run `meshctl agent identity` on shell entry (portable — any terminal, any OS)")
@@ -912,6 +1027,9 @@ func onboardCmd() *cobra.Command {
 			}
 			if !res.AddedManifest && !res.AddedIntake && !res.AddedCommsSec && len(res.Notes) == 0 {
 				fmt.Println("  (nothing to add — already a full mesh member)")
+			}
+			if err := refreshMembers(dir); err != nil {
+				return err
 			}
 			return nil
 		},

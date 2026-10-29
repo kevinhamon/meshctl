@@ -67,7 +67,7 @@ func TestPoolUpgrade_ApplyRewiresThenConverges(t *testing.T) {
 	if _, err := UpgradeDoctrine(pool, false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	res, err := UpgradeAgents(pool)
+	res, err := UpgradeAgents(pool, "vtest")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestPoolUpgrade_AddsMissingStatusLine(t *testing.T) {
 	if !hasAction() {
 		t.Fatal("--check must report the missing status line")
 	}
-	if _, err := UpgradeAgents(pool); err != nil {
+	if _, err := UpgradeAgents(pool, "vtest"); err != nil {
 		t.Fatal(err)
 	}
 	if !hasStatusLine(a.Dir()) {
@@ -165,5 +165,59 @@ func TestPoolUpgrade_AddsMissingStatusLine(t *testing.T) {
 	}
 	if hasAction() {
 		t.Fatal("a second check must not report the status line again")
+	}
+}
+
+// Issue #10: the upgrade commits exactly what it wrote in each agent repo,
+// leaves the person's uncommitted work alone, and pushes nothing.
+func TestPoolUpgrade_CommitsOnlyWhatItWrote(t *testing.T) {
+	pool, a := v1Pool(t)
+	gitIdentity(t)
+	initAgentRepo(a.Dir())
+	if _, err := git(a.Dir(), "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(a.Dir(), "commit", "-q", "--allow-empty", "-m", "baseline"); err != nil {
+		t.Fatal(err)
+	}
+	// The person's own uncommitted work: one file the upgrade never touches,
+	// one it rewrites (opencode.json gains ask rules).
+	notes := filepath.Join(a.Dir(), "notes.md")
+	if err := os.WriteFile(notes, []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ocPath := filepath.Join(a.Dir(), "opencode.json")
+	oc, _ := os.ReadFile(ocPath)
+	if err := os.WriteFile(ocPath, []byte(strings.Replace(string(oc), "{", "{\n  \"username\": \"mine\",", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := UpgradeAgents(pool, "vtest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ap AgentUpgradePlan
+	for _, x := range res {
+		if x.Name == "oc" {
+			ap = x
+		}
+	}
+	if !strings.Contains(strings.Join(ap.Actions, "\n"), "committed") {
+		t.Fatalf("want a commit action, got %v", ap.Actions)
+	}
+	if !strings.Contains(strings.Join(ap.Warnings, "\n"), "opencode.json") {
+		t.Fatalf("the hand-edited file the upgrade changed must be named, got %v", ap.Warnings)
+	}
+	subject, _ := git(a.Dir(), "log", "-1", "--format=%s")
+	if strings.TrimSpace(subject) != UpgradeWiringSubject("vtest") {
+		t.Fatalf("want the upgrade subject, got %q", subject)
+	}
+	files, _ := git(a.Dir(), "show", "--name-only", "--format=", "HEAD")
+	if !strings.Contains(files, opencodePluginV2Rel) || strings.Contains(files, "notes.md") || strings.Contains(files, "opencode.json") {
+		t.Fatalf("commit must hold only the upgrade's own files:\n%s", files)
+	}
+	status, _ := git(a.Dir(), "status", "--porcelain")
+	if !strings.Contains(status, "notes.md") || !strings.Contains(status, "opencode.json") {
+		t.Fatalf("the person's file must stay uncommitted:\n%s", status)
 	}
 }

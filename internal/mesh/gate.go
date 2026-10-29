@@ -42,6 +42,9 @@ type GateDecision struct {
 	// constants, gate_log.go). GatePreToolUse always sets it: an allow no
 	// check touched carries GateCheckNone, and the decision log says so.
 	Check string
+	// Rules are the KB notes a kb-rule deny fired on; the decision log
+	// records them so a human can tune a rule that misfires.
+	Rules []string
 }
 
 // fileEditTools name the tools whose input carries a target path the gate reads:
@@ -165,6 +168,12 @@ func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 		return opencodeAskPath(p, d)
 	}
 
+	// 5a. Usage of a gated command (`meshctl kb confirm --help`) runs nothing
+	//     the steps 5b–5e ask about (issue #15).
+	if meshctlHelpOnly(p) {
+		return gateOutbound(agentsDir, p)
+	}
+
 	// 5b. Promotion at `kb finish` (ADR-0067, gate_promotion.go): asked with
 	//     the peer's summary as the signature; candidates-only passes.
 	if d := gatePromotion(agentsDir, p); d.Ask || d.Deny {
@@ -195,6 +204,31 @@ func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 	return gateOutbound(agentsDir, p)
 }
 
+// meshctlHelpOnly reports a shell call whose every meshctl invocation only
+// prints usage (`--help`, `-h`, or `meshctl help …`), with at least one such
+// invocation.
+func meshctlHelpOnly(p HookPayload) bool {
+	command := shellCommandInput(p)
+	if command == "" {
+		return false
+	}
+	seen := false
+	for _, words := range ShellSimpleCommands(command) {
+		if len(words) == 0 || path.Base(words[0]) != "meshctl" {
+			continue
+		}
+		help := len(words) > 1 && words[1] == "help"
+		for _, w := range words[1:] {
+			help = help || w == "--help" || w == "-h"
+		}
+		if !help {
+			return false
+		}
+		seen = true
+	}
+	return seen
+}
+
 // --- pool knowledge (ADR-0066; spec decisions 11, 12; cross-cutting 68) ---
 //
 // The pool glossary, the local doctrine and the pool config live in the pool
@@ -205,7 +239,7 @@ func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 // (naming the path), no human at the prompt (dispatch depth, distilling,
 // consult or work mode), and shell git whose working directory or path is in
 // the pool repo — meshctl commits the pool repo after an allowed write, the
-// human pushes, agents never run git there.
+// human pushes, agents never change git state there (read-only git is fine).
 
 // HeadlessNow reports the headless environment signals of the spec's
 // cross-cutting decision 68: a dispatch depth set and non-zero, or a distil
@@ -295,6 +329,11 @@ func poolPathTargets(agentsDir string, p HookPayload) poolTargets {
 		if path.Base(words[0]) != "git" || t.git != "" {
 			return
 		}
+		// Reading the pool's history changes nothing: an agent may check
+		// that meshctl committed its write (issue #8).
+		if poolReadOnlyGit[gitSubcommand(words)] && !gitWritesOutput(words) {
+			return
+		}
 		resolve := func(w string) string { return resolveShellPath(w, base) }
 		dir := base
 		hit := false
@@ -326,6 +365,40 @@ func poolPathTargets(agentsDir string, p HookPayload) poolTargets {
 	return t
 }
 
+// poolReadOnlyGit are the git subcommands an agent may run in the pool repo:
+// they read history and the working tree and write nothing.
+var poolReadOnlyGit = map[string]bool{
+	"log": true, "status": true, "diff": true, "show": true, "blame": true,
+	"ls-files": true, "rev-parse": true,
+}
+
+// gitSubcommand is the subcommand of a git invocation's words: the first word
+// after the global options (`-C <dir>`, `-c <key=val>` and bare flags), "" if
+// none.
+func gitSubcommand(words []string) string {
+	for i := 1; i < len(words); i++ {
+		switch w := words[i]; {
+		case w == "-C" || w == "-c":
+			i++
+		case strings.HasPrefix(w, "-"):
+		default:
+			return w
+		}
+	}
+	return ""
+}
+
+// gitWritesOutput reports a read-only subcommand told to write a file
+// (`git diff --output=<file>`).
+func gitWritesOutput(words []string) bool {
+	for _, w := range words {
+		if w == "--output" || strings.HasPrefix(w, "--output=") {
+			return true
+		}
+	}
+	return false
+}
+
 // gatePoolPathDeny is the deny half of the pool-knowledge rule: shell git in
 // the pool repo, a shell call to the console's pool push or an agent repo's
 // Commit and Push buttons, and a pool write with no human at the prompt.
@@ -350,8 +423,8 @@ func gatePoolPathDeny(agentsDir string, p HookPayload) GateDecision {
 	}
 	if t.git != "" {
 		return GateDecision{Deny: true, Check: GateCheckPoolPath, Reason: "mesh: `" + t.git + "` runs git in the pool repo (`" +
-			PoolDirName(agentsDir) + "/`) — agents never run git there. meshctl commits the pool repo after each gate-asked write " +
-			"and the human pushes it; edit the pool file itself and let meshctl commit."}
+			PoolDirName(agentsDir) + "/`) — agents never change git state there (read-only `log`, `status`, `diff`, `show` are fine). " +
+			"meshctl commits the pool repo after each gate-asked write and the human pushes it; edit the pool file itself and let meshctl commit."}
 	}
 	if cause := noHumanCause(p); cause != "" {
 		return GateDecision{Deny: true, Check: GateCheckPoolPath, Reason: "mesh: this writes pool knowledge (`" +
@@ -370,6 +443,18 @@ func gatePoolPathAsk(agentsDir string, p HookPayload) GateDecision {
 		return GateDecision{}
 	}
 	targets := "`" + strings.Join(t.writes, "`, `") + "`"
+	// Mesh-wide tools moved to the config file (ADR-0066 config split); a
+	// charter written before the move still names the identity file. Say
+	// where they go instead of asking the human to sign a write upgrade
+	// would undo (issue #14).
+	for _, w := range t.writes {
+		if path.Base(w) == PoolMarkerFile && reTopLevelTools.MatchString(toolInputText(p.ToolInput)) {
+			cfg := path.Join(path.Dir(w), PoolConfigFile)
+			return GateDecision{Deny: true, Check: GateCheckPoolPath, Reason: "mesh: this writes `tools:` into `" + w +
+				"` — mesh-wide tools live in `" + cfg + "` now, not `" + PoolMarkerFile + "`. Write the entry to `" + cfg +
+				"` instead, and if your charter or a KB note told you `" + PoolMarkerFile + "`, fix that text too."}
+		}
+	}
 	a := payloadAgent(agentsDir, p)
 	if a == nil {
 		return GateDecision{Deny: true, Check: GateCheckPoolPath, Reason: "mesh: this writes pool knowledge (" + targets +
@@ -397,6 +482,9 @@ func gatePoolPathAsk(agentsDir string, p HookPayload) GateDecision {
 	})
 	return GateDecision{Ask: true, Check: GateCheckPoolPath, Reason: text}
 }
+
+// reTopLevelTools finds a top-level `tools:` key in YAML text.
+var reTopLevelTools = regexp.MustCompile(`(?m)^tools\s*:`)
 
 // delegationTools launch a subagent: Claude Code's Agent (formerly Task) and
 // opencode V2's subagent.

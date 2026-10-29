@@ -112,6 +112,10 @@ _Avoid_: triage list, stale report, findings
 A file a peer writes for the human to read (a design, report, brief or mockup), kept in the peer's `docs/` folder or a folder its manifest declares, never in a repo it works on; it is not knowledge until distilled through candidates.
 _Avoid_: artifact, deliverable, output
 
+**Member list**:
+The pool repo's record of which peers belong to the pool and where each one's repo lives, kept so the pool can be rebuilt on another machine; membership itself is still the peers found on disk.
+_Avoid_: roster file, registry (the machine's list of pools)
+
 **Skill pack**:
 An optional, externally maintained set of skills that a pool may adopt and assign to peers; meshctl works with any pack or none.
 _Avoid_: plugin (the distribution mechanism, not the concept), toolkit

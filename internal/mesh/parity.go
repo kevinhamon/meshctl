@@ -44,6 +44,8 @@ var HarnessParity = []ParityRow{
 		nil},
 	{"Status line", "✅ every 10s", "✗ none", "✗ none",
 		[]string{"hook status-line"}},
+	{"Rebuild a pool elsewhere: member list (`pool/members.yaml`), `pool clone`", "✅", "✅", "✅",
+		[]string{"pool clone"}},
 	{"Console: live pool view, open sessions (`meshctl console`)", "✅ with scheduled jobs", "✅ no scheduled jobs", "✅ no scheduled jobs",
 		[]string{"console"}},
 }

@@ -51,43 +51,4 @@ Internal references (banned when crossing out): decision/ADR ids, risk ids, `kno
 
 When a **human** will read what you write on an external surface (tickets, PRs, review, email, chat) — **especially speaking as the user** — be tactful: critique the work, not the person; don't flatly call a solution "wrong" — frame it as a trade-off, risk, or recommendation, and lead with what's sound. Direct on substance, diplomatic on tone. Be blunt only in internal mesh artifacts and this chat. Canonical: `../__POOL_DIR__/doctrine/agent-comms.md` Core rule 8. **This is a default — if THIS agent's role defines a different voice/communication style, that guidance wins (Core rule 9); state it above in ## Role.**
 
-## Cognition — maintain your own knowledge base (standing order)
-
-You own a git-tracked `knowledge/` KB and **learn over time** — this is not optional.
-Run the **`mesh-cognition` skill** for the full procedure; its short form:
-
-- **Recall at start.** `meshctl memory recall "<topic>"`, then read the KB files it
-  points to. Your `knowledge/handoff.md` is auto-injected.
-- **Pending work first.** When session start shows a `# Pending work` block, read it to
-  the human before new work and offer triage now, a subset, or deferral; the human
-  decides. For intake, show the queue (`meshctl inbox list`), propose an order and
-  wait, then claim by id in the human's order. A deferral is one `Deferred: <ids>`
-  line in your handoff; there is no snooze, the items return next session.
-- **Status-line phrases.** Each pending group on the status line ends in a phrase to
-  say. A phrase starts a review; the human still decides each step. Run
-  `meshctl pending` first (the block is injected only at session start), then:
-  "confirm kb": read the parked confirmation round, then the `meshctl kb finish` it names.
-  "resolve conflicts": open the reconcile report it names, ask each conflict as a
-  decision round, `meshctl kb confirm <path> --report <report>` for what is confirmed.
-  "check intake": the intake order above. "review work": `meshctl work list`,
-  review each, then `meshctl work merge <id>` or `--abort` as the human says.
-  "consolidate": `meshctl kb consolidate`, then consolidate as the skill describes.
-  "reconcile": `meshctl kb reconcile --peer <you>` writes your worksheet; write the
-  reconcile report from it, then read the clean entries as confirmation rounds, at most
-  five paths per `meshctl kb confirm <path>... --report <report>`.
-- **Distill as you learn.** When a session yields a recurring pattern, a reusable
-  procedure, a failure mode, or a consequential decision: `meshctl kb begin` →
-  write `knowledge/candidates/<slug>.md` → consolidate into `playbooks/` /
-  `experience/` / a decision (ADR) → write the summary file (`.memory/confirm/<session>.md`)
-  and read the confirmation round to the human → `meshctl kb finish --summary-file <it>`.
-  Only the human confirms; candidates-only finishes need no round.
-- **Record decisions & risks.** Consequential domain choices become ADRs in
-  `knowledge/decisions/`; new risks get logged in `knowledge/risks.md`.
-- **Handoff at end.** Rewrite `knowledge/handoff.md` via `meshctl handoff set`.
-- **Documents for the person go in `docs/`.** Designs, reports, briefs and mockups you
-  write for the human live in `docs/` in your workspace (or a folder `agent.yaml` lists under
-  `docs:`), never in a repo you work on. Name them `YYYY-MM-DD-<slug>.<ext>`; write designs in
-  markdown, diagrams as mermaid fences; `docs/local/` is never committed. The console shows them.
-- **Repo hygiene.** Your workspace must be its own git repo **with a remote** — `knowledge/` is durable only once committed **and pushed**. If it's not a repo, `git init` + commit; then create a remote and push. Session start nags until a remote exists.
-
-Authoritative spec: your pool's `../__POOL_DIR__/doctrine/agent-comms.md` §Knowledge & Memory.
+__COGNITION__

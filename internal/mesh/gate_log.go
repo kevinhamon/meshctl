@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -121,9 +122,13 @@ func logGateDecision(agentsDir string, p HookPayload, d GateDecision, now time.T
 	if check == "" {
 		check = GateCheckNone
 	}
-	appendGateLog(path, fmt.Sprintf("%s decision=%s check=%s mode=%s tool=%s session=%s agent_id=%s",
+	line := fmt.Sprintf("%s decision=%s check=%s mode=%s tool=%s session=%s agent_id=%s",
 		now.UTC().Format("2006-01-02T15:04:05Z"), gateDecisionWord(d), check, p.GateMode(),
-		p.ToolName, orDash(p.SessionID), orDash(p.AgentID)))
+		p.ToolName, orDash(p.SessionID), orDash(p.AgentID))
+	if len(d.Rules) > 0 {
+		line += " rule=" + strings.Join(d.Rules, ",")
+	}
+	appendGateLog(path, line)
 }
 
 // gateLogPathFor is the log an agent-scoped line goes to: the env override,

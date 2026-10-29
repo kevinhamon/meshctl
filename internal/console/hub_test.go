@@ -237,6 +237,17 @@ func TestSummarize_CountsAgentsThatNeedThePerson(t *testing.T) {
 	}
 }
 
+func TestSummarize_CountsAgentsThatCannotBeRebuilt(t *testing.T) {
+	s := Snapshot{Doctor: &mesh.DoctorReportJSON{Findings: []mesh.DoctorFindingJSON{
+		{Agent: "a", Level: "warn", Message: "no git remote", Kind: mesh.FindingNotRestorable},
+		{Agent: "b", Level: "warn", Message: "not a git repo", Kind: mesh.FindingNotRestorable},
+		{Agent: "c", Level: "warn", Message: "something else"},
+	}}}
+	if ps := Summarize(PoolRef{Key: "k"}, s); ps.Unrestorable != 2 || ps.Warnings != 3 {
+		t.Fatalf("want 2 not restorable of 3 warnings, got %+v", ps)
+	}
+}
+
 func TestServer_SettingsSavedInOneOrEveryPool(t *testing.T) {
 	h, a1, a2 := twoPoolHub(t)
 	srv := (&Server{Hub: h, Settings: Settings{Port: 7717, Token: "secret"}}).Handler()

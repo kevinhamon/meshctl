@@ -1,6 +1,7 @@
 package mesh
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -276,6 +277,8 @@ func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
 			p.Actions = append(p.Actions, "add Cognition stanza to CLAUDE.md")
 		} else if _, stale := refreshedCognitionSection(string(b), filepath.Dir(dir)); stale {
 			p.Actions = append(p.Actions, "refresh Cognition stanza in CLAUDE.md")
+		} else if cognitionStanzaUnrecognized(string(b)) {
+			p.Warnings = append(p.Warnings, "CLAUDE.md Cognition stanza has no ending meshctl recognises — left alone; replace it by hand with the current stanza")
 		}
 	}
 
@@ -284,7 +287,7 @@ func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
 		p.Warnings = append(p.Warnings, fmt.Sprintf("%d live session(s) — close them before upgrading and restart after", n))
 	}
 	if dirty := gitDirty(dir); dirty != "" {
-		p.Warnings = append(p.Warnings, "uncommitted changes ("+dirty+") — commit first so the upgrade is easy to review/revert")
+		p.Warnings = append(p.Warnings, "uncommitted changes ("+dirty+") — the upgrade commits only the files it writes; one of these it also changes stays uncommitted, so commit first")
 	}
 	return p
 }
@@ -305,15 +308,17 @@ func gitDirty(dir string) string {
 // UpgradeAgents re-runs onboard for every agent in the pool, which re-wires the
 // harness for the installed versions, refreshes mesh-owned skills, adds any
 // missing CLAUDE.md stanzas and refreshes the managed Cognition stanza and
-// Inbound order. Never touches agent.yaml or the role body. Returns
-// per-agent notes in roster order.
-func UpgradeAgents(poolRoot string) ([]AgentUpgradePlan, error) {
+// Inbound order, then commits what it wrote in each agent repo (never pushes).
+// Never touches agent.yaml or the role body. Returns per-agent notes in
+// roster order. version names the meshctl in the commit subject.
+func UpgradeAgents(poolRoot, version string) ([]AgentUpgradePlan, error) {
 	agents, _, err := ScanAgents(poolRoot)
 	if err != nil {
 		return nil, err
 	}
 	var out []AgentUpgradePlan
 	for _, a := range agents {
+		before := dirtySnapshot(a.Dir())
 		res, err := Onboard(poolRoot, a.Dir(), AgentSpec{}, ScaffoldOptions{})
 		if err != nil {
 			return out, fmt.Errorf("%s: %w", a.Name, err)
@@ -330,9 +335,85 @@ func UpgradeAgents(poolRoot string) ([]AgentUpgradePlan, error) {
 		if res.AddedCommsSec {
 			did = append(did, "added Agent Communication section to CLAUDE.md")
 		}
-		out = append(out, AgentUpgradePlan{Name: a.Name, Dir: a.Dir(), Harness: a.HarnessName(), Actions: did})
+		committed, warnings := commitUpgradeWiring(a.Dir(), before, version)
+		if committed != "" {
+			did = append(did, committed)
+		}
+		out = append(out, AgentUpgradePlan{Name: a.Name, Dir: a.Dir(), Harness: a.HarnessName(), Actions: did, Warnings: warnings})
 	}
 	return out, nil
+}
+
+// UpgradeWiringSubject is the subject of the commit `pool upgrade` makes in
+// an agent repo for the wiring it wrote.
+func UpgradeWiringSubject(version string) string { return "meshctl: upgrade wiring to " + version }
+
+// dirtySnapshot maps each uncommitted path of a repo (untracked files listed
+// one by one) to a hash of its content, "" when it is gone from disk. nil
+// when dir is not a repo.
+func dirtySnapshot(dir string) map[string]string {
+	if !isGitRepo(dir) {
+		return nil
+	}
+	out, err := git(dir, "-c", "core.quotePath=false", "status", "--porcelain", "-uall")
+	if err != nil {
+		return nil
+	}
+	snap := map[string]string{}
+	for _, ln := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if len(ln) < 4 {
+			continue
+		}
+		p := ln[3:]
+		if i := strings.Index(p, " -> "); i >= 0 {
+			p = p[i+4:]
+		}
+		p = strings.Trim(p, `"`)
+		snap[p] = ""
+		if b, err := os.ReadFile(filepath.Join(dir, p)); err == nil {
+			snap[p] = fmt.Sprintf("%x", sha256.Sum256(b))
+		}
+	}
+	return snap
+}
+
+// commitUpgradeWiring commits, in an agent repo, exactly the paths the upgrade
+// changed (issue #10): those clean before it and dirty after. A path that was
+// already uncommitted and that the upgrade changed again mixes the person's
+// edit with meshctl's, so it is left uncommitted and named in a warning.
+// Nothing is pushed. Returns the action line ("" when nothing was committed)
+// and any warnings.
+func commitUpgradeWiring(dir string, before map[string]string, version string) (string, []string) {
+	if before == nil {
+		return "", nil // not a repo
+	}
+	after := dirtySnapshot(dir)
+	var written, mixed []string
+	for p, h := range after {
+		prev, was := before[p]
+		switch {
+		case !was:
+			written = append(written, p)
+		case prev != h:
+			mixed = append(mixed, p)
+		}
+	}
+	sort.Strings(written)
+	sort.Strings(mixed)
+	var warnings []string
+	if len(mixed) > 0 {
+		warnings = append(warnings, "already uncommitted and changed again by the upgrade, left for you to commit: "+strings.Join(mixed, ", "))
+	}
+	if len(written) == 0 {
+		return "", warnings
+	}
+	if _, err := git(dir, append([]string{"add", "-A", "--"}, written...)...); err != nil {
+		return "", append(warnings, "could not stage the upgrade's files: "+err.Error())
+	}
+	if _, err := git(dir, append([]string{"commit", "-q", "-m", UpgradeWiringSubject(version), "--"}, written...)...); err != nil {
+		return "", append(warnings, "could not commit the upgrade's files (left staged): "+err.Error())
+	}
+	return fmt.Sprintf("committed %d path(s): %s", len(written), UpgradeWiringSubject(version)), warnings
 }
 
 // opencodeV1ConfigKeys are V1 opencode.json keys that V2 renames or reshapes
