@@ -66,6 +66,9 @@ func TestHook_SessionStart_ResumeSkipsTranscriptBlocks(t *testing.T) {
 	if !strings.Contains(ctx, "no git remote") {
 		t.Fatalf("resume should still carry the repo nag, got %q", ctx)
 	}
+	if !strings.Contains(ctx, SummaryPath(a.Dir(), "r")) {
+		t.Fatalf("resume must name the new session's summary path, got %q", ctx)
+	}
 	if len(SessionList(a, time.Now())) != 1 {
 		t.Fatalf("resume must still register presence")
 	}

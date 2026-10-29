@@ -396,7 +396,14 @@ func resolveContextAgent(dir, flagAgent string) (*mesh.Agent, error) {
 			return mesh.FindAgent(dir, rec)
 		}
 	}
-	return mesh.FindAgent(dir, name) // return the original "has no manifest" error
+	a, err := mesh.FindAgent(dir, name)
+	if err != nil && flagAgent == "" {
+		// The name was guessed from $AGENT_NAME or cwd, which may have moved to
+		// the pool root or another folder (issue #9): say how to name the agent.
+		return nil, fmt.Errorf("%w — no --agent given, so the agent was taken from $AGENT_NAME or the current folder; "+
+			"pass --agent <name>", err)
+	}
+	return a, err
 }
 
 func parseRGB(s string) (r, g, b float64, err error) {
@@ -1820,6 +1827,11 @@ func handoffCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("wrote %s\n", mesh.HandoffPath(a))
+			if sha, err := mesh.HandoffCommit(a); err != nil {
+				fmt.Fprintf(os.Stderr, "⚠ handoff written but not committed: %v\n", err)
+			} else if sha != "" {
+				fmt.Printf("committed %s %s\n", sha, mesh.HandoffCommitSubject)
+			}
 			return nil
 		},
 	}
@@ -1906,7 +1918,9 @@ func stateCmd() *cobra.Command {
 				return err
 			}
 			if strings.TrimSpace(string(b)) == "" {
-				return fmt.Errorf("state set: empty body on stdin")
+				return fmt.Errorf("state set: empty body on stdin — the digest is read from stdin (a heredoc: " +
+					"`meshctl state set --summary-file <summary> <<'EOF' … EOF`); --summary-file is your confirmation " +
+					"summary, not the digest body")
 			}
 			if problems := mesh.StateLint(string(b)); len(problems) > 0 && !force {
 				for _, w := range problems {

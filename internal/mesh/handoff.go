@@ -50,6 +50,35 @@ func HandoffSet(agent *Agent, body string, now time.Time) error {
 	return os.WriteFile(HandoffPath(agent), []byte(content), 0o644)
 }
 
+// HandoffCommitSubject is the subject of the commit `handoff set` makes.
+const HandoffCommitSubject = "meshctl: session handoff"
+
+// HandoffCommit commits knowledge/handoff.md alone in the agent's repo, as
+// `state set` commits its digest (issue #6), so a written handoff is never left
+// for the next session to find uncommitted. Returns the short sha, or "" when
+// the repo is not git or the handoff has no change to commit.
+func HandoffCommit(agent *Agent) (string, error) {
+	if !isGitRepo(agent.Dir()) {
+		return "", nil
+	}
+	rel := KnowledgeDir + "/" + HandoffFile
+	out, err := git(agent.Dir(), "status", "--porcelain", "--", rel)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out) == "" {
+		return "", nil
+	}
+	if _, err := git(agent.Dir(), "add", "--", rel); err != nil {
+		return "", err
+	}
+	if _, err := git(agent.Dir(), "commit", "-q", "-m", HandoffCommitSubject, "--", rel); err != nil {
+		return "", err
+	}
+	sha, err := git(agent.Dir(), "rev-parse", "--short", "HEAD")
+	return strings.TrimSpace(sha), err
+}
+
 // HandoffTemplate is the one shape a handoff takes. It is fixed — headings,
 // order, budget — so writing one is form-filling, not a design exercise: a
 // model given only "write a handoff" deliberates over format, length and tone

@@ -554,6 +554,38 @@ func stateDigestDebt(agentDir string) []ADR {
 // unconsolidated: the inbox is a holding area, not a graveyard.
 const CandidateMaxAge = 14 * 24 * time.Hour
 
+// uncommittedCandidates lists knowledge/candidates/*.md that are untracked or
+// carry uncommitted changes. agedCandidates dates them by mtime, so they never
+// age past CandidateMaxAge; consolidate lists them on their own (issue #17).
+func uncommittedCandidates(agentDir string) []string {
+	if !dirExists(filepath.Join(agentDir, ".git")) {
+		return nil
+	}
+	prefix := filepath.ToSlash(filepath.Join(KnowledgeDir, CandidatesDir)) + "/"
+	out, err := exec.Command("git", "-C", agentDir, "-c", "core.quotePath=false", "status",
+		"--porcelain", "--untracked-files=all", "--", prefix).Output()
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if len(line) < 4 || line[0] == 'D' || line[1] == 'D' {
+			continue
+		}
+		path := line[3:]
+		if i := strings.Index(path, " -> "); i >= 0 {
+			path = path[i+4:]
+		}
+		name, ok := strings.CutPrefix(path, prefix)
+		if !ok || strings.Contains(name, "/") || !strings.HasSuffix(name, ".md") || strings.EqualFold(name, "README.md") {
+			continue
+		}
+		names = append(names, "candidates/"+name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // agedCandidates lists knowledge/candidates/*.md older than CandidateMaxAge,
 // each with its age in days.
 func agedCandidates(agentDir string, now time.Time) []string {

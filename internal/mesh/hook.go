@@ -178,7 +178,7 @@ func hookAgent(agentsDir, cwd string) *Agent {
 // line, tool reference, state digest and handoff in its transcript, so they
 // are not injected again: every resume would otherwise add them once more.
 // What can have changed since (overlap warning, repo nags, pending work) is
-// still injected. A compacted session gets everything: compaction drops it.
+// still injected, plus the new confirmation summary path. A compacted session gets everything: compaction drops it.
 func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) string {
 	a := hookAgent(agentsDir, p.Cwd)
 	// A headless distill run (SpawnPeerDistill) fires the same hooks; it must
@@ -200,6 +200,11 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 	var b strings.Builder
 	if !resumed {
 		b.WriteString(IdentityLine(agentsDir, a))
+		b.WriteString("\n\n")
+	} else {
+		// A resume gets a new session id, so the confirmation summary path the
+		// transcript knows is stale (issue #18).
+		b.WriteString(ResumeSummaryLine(a, id))
 		b.WriteString("\n\n")
 	}
 	if line := PeerLine(a); line != "" && !resumed {
@@ -251,6 +256,14 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 		b.WriteString(handoff)
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// ResumeSummaryLine names a resumed session's confirmation summary path: the
+// session id changed, so a summary written before the resume is not the one the
+// gate reads.
+func ResumeSummaryLine(a *Agent, session string) string {
+	return fmt.Sprintf("Resumed as session `%s`: your confirmation summary path is now `%s` — a summary written before "+
+		"this resume is under the old session id and the gate will not read it.", session, SummaryPath(a.Dir(), session))
 }
 
 // IdentityLine anchors an agent to its own pool. Several pools can share a

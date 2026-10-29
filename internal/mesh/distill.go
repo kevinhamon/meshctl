@@ -116,7 +116,7 @@ func peerDistillArgv(prompt string) []string {
 		"--permission-mode", "default",
 		"--allowedTools", "Read", "Grep", "Glob",
 		"Edit(./knowledge/candidates/**)", "Write(./knowledge/candidates/**)",
-		"Edit(./knowledge/pending-decisions.md)", "Write(./knowledge/pending-decisions.md)",
+		"Edit(./knowledge/" + PendingDecisionsFile + ")", "Write(./knowledge/" + PendingDecisionsFile + ")",
 		"Bash(meshctl memory recall:*)", "Bash(meshctl memory sessions:*)",
 		"Bash(meshctl intuition recall:*)", "Bash(meshctl kb consolidate:*)",
 	}

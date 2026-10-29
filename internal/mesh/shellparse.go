@@ -657,6 +657,51 @@ func shellWriteTargets(command, cwd string) []string {
 	return out
 }
 
+// reScriptWrite finds a file write in interpreter source: Python open() in a
+// write or append mode, pathlib's write_text/write_bytes, Node's fs writes,
+// Ruby's File.write, Perl's open with '>' and the usual rename/remove calls.
+var reScriptWrite = regexp.MustCompile(`open\([^)]*['"][wax]\+?b?['"]|\.write_(text|bytes)\(|` +
+	`(writeFile|appendFile|writeFileSync|appendFileSync)\(|File\.(write|open\([^)]*['"][wa])|` +
+	`open\s*\(?\s*(my\s+)?\$?\w*\s*,\s*['"]\+?>|shutil\.|os\.(replace|rename|remove|unlink)\(|\.unlink\(|\.rename\(`)
+
+// reScriptPath finds quoted string literals that look like paths.
+var reScriptPath = regexp.MustCompile(`['"]([^'"\s]*/[^'"\s]*)['"]`)
+
+// interpreterWriteTargets returns the paths a script run by a code interpreter
+// (`python3 - <<'EOF' … EOF`, `node -e '…'`) may write: when the line runs an
+// interpreter and its text holds a file-write call, every quoted path literal,
+// resolved against the directory the interpreter runs in. The script is code
+// the gate cannot follow, so this over-reads (a path that is only read counts
+// when a write appears elsewhere in the script); a gate over-asks, it never
+// misses (issue #13). Heredoc bodies are read on purpose: here they are the
+// program, not prose.
+func interpreterWriteTargets(command, cwd string) []string {
+	base, found := "", false
+	shellWalk(command, cwd, func(words []string, dir string) {
+		if !found && codeInterpreter(path.Base(words[0])) {
+			base, found = dir, true
+		}
+	})
+	if !found || !reScriptWrite.MatchString(command) {
+		return nil
+	}
+	var out []string
+	for _, m := range reScriptPath.FindAllStringSubmatch(command, -1) {
+		out = append(out, resolveShellPath(m[1], base))
+	}
+	return out
+}
+
+// codeInterpreter reports whether a program name runs source code it is given
+// (python3.12 and the like included).
+func codeInterpreter(name string) bool {
+	switch name {
+	case "node", "ruby", "perl", "php", "deno", "bun", "osascript":
+		return true
+	}
+	return name == "python" || strings.HasPrefix(name, "python3") || strings.HasPrefix(name, "python2")
+}
+
 // sedInPlace reports whether a sed command carries -i (edit in place).
 func sedInPlace(words []string) bool {
 	for _, w := range words[1:] {

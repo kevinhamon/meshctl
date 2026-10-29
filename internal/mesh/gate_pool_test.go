@@ -67,6 +67,9 @@ func TestGate_PoolWriteAsksWithSummary(t *testing.T) {
 		{"shell sed -i", bash(a, "sess-1", "sed -i '' 's/owner/fact owner/' "+glossary)},
 		{"shell cd then touch", bash(a, "sess-1", "cd ../pool && touch doctrine/local.md")},
 		{"shell tee absolute", bash(a, "sess-1", "printf x | tee "+doctrine)},
+		{"python heredoc writes relative", bash(a, "sess-1", "python3 - <<'EOF'\np='../pool/doctrine/local.md'; s=open(p).read()\nopen(p,'w').write(s.replace('a','b'))\nEOF")},
+		{"python heredoc after cd, absolute", bash(a, "sess-1", "cd /tmp && python3 - <<'EOF'\nfrom pathlib import Path\nPath('"+filepath.Join(PoolDir(dir), "config.yaml")+"').write_text('x')\nEOF")},
+		{"node -e writes", bash(a, "sess-1", "node -e \"require('fs').appendFileSync('../pool/glossary.md','x')\"")},
 		{"shell cwd in pool", HookPayload{Cwd: PoolDir(dir), SessionID: "sess-1", ToolName: "Bash", PeerAgent: "architect",
 			ToolInput: []byte(`{"command":"echo x > glossary.md"}`)}},
 	}
@@ -294,5 +297,19 @@ func TestGate_ToolsIntoPoolMarkerDenied(t *testing.T) {
 	}
 	if d := GatePreToolUse(dir, write(PoolMarkerFile, "name: x\n")); !d.Ask {
 		t.Fatalf("a pool.yaml edit without tools must be asked, got %+v", d)
+	}
+}
+
+// TestGate_InterpreterReadOfPoolAllowed: a script that only reads a pool file,
+// or writes outside the pool, is not a pool write (#13).
+func TestGate_InterpreterReadOfPoolAllowed(t *testing.T) {
+	dir, a := poolGateFixture(t)
+	for _, cmd := range []string{
+		"python3 - <<'EOF'\nprint(open('../pool/glossary.md').read())\nEOF",
+		"python3 -c \"open('/tmp/out.txt','w').write('x')\"",
+	} {
+		if d := GatePreToolUse(dir, bash(a, "sess-1", cmd)); d.Ask || d.Deny {
+			t.Errorf("%q: not a pool write, got %+v", cmd, d)
+		}
 	}
 }

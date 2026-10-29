@@ -24,6 +24,7 @@ type ConsolidateReport struct {
 	StateProblems    []string `json:"state_problems,omitempty"`
 	HandoffProblems  []string `json:"handoff_problems,omitempty"`
 	AgedCandidates   []string `json:"aged_candidates,omitempty"`
+	Uncommitted      []string `json:"uncommitted_candidates,omitempty"` // never dated by git, so never aged
 	SupersededBroken []string `json:"superseded_broken,omitempty"`
 }
 
@@ -31,7 +32,7 @@ type ConsolidateReport struct {
 func (r ConsolidateReport) Clean() bool {
 	return len(r.NoFrontmatter) == 0 && len(r.Unlanded) == 0 && len(r.NotInDigest) == 0 &&
 		!r.StateMissing && len(r.StateProblems) == 0 && len(r.HandoffProblems) == 0 &&
-		len(r.AgedCandidates) == 0 && len(r.SupersededBroken) == 0
+		len(r.AgedCandidates) == 0 && len(r.Uncommitted) == 0 && len(r.SupersededBroken) == 0
 }
 
 // KBConsolidate computes the debt list for an agent.
@@ -62,6 +63,7 @@ func KBConsolidate(agent *Agent, now time.Time) ConsolidateReport {
 		r.HandoffProblems = HandoffLint(h)
 	}
 	r.AgedCandidates = agedCandidates(dir, now)
+	r.Uncommitted = uncommittedCandidates(dir)
 	return r
 }
 
@@ -70,7 +72,7 @@ func (r ConsolidateReport) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# KB consolidation — %s\n\n", r.Agent)
 	if r.Clean() {
-		b.WriteString("nothing to consolidate ✓ (decisions landed, digest current, candidates judged)\n")
+		b.WriteString("nothing to consolidate ✓ (decisions landed, digest current, no candidate uncommitted or older than 14 days)\n")
 		return b.String()
 	}
 	section := func(title, hint string, items []string) {
@@ -98,6 +100,7 @@ func (r ConsolidateReport) Markdown() string {
 	section("State digest problems", "rewrite with `meshctl state set --summary-file <summary>` (it refuses a digest that fails lint)", r.StateProblems)
 	section("Accepted decisions the state digest predates", "fold each into state.md (Now / Recently decided), then `meshctl state set --summary-file <summary>`", r.NotInDigest)
 	section("Candidates older than 14 days", "judge each: promote into playbooks/experience/a decision, or delete it", r.AgedCandidates)
+	section("Uncommitted candidates", "judge each now, or commit it so it is dated and ages like the rest", r.Uncommitted)
 	section("Handoff problems", "rewrite with `meshctl handoff set` — template sections, ≤40 lines", r.HandoffProblems)
 	b.WriteString("Work it off in a KB worktree: `meshctl kb begin` → edit → commit → summary + confirmation round → `meshctl kb finish --summary-file <summary>`. Digest and handoff go through `meshctl state set --summary-file <summary>` / `meshctl handoff set`.\n")
 	return b.String()

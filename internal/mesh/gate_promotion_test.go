@@ -128,6 +128,9 @@ func TestGate_PromotionCases(t *testing.T) {
 			func(string) string { return "meshctl kb finish" }, "deny", SummaryPath("/AGENT", "sess-1")},
 		{"summary file missing", []string{"playbooks/x.md"}, "",
 			func(s string) string { return "meshctl kb finish --summary-file " + s }, "deny", "no file at"},
+		{"summary created in the same call", []string{"playbooks/x.md"}, "",
+			func(s string) string { return "cp /tmp/x.md " + s + " && meshctl kb finish --summary-file " + s }, "deny",
+			"write it in a separate call first"},
 		{"summary file empty", []string{"playbooks/x.md"}, "  \n",
 			func(s string) string { return "meshctl kb finish --summary-file " + s }, "deny", "empty at"},
 		{"summary with no Intent", []string{"playbooks/x.md"}, "## Grounding\n- x\n",
@@ -263,6 +266,8 @@ func TestGate_KnowledgeWritesOnMainCheckoutDenied(t *testing.T) {
 	allow := []HookPayload{
 		editAt(a, "sess-1", "Write", kb(a.Dir(), "candidates/x.md")),
 		bash(a, "sess-1", "echo x > knowledge/candidates/y.md"),
+		editAt(a, "sess-1", "Edit", kb(a.Dir(), PendingDecisionsFile)),
+		bash(a, "sess-1", "echo x >> knowledge/pending-decisions.md"),
 		editAt(a, "sess-1", "Write", kb(wt, "playbooks/x.md")),
 		editAt(a, "sess-1", "Edit", kb(work, "decisions/0001-x.md")),
 		bash(a, "sess-1", "echo x > "+kb(wt, "state.md")),

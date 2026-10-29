@@ -74,7 +74,7 @@ func gateKBConfirm(agentsDir string, p HookPayload) GateDecision {
 	repPath := resolveShellPath(call.report, p.Cwd)
 	r, err := ReadReconcileReport(repPath)
 	if err != nil {
-		return deny("`kb confirm --report " + call.report + "`: no readable report at " + repPath + ".")
+		return deny("`kb confirm --report " + call.report + "`: no readable report at " + repPath + "." + writeFirstHint(repPath))
 	}
 	if err := r.Err(); err != nil {
 		return deny("`kb confirm`: the report is malformed — fix these lines, then re-run:\n" + err.Error())

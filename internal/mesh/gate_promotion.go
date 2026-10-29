@@ -39,6 +39,11 @@ const (
 // CandidatesDir is the KB inbox under knowledge/: proposals, never promoted.
 const CandidatesDir = "candidates"
 
+// PendingDecisionsFile holds the distiller's open questions under knowledge/.
+// Like candidates/ it is not confirmed knowledge, so it is written straight to
+// the main checkout (issue #7).
+const PendingDecisionsFile = "pending-decisions.md"
+
 // PromotionAskFooter ends every promotion ask.
 const PromotionAskFooter = "deny if this was not read to you as a confirmation round"
 
@@ -257,7 +262,8 @@ func gatePromotion(agentsDir string, p HookPayload) GateDecision {
 		}
 		return deny("this `kb finish` promotes " + files + " and needs your confirmation summary first — " + why + " at " +
 			named + ". Write `## Intent` (one line, first), `## Grounding`, `## Precedent` and `## Changes`, read the " +
-			"confirmation round out in chat, then re-run the finish: the gate asks the human with your summary (ADR-0067).")
+			"confirmation round out in chat, then re-run the finish: the gate asks the human with your summary (ADR-0067)." +
+			writeFirstHint(sumPath))
 	}
 	text := RenderPromotionAsk(a.Dir(), PromotionAsk{Agent: a.Name, Branch: branch, Summary: s, Promoted: promoted,
 		Related: PromotionRelated(agentsDir, a, branch, s)})
@@ -265,7 +271,7 @@ func gatePromotion(agentsDir string, p HookPayload) GateDecision {
 }
 
 // deniedKBMainWrite returns a reason when a file-tool or shell write targets a
-// peer's knowledge/ outside candidates/ on its main checkout (<pool>/<peer>/).
+// peer's knowledge/ outside candidates/ and pending-decisions.md on its main checkout (<pool>/<peer>/).
 // KB and work worktrees live under the pool's worktrees dir, never there.
 // agentsDir "" ⇒ inert.
 func deniedKBMainWrite(agentsDir string, p HookPayload) string {
@@ -293,7 +299,7 @@ func deniedKBMainWrite(agentsDir string, p HookPayload) string {
 		if len(parts) < 3 || parts[1] != KnowledgeDir || !fileExists(ManifestPath(agentsDir, parts[0])) {
 			continue
 		}
-		if kb := parts[2]; kb == CandidatesDir || strings.HasPrefix(kb, CandidatesDir+"/") {
+		if kb := parts[2]; kb == CandidatesDir || strings.HasPrefix(kb, CandidatesDir+"/") || kb == PendingDecisionsFile {
 			continue
 		}
 		return "mesh: `" + parts[0] + "/" + KnowledgeDir + "/" + parts[2] + "` is confirmed knowledge (current or log tier) on " +

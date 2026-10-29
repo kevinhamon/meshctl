@@ -80,7 +80,7 @@ func gateStateSet(agentsDir string, p HookPayload) GateDecision {
 		}
 		return deny("`state set` needs your confirmation summary first — " + why + named + ". Write `## Intent` (one line, " +
 			"first), `## Grounding`, `## Precedent` and `## Changes`, read the confirmation round out in chat, then re-run: " +
-			"the gate asks the human with your summary (ADR-0067).")
+			"the gate asks the human with your summary (ADR-0067)." + writeFirstHint(sumPath))
 	}
 	body := []string{"state set rewrites `" + a.Name + "`'s current-state digest (" + KnowledgeDir + "/" + StateFile + "):"}
 	body = append(body, PromotionAskBody(s, []string{StateFile})...)

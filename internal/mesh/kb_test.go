@@ -335,3 +335,25 @@ func TestKB_BeginRefusesWorktreeHeldByAnotherLiveSession(t *testing.T) {
 		t.Fatalf("begin after holder ended: %q %v, want %q", again, err, wt)
 	}
 }
+
+// TestKB_BeginRefusesFolderThatIsNotAWorktree: a folder at the worktree path
+// that git does not list as a worktree is not a begun session (#5).
+func TestKB_BeginRefusesFolderThatIsNotAWorktree(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	gitInit(t, a.Dir())
+	wt := worktreePath(dir, a.Name, "sY")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := KBBegin(dir, a, "sY", time.Now())
+	if err == nil || !strings.Contains(err.Error(), wt) {
+		t.Fatalf("kb begin over a non-worktree folder must fail naming it, got %v", err)
+	}
+	if err := os.RemoveAll(wt); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := KBBegin(dir, a, "sY", time.Now()); err != nil || got != wt {
+		t.Fatalf("kb begin after removing the folder: %q %v", got, err)
+	}
+}

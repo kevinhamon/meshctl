@@ -357,8 +357,12 @@ func poolPathTargets(agentsDir string, p HookPayload) poolTargets {
 			t.git = strings.Join(words, " ")
 		}
 	})
-	for _, w := range shellWriteTargets(in.Command, p.Cwd) {
-		if r, ok := rel(w); ok {
+	writes := shellWriteTargets(in.Command, p.Cwd)
+	writes = append(writes, interpreterWriteTargets(in.Command, p.Cwd)...)
+	seen := map[string]bool{}
+	for _, w := range writes {
+		if r, ok := rel(w); ok && !seen[r] {
+			seen[r] = true
 			t.writes = append(t.writes, r)
 		}
 	}

@@ -3,6 +3,7 @@ package mesh
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -355,5 +356,29 @@ func TestDoctor_CleanKBHasNoS1Noise(t *testing.T) {
 	}
 	if r := KBConsolidate(a, time.Now()); !r.Clean() && len(r.NotInDigest) != 0 {
 		t.Fatalf("fresh agent consolidate: %+v", r)
+	}
+}
+
+// TestKBConsolidate_ListsUncommittedCandidates: an untracked or edited
+// candidate is dated by mtime and never ages, so consolidate lists it on its
+// own and does not report the KB clean (#17).
+func TestKBConsolidate_ListsUncommittedCandidates(t *testing.T) {
+	root := meshRoot(t)
+	a := newTestAgent(t, root, "catalog", false, nil)
+	gitInit(t, a.Dir())
+	now := time.Now()
+	writeKB(t, a, "candidates/kept.md", "# Kept\n")
+	writeKB(t, a, "candidates/edited.md", "# Edited\n")
+	commitAt(t, a.Dir(), "candidates", now.AddDate(0, 0, -2))
+	writeKB(t, a, "candidates/edited.md", "# Edited again\n")
+	writeKB(t, a, "candidates/new.md", "# New\n")
+
+	r := KBConsolidate(a, now)
+	want := []string{"candidates/edited.md", "candidates/new.md"}
+	if !reflect.DeepEqual(r.Uncommitted, want) {
+		t.Fatalf("uncommitted = %q, want %q", r.Uncommitted, want)
+	}
+	if r.Clean() || !strings.Contains(r.Markdown(), "## Uncommitted candidates (2)") {
+		t.Fatalf("uncommitted candidates must be debt:\n%s", r.Markdown())
 	}
 }

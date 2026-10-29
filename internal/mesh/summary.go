@@ -271,6 +271,18 @@ func summaryProblem(path string) (s Summary, why string) {
 	return s, ""
 }
 
+// writeFirstHint is appended to a gate deny when a file the command names
+// (--summary-file, --report) does not exist yet. The gate checks the whole
+// shell command before any of it runs, so `cp x <path> && meshctl … <path>` is
+// always denied: the file must be written by an earlier call (issue #6).
+func writeFirstHint(path string) string {
+	if fileExists(path) {
+		return ""
+	}
+	return " The gate checks the whole command before any of it runs, so a file created in the same call does not " +
+		"exist yet: write it in a separate call first, then run the command on its own."
+}
+
 // usableSummary is summaryProblem for a command's --summary-file: why is ""
 // when it is usable, else what is wrong with it, path included (none named,
 // no file, empty, no Intent line).

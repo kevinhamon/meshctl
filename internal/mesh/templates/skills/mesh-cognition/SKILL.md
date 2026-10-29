@@ -56,7 +56,10 @@ Recognize → Recall → Retrieve → Reconcile → Verify → **Align** → Act
      `.memory/reconcile/`; write the reconcile report from it (one verdict and a quoted
      grounding per entry), then read the clean entries to the human as confirmation
      rounds, at most five paths per `meshctl kb confirm <path>... --report <report>`.
-     Conflicts go to "resolve conflicts".
+     Conflicts go to "resolve conflicts". Order: write the report in its own call
+     (the gate checks the whole command before any of it runs, so a report created in
+     the same call does not exist yet), commit the files you confirm (`kb confirm`
+     refuses uncommitted ones), then run `kb confirm`.
 1. **Recall.** `meshctl memory recall "<topic>"` returns tiered pointers — current
    tier outranks log, superseded decisions never appear. Add `--budget 4000` to inline
    the top current-tier bodies so the knowledge is in view. Your `state.md` digest and
@@ -301,7 +304,8 @@ EOF
 Rules — that is all there is to decide:
 - **Facts only**, no session narrative ("I then…"), no hedging. At most 40 lines.
 - **Rewrite the whole thing** each time; never append. Git keeps prior handoffs.
-- Keep the quoted `'EOF'` so nothing is shell-expanded. meshctl adds the timestamp.
+- Keep the quoted `'EOF'` so nothing is shell-expanded. meshctl adds the timestamp
+  and commits the handoff on its own (`meshctl: session handoff`).
 - Don't re-read or second-guess it after writing; `meshctl handoff set` refuses a body
   with a missing section, a leftover placeholder or over budget — fix and resend
   (`--force` writes it anyway).

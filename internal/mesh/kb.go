@@ -156,6 +156,30 @@ func mainBranch(dir string) string {
 	return strings.TrimSpace(out)
 }
 
+// isRegisteredWorktree reports whether git in repo lists wt as one of its
+// worktrees. A folder left at a worktree path without git's record of it is not
+// a begun KB session.
+func isRegisteredWorktree(repo, wt string) bool {
+	out, err := git(repo, "worktree", "list", "--porcelain")
+	if err != nil {
+		return false
+	}
+	want := canonicalPath(wt)
+	for _, line := range strings.Split(out, "\n") {
+		if p, ok := strings.CutPrefix(line, "worktree "); ok && canonicalPath(p) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
+}
+
 // KBBegin creates an isolated worktree+branch (mesh/kb/<session>) for a KB
 // write and points the session at it. Returns the worktree path. Re-running it
 // from the session that holds the worktree is idempotent; when another live
@@ -165,6 +189,10 @@ func mainBranch(dir string) string {
 // it (ResolveAgentSessionID).
 func KBBegin(agentsDir string, agent *Agent, session string, now time.Time) (string, error) {
 	wt := worktreePath(agentsDir, agent.Name, session)
+	if dirExists(wt) && !isRegisteredWorktree(agent.Dir(), wt) {
+		return "", fmt.Errorf("%s exists but is not a git worktree of %s — remove that folder, then run `meshctl kb begin` again",
+			wt, agent.Name)
+	}
 	if dirExists(wt) {
 		if h := KBHolder(agentsDir, agent, session, now); h != nil && h.ID != ResolveAgentSessionID(agent, os.Getpid(), now) {
 			return "", fmt.Errorf("KB session %s is held by live session %s (pid %d) in %s — one worktree, one session: "+

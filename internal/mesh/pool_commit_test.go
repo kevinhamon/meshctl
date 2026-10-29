@@ -156,6 +156,22 @@ func TestPostToolUse_ShellWriteCommits(t *testing.T) {
 	}
 }
 
+// TestPostToolUse_InterpreterWriteCommits: a python heredoc that writes a pool
+// file is committed like a shell redirect (#13).
+func TestPostToolUse_InterpreterWriteCommits(t *testing.T) {
+	dir, a := poolCommitFixture(t)
+	before := poolCommitCount(t, dir)
+	d := DoctrineLocalPath(dir)
+	appendFile(t, d, "\n- a new house rule\n")
+
+	cmd := "python3 - <<'EOF'\np='" + d + "'; s=open(p).read()\nopen(p,'w').write(s)\nEOF"
+	HookPostToolUse(dir, postBash(a, "sess-2", cmd, `{"stdout":"","stderr":"","interrupted":false}`), time.Now())
+
+	if got := poolCommitCount(t, dir); got != incr(before) {
+		t.Fatalf("interpreter write: want one commit, count %s → %s", before, got)
+	}
+}
+
 func TestPostToolUse_FailureOrOutsidePoolCommitsNothing(t *testing.T) {
 	dir, a := poolCommitFixture(t)
 	g := PoolGlossaryPath(dir)
