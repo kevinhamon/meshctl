@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// state_confirm_test.go — `state set` is a promotion (ADR-0067; spec decision
-// 25): the digest and its section hashes land on main together as one
-// `Confirm: <Intent line>` commit, asked by the gate with the summary.
+// state_confirm_test.go — `state set` is a promotion: the digest and its
+// section hashes land on main together as one `Confirm: <Intent line>` commit,
+// asked by the gate with the summary.
 
 const stateDigest = "## Now\nAll services are Go.\n\n## Active\n- v2 migration: 5 of 7\n\n## Recently decided\n- ADR-0012 one repo per service\n\n## Open questions\n- none\n"
 

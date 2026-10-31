@@ -15,7 +15,7 @@ const (
 
 // DirectoryMarkdown renders the roster as the table format used in
 // agent-comms.md, computed live from manifests. cfg supplies the pool default
-// for each peer's knowledge kind (ADR-0069).
+// for each peer's knowledge kind.
 func DirectoryMarkdown(agents []*Agent, cfg PoolConfig) string {
 	var b strings.Builder
 	fmt.Fprintln(&b, "| Agent | Knowledge | Inbox | Owns | Accepts | Dispatch |")

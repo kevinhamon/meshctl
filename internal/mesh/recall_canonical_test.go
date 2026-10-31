@@ -8,9 +8,8 @@ import (
 	"testing"
 )
 
-// Canonical recall scope and one-hop references (ADR-0065, ADR-0069; spec
-// decisions 30 and 33). Fixture: a three-peer pool, catalog and lending canonical,
-// critic perspective.
+// Canonical recall scope and one-hop references. Fixture: a three-peer pool,
+// catalog and lending canonical, critic perspective.
 
 type canonicalPool struct {
 	root                     string
@@ -233,7 +232,7 @@ func TestRecallCanonical_OneHopReferenceFollowedNeverTransitively(t *testing.T) 
 
 // TestRecallOwn_OneHopReferenceFollowed: the default (own) scope still
 // searches only the peer's own KB, but an inlined body's `mesh://` reference
-// is followed one hop like in the canonical scope (ADR-0065; story 42).
+// is followed one hop like in the canonical scope.
 func TestRecallOwn_OneHopReferenceFollowed(t *testing.T) {
 	p := newCanonicalPool(t)
 	writePoolGlossary(t, p.root, "# Pool glossary\n\n**Renewal**: TRANSITIVE-POOL-TEXT.\n")

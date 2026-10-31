@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// reconcile report grammar (ADR-0070; spec decision 45).
+// reconcile report grammar.
 
 func TestReconcileReport_ValidatorAcceptsGrammarAndNamesFailingLines(t *testing.T) {
 	good := `# Reconcile report — alpha (2026-10-18)

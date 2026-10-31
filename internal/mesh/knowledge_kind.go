@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// knowledge_kind.go — a peer's knowledge kind (ADR-0069, spec decision 29).
+// knowledge_kind.go — a peer's knowledge kind.
 // Canonical knowledge is part of the pool's one shared truth; perspective
 // knowledge is a viewpoint, free to contradict. The kind is declared with one
 // key at two levels: `knowledge:` in the pool config file (the default) and in
@@ -50,7 +50,7 @@ func knowledgeKindProblem(v string) string {
 }
 
 // canonicalOwnsFindings warns when two or more canonical peers declare the same
-// `owns` tag (ADR-0065: one fact owner per canonical fact). Perspective peers
+// `owns` tag (one fact owner per canonical fact). Perspective peers
 // are exempt. Tags compare case-insensitively; one finding per shared tag,
 // naming the peers in sorted order.
 func canonicalOwnsFindings(cfg PoolConfig, agents []*Agent) []DoctorFinding {
@@ -85,7 +85,7 @@ func canonicalOwnsFindings(cfg PoolConfig, agents []*Agent) []DoctorFinding {
 		names := byTag[k]
 		sort.Strings(names)
 		out = append(out, DoctorFinding{Agent: strings.Join(names, ","), Level: "warn", Message: fmt.Sprintf(
-			"owns `%s` is declared by canonical peers %s — one fact owner per canonical fact (ADR-0065): keep it on one peer, or declare the others `knowledge: perspective`",
+			"owns `%s` is declared by canonical peers %s — one fact owner per canonical fact: keep it on one peer, or declare the others `knowledge: perspective`",
 			display[k], strings.Join(names, ", "))})
 	}
 	return out

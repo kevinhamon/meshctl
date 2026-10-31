@@ -73,7 +73,7 @@ func TestPoolRepoNag_States(t *testing.T) {
 func TestHook_SessionStart_PoolRepoNagUntilPushed(t *testing.T) {
 	root := migratedRoot(t)
 	a := newTestAgent(t, root, "architect", true, nil)
-	// The peer's own ADR-0039 nag is silenced so only the pool line is under test.
+	// The peer's own repo-hygiene nag is silenced so only the pool line is under test.
 	gitOut(t, a.Dir(), "remote", "add", "origin", "https://example.test/x.git")
 
 	ctx := HookSessionStart(root, HookPayload{Cwd: a.Dir(), SessionID: "s"}, 1, time.Now())

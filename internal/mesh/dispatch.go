@@ -65,7 +65,7 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 		o.From = CallerName()
 	}
 
-	// Refuse state-mutating targets as data, not prose (ADR-0010).
+	// Refuse state-mutating targets as data, not prose.
 	if !target.IsDispatchable() {
 		reason := "not dispatchable"
 		if len(target.Mutates) > 0 {
@@ -150,7 +150,7 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 	}
 
 	// Claim the target request for this dispatched session so a concurrent
-	// interactive session can't double-process it (ADR-0011).
+	// interactive session can't double-process it.
 	dispatchSession := fmt.Sprintf("dispatch-%d-%s", os.Getpid(), now.UTC().Format("150405"))
 	_, _ = ClaimRequest(req.path, dispatchSession, os.Getpid(), now)
 	defer func() { _ = ReleaseClaim(req.path, dispatchSession, time.Now()) }()
@@ -202,8 +202,8 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 	return req, rc, nil
 }
 
-// dispatchArgv builds the headless invocation for a target's harness (ADR-0032/
-// ADR-0041). Claude Code: `claude -p` with the scoped allowlist + appended system
+// dispatchArgv builds the headless invocation for a target's harness.
+// Claude Code: `claude -p` with the scoped allowlist + appended system
 // prompt. opencode V1: `opencode run --pure --auto` (no plugins → no hook recursion /
 // mid-dispatch capture; auto-approve for non-interactive). A random port per run
 // means dispatch never collides with a live TUI's server. opencode V2 has no
@@ -253,7 +253,7 @@ const opencodeDispatchConfig = `{"permission":{"edit":"deny","webfetch":"deny","
 
 // realDispatch runs the target's harness headlessly in its workspace to process
 // the intake request. The runtime is chosen by the TARGET agent's manifest harness
-// (ADR-0041) — claude → `claude -p`, opencode → `opencode run` — so dispatch works
+// — claude → `claude -p`, opencode → `opencode run` — so dispatch works
 // in an opencode mesh, not just a Claude Code one.
 func realDispatch(ctx context.Context, targetDir, msg, sys, model string, env []string, stdout, stderr io.Writer) int {
 	harness, ocMajor := HarnessClaude, 0

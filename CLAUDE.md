@@ -10,4 +10,4 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 
 ### Domain docs
 
-Single-context: root `GLOSSARY.md` plus ADRs in `docs/decisions/`. See `docs/agents/domain.md`.
+Single-context: root `GLOSSARY.md`. Decision records are kept privately under `private-docs/`. See `docs/agents/domain.md`.

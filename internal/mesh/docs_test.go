@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// docs_test.go — the documents folder convention (agent-docs ticket 02).
+// docs_test.go — the documents folder convention.
 
 func TestDocFolders_DefaultCleanAndRefused(t *testing.T) {
 	a := &Agent{}

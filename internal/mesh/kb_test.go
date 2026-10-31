@@ -24,7 +24,7 @@ func gitInit(t *testing.T, dir string) {
 	}
 	run("init", "-b", "main")
 	run("add", "-A")
-	// --allow-empty: New() may have already committed the scaffold (ADR-0039), so
+	// --allow-empty: New() may have already committed the scaffold, so
 	// there can be nothing new to seed.
 	run("commit", "--allow-empty", "-m", "seed")
 }
@@ -196,8 +196,8 @@ func gitBranchExists(t *testing.T, dir, branch string) bool {
 	return err == nil
 }
 
-// TestKB_BeginCreatesMeshKBBranch: a KB session branch is mesh/kb/<session>
-// (spec decision 17), alongside mesh/work/<id>; finish removes it.
+// TestKB_BeginCreatesMeshKBBranch: a KB session branch is mesh/kb/<session>,
+// alongside mesh/work/<id>; finish removes it.
 func TestKB_BeginCreatesMeshKBBranch(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)
@@ -285,7 +285,7 @@ func TestKB_LegacySessionBranchAccepted(t *testing.T) {
 }
 
 // TestKB_BeginRefusesWorktreeHeldByAnotherLiveSession: one worktree, one
-// session (spec decision 6). Another live session's KB worktree cannot be
+// session. Another live session's KB worktree cannot be
 // begun into; the holder re-running kb begin is idempotent as before, and a
 // dead holder frees it.
 func TestKB_BeginRefusesWorktreeHeldByAnotherLiveSession(t *testing.T) {

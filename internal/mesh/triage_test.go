@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// triage_test.go — the intake triage pass, worksheet half (ADR-0072; spec
-// decisions 55, 56): the hub walk order, the per-peer worksheet and its
-// signal groups, and the "no human at the prompt" refusals.
+// triage_test.go — the intake triage pass, worksheet half: the hub walk order,
+// the per-peer worksheet and its signal groups, and the "no human at the
+// prompt" refusals.
 
 var triageNow = time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
 

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// triage_apply_test.go — `inbox triage apply` (ADR-0072; spec decisions 59–61):
+// triage_apply_test.go — `inbox triage apply`:
 // the ref resolver, the status mapping and stamps, the refusals (before any
 // file changes), the cap, the live-branch refusal and read-back.
 

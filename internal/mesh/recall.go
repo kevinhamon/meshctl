@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Unified recall (ADR-0033): one contract over three sources —
+// Unified recall: one contract over three sources —
 //   - KB topics (durable, authoritative; live-computed, no persisted index),
 //   - session-records (owned episodic capture),
 //   - the git time-spine (always-on floor: recent commits, even before any
@@ -39,11 +39,11 @@ type RecallHit struct {
 	Tier   string   `json:"tier,omitempty"` // kb hits: "current" | "log" | "inbox"
 	Body   string   `json:"body,omitempty"` // RecallWithBodies: the source text, within budget
 	// Via names the source peer of a hit that is not the calling peer's own:
-	// ReservedOwner for the pool glossary (ADR-0066), a peer name for canonical
-	// scope (ADR-0065). "" is the peer's own knowledge. Where[0] of a via hit
+	// ReservedOwner for the pool glossary, a peer name for canonical
+	// scope. "" is the peer's own knowledge. Where[0] of a via hit
 	// is the `mesh://` reference, not a workspace-relative path.
 	Via string `json:"via,omitempty"`
-	// Confirmed is false for a hit the human has not agreed to (ADR-0067): an
+	// Confirmed is false for a hit the human has not agreed to: an
 	// own entry whose hash does not match the peer's ledger (no ledger ⇒
 	// unconfirmed), any inbox hit, or a pool file with uncommitted changes.
 	Confirmed bool `json:"confirmed"`
@@ -100,7 +100,7 @@ func tierBonus(tier string) int {
 	return 0
 }
 
-// rankBonus is tierBonus for a hit that may be unconfirmed (ADR-0067): an
+// rankBonus is tierBonus for a hit that may be unconfirmed: an
 // unconfirmed current or log hit ranks below confirmed log and above inbox.
 func rankBonus(tier string, confirmed bool) int {
 	if !confirmed && (tier == TierCurrent || tier == TierLog) {
@@ -167,7 +167,7 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 	// KB topics (authoritative; live). Inactive decisions are already gone
 	// (computeTopics drops them); tiers rank what is left.
 	if idx, err := computeTopics(agent); err == nil && includeKB {
-		ledger := newLedgerCheck(agent.Dir()) // ADR-0067: no ledger ⇒ unconfirmed
+		ledger := newLedgerCheck(agent.Dir()) // no ledger ⇒ unconfirmed
 		for _, t := range idx.Topics {
 			s := len(tokens) == 0 // empty query → include, score 0
 			score := 0
@@ -188,8 +188,8 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 			}
 		}
 	}
-	// The pool glossary: a current-tier source for every peer, via pool
-	// (ADR-0066). Independent of the peer's own knowledge/ being present.
+	// The pool glossary: a current-tier source for every peer, via pool.
+	// Independent of the peer's own knowledge/ being present.
 	if includeKB {
 		hits = append(hits, poolGlossaryHits(filepath.Dir(agent.Dir()), tokens)...)
 	}
@@ -249,7 +249,7 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 // mid-file except the last one that fits partially. Log-tier and inbox hits
 // stay pointers: history is for following up, not for reading by default.
 // Search is the peer's own; an inlined body's `mesh://` references are
-// followed one hop to canonical targets within the same budget (ADR-0065).
+// followed one hop to canonical targets within the same budget.
 func RecallWithBodies(agent *Agent, query string, limit, budgetTokens int) ([]RecallHit, error) {
 	hits, err := Recall(agent, query, limit)
 	if err != nil || budgetTokens <= 0 {
@@ -292,7 +292,7 @@ func inlineBodies(agent *Agent, hits []RecallHit, budgetTokens int, expand func(
 			continue
 		}
 		if !h.Confirmed {
-			body = hypothesisPrefix + body // ADR-0067: a proposal, not truth
+			body = hypothesisPrefix + body // a proposal, not truth
 		}
 		if expand != nil && len(body) < remaining {
 			body = expand(h, body, remaining-len(body))
@@ -308,7 +308,7 @@ func inlineBodies(agent *Agent, hits []RecallHit, budgetTokens int, expand func(
 	}
 }
 
-// hypothesisPrefix opens the inlined body of an unconfirmed hit (ADR-0067).
+// hypothesisPrefix opens the inlined body of an unconfirmed hit.
 const hypothesisPrefix = "_hypothesis_\n"
 
 // RecallMarkdown renders hits as a list; a hit with a body gets it inlined

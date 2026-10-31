@@ -1,6 +1,6 @@
 // Package mesh implements the meshctl CLI's core: manifest parsing, on-demand
 // directory, file-based intake, headless dispatch with anti-cascade guards, and
-// the ADR-0011 concurrency layer (session presence, atomic claims, KB worktrees).
+// the concurrency layer (session presence, atomic claims, KB worktrees).
 package mesh
 
 import (
@@ -11,19 +11,19 @@ import (
 )
 
 // Runtime artifact + layout constants. Coordination/ephemeral state lives on the
-// shared filesystem outside any repo (ADR-0011); the mesh kit itself is one repo.
+// shared filesystem outside any repo; the mesh kit itself is one repo.
 const (
 	MeshRepoName = "agent-mesh" // legacy doctrine dir name (detection + doctor skip only)
 	CommsFile    = "agent-comms.md"
 
-	// CurrentPoolDir is the pool directory (ADR-0066): the pool's single infra
+	// CurrentPoolDir is the pool directory: the pool's single infra
 	// footprint at the pool root — a visible git repo holding the marker, the
 	// doctrine, the pool glossary and (ignored) runtime state, with agents as
 	// first-class sibling repos beside it.
 	CurrentPoolDir = "pool"
-	// LegacyPoolDir is the hidden pool directory of ADR-0031/0037/0038, recognised
+	// LegacyPoolDir is the hidden pool directory of older pools, recognised
 	// until `pool upgrade` renames it. Both names live here and nowhere else —
-	// PoolDir resolves them (ADR-0066 decision 8).
+	// PoolDir resolves them.
 	LegacyPoolDir = ".agentmesh"
 
 	// Names inside the pool directory. Build paths with the *Path helpers below;
@@ -43,7 +43,7 @@ const (
 	ManifestName = "agent.yaml"
 	IntakeDir    = "intake"
 
-	// LegacyDoctrineDir is the pre-ADR-0038 top-level doctrine dir; detected for
+	// LegacyDoctrineDir is the older top-level doctrine dir; detected for
 	// migration + back-compat.
 	LegacyDoctrineDir = MeshRepoName
 )
@@ -52,7 +52,7 @@ const (
 // holds the marker, the doctrine and the runtime state. Every runtime path is
 // built from its result, so a change of layout is a change here alone.
 // Resolution: `pool/pool.yaml` when present; else the legacy hidden directory
-// when it exists (marker or not — pre-ADR-0031 pools had none); else `pool/`,
+// when it exists (marker or not — the oldest pools had none); else `pool/`,
 // the layout every new pool gets.
 func PoolDir(poolRoot string) string {
 	cur := filepath.Join(poolRoot, CurrentPoolDir)
@@ -66,7 +66,7 @@ func PoolDir(poolRoot string) string {
 }
 
 // PoolDirIsLegacy reports whether the pool still lives in the hidden legacy
-// directory, i.e. `pool upgrade` has not migrated it yet (ADR-0066).
+// directory, i.e. `pool upgrade` has not migrated it yet.
 func PoolDirIsLegacy(poolRoot string) bool {
 	return filepath.Base(PoolDir(poolRoot)) == LegacyPoolDir
 }
@@ -77,7 +77,7 @@ func PoolDirName(poolRoot string) string {
 	return filepath.Base(PoolDir(poolRoot))
 }
 
-// DispatchLogPath is the dispatch audit log (ADR-0011).
+// DispatchLogPath is the dispatch audit log.
 func DispatchLogPath(poolRoot string) string {
 	return filepath.Join(PoolDir(poolRoot), DispatchLogFile)
 }
@@ -97,19 +97,19 @@ func WorktreesPath(poolRoot string) string {
 	return filepath.Join(PoolDir(poolRoot), WorktreesDirName)
 }
 
-// DoctrinePath is where the doctrine docs are emitted (ADR-0038). Legacy pools
+// DoctrinePath is where the doctrine docs are emitted. Legacy pools
 // used the top-level `agent-mesh/` dir — see `pool migrate`.
 func DoctrinePath(poolRoot string) string {
 	return filepath.Join(PoolDir(poolRoot), DoctrineDirName)
 }
 
-// PoolGlossaryPath is the pool glossary (ADR-0066): the one vocabulary every
+// PoolGlossaryPath is the pool glossary: the one vocabulary every
 // peer uses, tracked in the pool repo.
 func PoolGlossaryPath(poolRoot string) string {
 	return filepath.Join(PoolDir(poolRoot), PoolGlossaryFile)
 }
 
-// PoolConfigPath is the human-owned pool settings file (ADR-0066): knowledge
+// PoolConfigPath is the human-owned pool settings file: knowledge
 // kind, outbound surfaces, reconcile order, tool reference. Never rewritten by
 // meshctl; see pool_config.go.
 func PoolConfigPath(poolRoot string) string {
@@ -149,11 +149,11 @@ func AgentsDir() (string, error) {
 
 	if cwd, err := os.Getwd(); err == nil {
 		for dir := cwd; ; {
-			// Preferred marker (ADR-0031): the resolved pool dir.
+			// Preferred marker: the resolved pool dir.
 			if IsPool(dir) {
 				return dir, nil
 			}
-			// Back-compat (ADR-0029): the doctrine clone marker.
+			// Back-compat: the doctrine clone marker.
 			if fileExists(filepath.Join(dir, MeshRepoName, CommsFile)) {
 				return dir, nil
 			}
@@ -184,7 +184,7 @@ func PoolMarkerPath(poolRoot string) string {
 }
 
 // IsPool reports whether poolRoot is a pool: it carries `pool/pool.yaml`, or the
-// legacy hidden directory (whose marker is optional — pools older than ADR-0031
+// legacy hidden directory (whose marker is optional — the oldest pools
 // gained it on their first repair). A bare `pool/` without a marker is not a
 // pool: the visible name can collide with a user's own directory.
 func IsPool(poolRoot string) bool {
@@ -211,9 +211,9 @@ func WritePoolMarker(poolRoot, name, doctrineVersion string, created time.Time, 
 }
 
 // poolMarkerBody is the identity file's whole content: identity only. Human
-// settings (tool reference included) live in PoolConfigPath (ADR-0066).
+// settings (tool reference included) live in PoolConfigPath.
 func poolMarkerBody(name, created, doctrineVersion string) string {
-	return fmt.Sprintf("# meshctl pool marker (ADR-0031) — binary-managed; identity for this pool.\n"+
+	return fmt.Sprintf("# meshctl pool marker — binary-managed; identity for this pool.\n"+
 		"# Pool settings (knowledge, outbound, reconcile, tools) go in %s beside this file.\n"+
 		"name: %s\ncreated: %s\ndoctrine_version: %s\n", PoolConfigFile, name, created, doctrineVersion)
 }

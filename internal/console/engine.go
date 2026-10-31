@@ -1,6 +1,6 @@
 // Package console is `meshctl console`: a near-real-time view of a pool,
-// served on localhost (spec: .scratch/mesh-console, decisions C1–C9). It is
-// read-only except for doctor's automatic repairs (ADR-0079).
+// served on localhost. It is
+// read-only except for doctor's automatic repairs.
 //
 // The engine keeps one snapshot of the pool and recomputes it when the
 // pool's state files change. Files are the source of truth and the "message
@@ -23,7 +23,7 @@ import (
 	"github.com/kevinhamon/meshctl/internal/mesh"
 )
 
-// Cadences (decision C5).
+// Cadences.
 const (
 	debounce      = 250 * time.Millisecond
 	tickEvery     = time.Minute
@@ -50,7 +50,7 @@ type Snapshot struct {
 	PoolPush string `json:"pool_push,omitempty"`
 }
 
-// Notice is a pool-level message (ticket 06): not any one peer's work.
+// Notice is a pool-level message: not any one peer's work.
 type Notice struct {
 	Kind    string `json:"kind"`
 	Message string `json:"message"`

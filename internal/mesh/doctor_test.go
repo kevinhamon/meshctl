@@ -18,7 +18,7 @@ func TestReferenceMissingEffective(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("README.md", "# Reference\n")                                  // ignored
+	write("README.md", "# Reference\n")                                   // ignored
 	write("dated.md", "---\nsource: X\neffective: 2026-04-01\n---\nbody") // ok
 	write("undated.md", "---\nsource: Y\nurl: z\n---\nbody")              // flagged
 
@@ -68,10 +68,10 @@ func TestKBConsistencyFindings(t *testing.T) {
 
 	wants := []string{
 		`lists ADR 18 as "proposed" but the file says "accepted"`, // status mismatch
-		"decisions/0020-boundary.md has no row",                    // missing README row
-		"README.md row references ADR 99 but no such file",         // orphan README row
-		"0020-boundary.md references ADR-99 but no such",           // broken cross-ref in body (num is zero-stripped)
-		"'pending … ADR' marker",                                   // stale pending marker
+		"decisions/0020-boundary.md has no row",                   // missing README row
+		"README.md row references ADR 99 but no such file",        // orphan README row
+		"0020-boundary.md references ADR-99 but no such",          // broken cross-ref in body (num is zero-stripped)
+		"'pending … ADR' marker",                                  // stale pending marker
 	}
 	must := []string{wants[0], wants[1], wants[2], wants[3], wants[4]}
 	for _, w := range must {

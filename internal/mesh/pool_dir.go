@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// pool_dir.go — the pool directory as a git repo (ADR-0066, spec decisions 8–9).
+// pool_dir.go — the pool directory as a git repo.
 // Pool knowledge (marker, doctrine, glossary) lives in the visible `pool/`,
 // which is a git repository on main; runtime state (dispatch files, worktrees)
 // sits beside it, ignored. PlanPoolDir is the read-only preview `pool upgrade
@@ -20,7 +20,7 @@ import (
 const poolInitialCommit = "pool: initialise repository"
 
 // Subjects of the config-split commits on an already-initialised pool repo
-// (ADR-0066 decision 10): tools moved out of the identity file, or the config
+// (the config split): tools moved out of the identity file, or the config
 // file first written on a pool migrated before the split existed.
 const (
 	poolConfigSplitCommit = "config: split from " + PoolMarkerFile
@@ -35,7 +35,7 @@ const poolIgnoreMemoryCommit = "pool: ignore " + MemoryDir + "/"
 // runtime state never enters the pool's history. Doctrine merge scratch
 // (`.upstream`, `.bak-*`) is meshctl's, not knowledge, so it stays out too.
 var poolIgnoreBlock = "\n" + gitignoreMarker + " — do not edit\n" +
-	"# runtime state (ADR-0011/0066): dispatch audit, counter, lock (+ its reclaim/tomb files), worktrees\n" +
+	"# runtime state: dispatch audit, counter, lock (+ its reclaim/tomb files), worktrees\n" +
 	DispatchLogFile + "\n" +
 	DispatchCountFile + "\n" +
 	DispatchLockFile + "\n" +
@@ -56,7 +56,7 @@ type poolDirState struct {
 	staleLegacy         bool // migrated, but the hidden directory is still there beside pool/
 	markerMissing       bool
 	configMissing       bool
-	splitTools          splitToolsState // tools still in the identity file (config split, decision 10)
+	splitTools          splitToolsState // tools still in the identity file (config split)
 	splitCmds           []string
 	glossaryMissing     bool
 	repoMissing         bool

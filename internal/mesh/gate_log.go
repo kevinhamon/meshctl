@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// gate_log.go — two things the ADR-0068 amendment asked of the gate after the
+// gate_log.go — two things the gate needed after the
 // outbound prototype: a hub's hooks STEP ASIDE for its subagents' calls, and
 // every decision names the check that produced it, in a per-agent decision log.
 //
@@ -31,8 +31,8 @@ import (
 // check, the mode and the tool. An allow no check touched says `check=none`.
 
 // Check names: the vocabulary of the decision log's `check=` field. Each is the
-// rule that produced a decision; ticket 40 (outbound) and ticket 26 (pool
-// path) set the reserved ones.
+// rule that produced a decision; the outbound and pool-path checks
+// set the reserved ones.
 const (
 	GateCheckNone        = "none"        // allow: no check touched the call
 	GateCheckDelegation  = "delegation"  // Agent/Task to a mutating peer (ask), or from a peer (deny)
@@ -41,7 +41,7 @@ const (
 	GateCheckShellWrite  = "shell-write" // shell write into the same stores
 	GateCheckKBBranch    = "kb-branch"   // shell command naming a mesh/kb/ branch outside `meshctl kb`
 	GateCheckKBRule      = "kb-rule"     // standing rule from the agent's own KB (deny-once)
-	GateCheckOutbound    = "outbound"    // reserved: the outbound gate (ticket 40)
+	GateCheckOutbound    = "outbound"    // reserved: the outbound gate
 	GateCheckPoolPath    = "pool-path"   // pool writes asked with the summary; git in pool/ denied
 	GateCheckUnavailable = "unavailable" // the gate could not evaluate the call at all
 )
@@ -67,7 +67,7 @@ const gateLogMaxBytes = 1 << 20
 // seeing one of its subagents' tool calls: the payload carries a subagent id
 // (Claude Code sets agent_id inside a subagent) but no peer flag was passed.
 // Such a hook applies only the machine-global rules; the KB-rule gate and the
-// outbound gate (ticket 40 checks this seam) belong to the subagent's own
+// outbound gate belong to the subagent's own
 // frontmatter hook, which runs with `--agent <peer>`.
 func (p HookPayload) StepAside() bool {
 	return p.AgentID != "" && p.PeerAgent == ""

@@ -13,7 +13,7 @@ import (
 	"github.com/kevinhamon/meshctl/internal/mesh"
 )
 
-// hub.go — one console for every pool on this machine (ADR-0077 amendment,
+// hub.go — one console for every pool on this machine (since
 // v1.8.2). The hub runs one engine per live pool in the registry, plus the
 // pool the console was started from, and tells each page about its own pool
 // and a summary of all of them, so the switcher shows where work waits.
@@ -50,7 +50,7 @@ type Frame struct {
 	PoolKey string        `json:"pool_key"`
 	Pools   []PoolSummary `json:"pools"`
 	// Boot is new each time the console starts. Document links are signed
-	// per process (ADR-0078), so a page that sees it change refetches them.
+	// per process, so a page that sees it change refetches them.
 	Boot string `json:"boot"`
 }
 

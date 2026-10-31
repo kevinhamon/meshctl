@@ -8,11 +8,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// console_settings.go — how the mesh console looks for this pool (console
-// layout spec C26–C29): saved in the pool repo so a pool cloned on another
-// machine opens the same way. A file of its own beside config.yaml, which
-// meshctl never rewrites (ADR-0066); the console writes and commits this one,
-// and never pushes.
+// console_settings.go — how the mesh console looks for this pool: saved in the
+// pool repo so a pool cloned on another machine opens the same way. A file of
+// its own beside config.yaml, which meshctl never rewrites; the console writes
+// and commits this one, and never pushes.
 
 // ConsoleSettingsFile is <pool dir>/console.yaml.
 const ConsoleSettingsFile = "console.yaml"

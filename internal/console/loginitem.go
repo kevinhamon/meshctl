@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// loginitem.go — start `meshctl console` at login (decision C9, ticket 13):
+// loginitem.go — start `meshctl console` at login:
 // a macOS LaunchAgent, installed and removed on request, restarted after
 // `meshctl update` so an old binary never keeps serving.
 

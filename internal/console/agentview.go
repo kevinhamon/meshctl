@@ -18,7 +18,7 @@ import (
 )
 
 // agentview.go — GET /api/agent: the parts of one agent's page that are not
-// in the pool snapshot (agent-docs ticket 04): its knowledge base by area,
+// in the pool snapshot its knowledge base by area,
 // its recent commits and its recently closed requests. Read on demand, for
 // the agent on screen only.
 

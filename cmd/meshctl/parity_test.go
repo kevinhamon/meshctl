@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// parity_test.go — the harness parity table (ADR-0075) cannot drift: every
+// parity_test.go — the harness parity table cannot drift: every
 // command is classified, and the README shows the table the code declares.
 // The release workflow runs these tests before it builds anything.
 

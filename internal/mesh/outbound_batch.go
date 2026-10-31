@@ -9,8 +9,7 @@ import (
 	"time"
 )
 
-// outbound_batch.go — the outbound gate, ask side (ADR-0068 with amendment;
-// spec decisions 36–38, cross-cutting 69). A peer that declares the surface is
+// outbound_batch.go — the outbound gate, ask side. A peer that declares the surface is
 // asked once per summary: the batch is the sha256 of its summary file. The ask
 // text is the signature of the confirmation round (Intent line, up to six
 // `## Changes` bullets, `Outbound: <surface> via <tool>`, the call's input cut
@@ -30,8 +29,8 @@ import (
 // the audit log and the pending-ask markers, one pair per session.
 const OutboundDir = "outbound"
 
-// outboundAskBullets and outboundAskInput bound the ask's signature (ADR-0068
-// amendment: about 600 characters render whole).
+// outboundAskBullets and outboundAskInput bound the ask's signature (about
+// 600 characters render whole).
 const (
 	outboundAskBullets = 6
 	outboundAskInput   = 300
@@ -95,7 +94,7 @@ func gateOutboundAsk(agentsDir string, a *Agent, p HookPayload, mt OutboundMatch
 		return outboundDeny("mesh: `" + p.ToolName + "` writes the outbound surface `" + mt.Surface + "` — summary required (" + why +
 			" at " + b.SummaryPath + "). Write it with `## Intent` (one line, first), `## Grounding`, `## Precedent` and " +
 			"`## Changes` (the writes you plan, as `+`/`-` bullets), read the confirmation round out in chat, then re-issue " +
-			"this call: the gate asks the human once for the whole batch (ADR-0068).")
+			"this call: the gate asks the human once for the whole batch.")
 	}
 	now := time.Now()
 	if b.Acked() {

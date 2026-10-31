@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// triageCmd is `meshctl inbox triage [--peer <name>]` (ADR-0072): with a peer
+// triageCmd is `meshctl inbox triage [--peer <name>]`: with a peer
 // (or from a peer's own workspace) it writes and prints the triage worksheet;
 // from a hub with no peer it prints the pool-wide walk order and writes
 // nothing. agent is the inbox parent's persistent --agent flag.
@@ -51,8 +51,8 @@ func triageCmd(agent *string) *cobra.Command {
 	return cmd
 }
 
-// triageApplyCmd is `meshctl inbox triage apply --report <file> <id>...`
-// (ADR-0072): closes up to five confirmed requests per the triage report,
+// triageApplyCmd is `meshctl inbox triage apply --report <file> <id>...`:
+// closes up to five confirmed requests per the triage report,
 // through the respond path. Gate-asked with the report lines.
 func triageApplyCmd(agent *string) *cobra.Command {
 	var report string

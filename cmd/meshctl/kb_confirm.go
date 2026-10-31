@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// kbConfirmCmd is `meshctl kb confirm` (ADR-0070): bulk confirmation of
+// kbConfirmCmd is `meshctl kb confirm`: bulk confirmation of
 // reviewed entries from a reconcile report, on main, ledger and Confirm:
 // commit in one step. agent and session are kb's shared persistent flags.
 func kbConfirmCmd(agent, session *string) *cobra.Command {

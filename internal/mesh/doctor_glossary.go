@@ -6,11 +6,10 @@ import (
 	"strings"
 )
 
-// doctor_glossary.go — peer glossaries retire (ADR-0066 and its amendment,
-// spec decision 16). The pool glossary is the one vocabulary; a peer's legacy
-// knowledge/glossary.md stays indexed as a current-tier state doc until it is
-// migrated by hand, and doctor keeps both conditions in view. No config, no
-// migrate command.
+// doctor_glossary.go — peer glossaries retire. The pool glossary is the one
+// vocabulary; a peer's legacy knowledge/glossary.md stays indexed as a
+// current-tier state doc until it is migrated by hand, and doctor keeps both
+// conditions in view. No config, no migrate command.
 
 // PeerGlossaryFile is a peer's legacy glossary, relative to its knowledge/.
 // The KB template no longer scaffolds it.
@@ -49,7 +48,7 @@ func glossaryFindings(a *Agent, terms map[string]bool, poolExists bool) []Doctor
 	if fileExists(filepath.Join(a.Dir(), KnowledgeDir, PeerGlossaryFile)) {
 		return []DoctorFinding{{Agent: a.Name, Level: "warn", Message: "still has " + KnowledgeDir + "/" + PeerGlossaryFile +
 			" — the pool glossary (mesh://" + ReservedOwner + "/" + PoolGlossaryFile + ") is the one vocabulary now; migrate its terms by hand" +
-			" (ADR-0066 amendment: consistent sections, batches of five, one confirmation round, pool edit then `meshctl kb finish` deleting them)"}}
+			" (consistent sections, batches of five, one confirmation round, pool edit then `meshctl kb finish` deleting them)"}}
 	}
 	if len(terms) == 0 {
 		return nil

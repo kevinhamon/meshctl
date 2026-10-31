@@ -11,7 +11,7 @@ import (
 
 // gitIdentity pins the git identity meshctl's own commits pick up from the
 // environment, so first-commit authorship is deterministic in tests. Production
-// code sets no identity: the user's configured one is the point (ADR-0066).
+// code sets no identity: the user's configured one is the point.
 func gitIdentity(t *testing.T) {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "t")
@@ -22,7 +22,7 @@ func gitIdentity(t *testing.T) {
 
 // legacyRoot is meshRoot made a real legacy pool: the hidden directory carries
 // a marker, a local doctrine addendum and runtime files, the shape every pool
-// on a machine had before ADR-0066.
+// on a machine had before the pool repo.
 func legacyRoot(t *testing.T) string {
 	t.Helper()
 	dir := meshRoot(t)
@@ -38,7 +38,7 @@ func legacyRoot(t *testing.T) string {
 	return dir
 }
 
-// migratedRoot is the pool fixture for everything after ADR-0066: a pool whose
+// migratedRoot is the pool fixture for everything after the pool repo: a pool whose
 // directory is the visible pool/ git repo on main with the ignore file and the
 // first commit in place. Later tickets (pool writes, PostToolUse commit, repo
 // nag) build on it.

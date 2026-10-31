@@ -1381,19 +1381,37 @@ function ensureAgentData(a) {
   const key = poolKey + "/" + a.info.name;
   const sig = a.info.docs + "|" + (a.info.docs_newest || "");
   if (agentData.key !== key) Object.assign(agentData, { key, docs: null, view: null, docsSig: null, viewAt: 0 });
-  if (agentData.docsSig !== sig) { agentData.docsSig = sig; fetchAgentJSON("/api/docs", a.info.name, key, "docs"); }
-  if (Date.now() - agentData.viewAt > 30000) { agentData.viewAt = Date.now(); fetchAgentJSON("/api/agent", a.info.name, key, "view"); }
+  if (agentData.docsSig !== sig) {
+    agentData.docsSig = sig;
+    fetchAgentJSON("/api/docs", a.info.name, key, "docs", () => { if (agentData.docsSig === sig) agentData.docsSig = null; });
+  }
+  if (Date.now() - agentData.viewAt > 30000) {
+    agentData.viewAt = Date.now();
+    fetchAgentJSON("/api/agent", a.info.name, key, "view", () => { agentData.viewAt = 0; });
+  }
 }
 
-async function fetchAgentJSON(path, agent, key, slot) {
+// A failed fetch (asleep, console restarting) undoes its mark and redraws a
+// little later, which fetches again; otherwise the page stays on "loading…".
+async function fetchAgentJSON(path, agent, key, slot, unmark) {
   try {
     const r = await fetch(path + "?" + new URLSearchParams({ pool: poolKey, agent }));
-    if (!r.ok || agentData.key !== key) return;
+    if (agentData.key !== key) return;
+    if (!r.ok) throw new Error(path + ": " + r.status);
     agentData[slot] = await r.json();
-    const y = window.scrollY;
-    render();
-    window.scrollTo(0, y);
-  } catch (e) {}
+  } catch (e) {
+    if (agentData.key !== key) return;
+    unmark();
+    setTimeout(() => { if (agentData.key === key) redraw(); }, 5000);
+    return;
+  }
+  redraw();
+}
+
+function redraw() {
+  const y = window.scrollY;
+  render();
+  window.scrollTo(0, y);
 }
 
 const kindLabel = { markdown: "MD", html: "HTML", pdf: "PDF", image: "IMG", text: "TXT", other: "FILE" };
@@ -1497,7 +1515,7 @@ async function focusSession(agent, session, button) {
   }
 }
 
-// Doctor's automatic repairs (ADR-0079): list them, run on confirm, report.
+// Doctor's automatic repairs: list them, run on confirm, report.
 function openRepair(items) {
   const body = $("repair-body");
   const list = el("ul");
@@ -1535,7 +1553,7 @@ async function doRepair(b) {
 }
 $("repair-close").addEventListener("click", () => $("repair").close());
 
-// The Upgrade button (ADR-0079): preview with `pool upgrade --check`, run on
+// The Upgrade button: preview with `pool upgrade --check`, run on
 // confirm, then say what changed and which sessions to restart.
 async function openUpgrade(key, name) {
   const body = $("upgrade-body"), acts = $("upgrade-actions");
@@ -1597,7 +1615,7 @@ async function runUpgrade(key, name, b) {
 }
 $("upgrade-close").addEventListener("click", () => $("upgrade").close());
 
-// The Push button (ADR-0079 amendment): list the commits that would go, push
+// The Push button: list the commits that would go, push
 // on confirm, then say what happened and what to do if it did not.
 async function openPush(key) {
   const body = $("push-body"), acts = $("push-actions");
@@ -1645,7 +1663,7 @@ async function runPush(key, b) {
 }
 $("push-close").addEventListener("click", () => $("push").close());
 
-// An agent repo's Commit and Push buttons (ADR-0079 amendment). Commit lists
+// An agent repo's Commit and Push buttons. Commit lists
 // the paths it takes and asks for a message; the server refuses when the tree
 // changed since. After a commit that leaves the repo ahead, Push is offered
 // in the same dialog.
@@ -1947,6 +1965,23 @@ function connect() {
     }).catch(() => {});
   };
 }
+
+// A tab left in the background lets go of its live connection, and takes it
+// back when shown. Browsers allow about six connections per host; each open
+// tab holds one, so a few forgotten tabs starve the rest (lists stay on
+// "loading…", documents open blank).
+let pauseTimer = null;
+document.addEventListener("visibilitychange", () => {
+  clearTimeout(pauseTimer);
+  if (document.hidden) {
+    pauseTimer = setTimeout(() => {
+      if (!es) return;
+      es.close();
+      es = null;
+      setLive(false, "paused in the background");
+    }, 30000);
+  } else if (!es) connect();
+});
 onRoute();
 </script>
 </body>

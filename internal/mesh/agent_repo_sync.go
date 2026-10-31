@@ -11,8 +11,8 @@ import (
 )
 
 // agent_repo_sync.go — the console's Commit and Push buttons for an agent's
-// own repo (ADR-0079 amendment). ADR-0039 has a peer's knowledge safe only
-// once committed and pushed; doctor names a workspace with uncommitted paths
+// own repo. A peer's knowledge is safe only once
+// committed and pushed; doctor names a workspace with uncommitted paths
 // or unpushed commits, and the console lets the person commit or push it from
 // that finding, after seeing what goes. Agents never reach the endpoints: the
 // gate denies a shell call naming them, as it does the pool's push.
@@ -43,7 +43,7 @@ type AgentRepoState struct {
 
 // AgentRepoSync reads what an agent repo would commit or push. Only a
 // workspace that is its own repo with a remote has anything to do: the
-// ADR-0039 findings cover the rest. Dirty comes first; a push waits for a
+// repo-hygiene findings cover the rest. Dirty comes first; a push waits for a
 // clean tree, as the pool's does.
 func AgentRepoSync(dir string) AgentRepoState {
 	st := AgentRepoState{Dirty: []string{}, Commits: []string{}}

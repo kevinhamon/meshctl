@@ -15,7 +15,7 @@ import (
 // peers.go — in-session dispatch: every dispatchable peer is rendered
 // as a subagent definition in each caller whose harness can run one — Claude
 // Code's `.claude/agents/mesh-<peer>.md`, opencode V2's
-// `.opencode/agents/mesh-<peer>.md` (ADR-0076) — computed from the pool's
+// `.opencode/agents/mesh-<peer>.md` — computed from the pool's
 // manifests exactly like the roster. A caller then consults an advisory peer with the Agent tool
 // instead of spawning a second `claude` process in a second terminal: same
 // intake file, same audit trail, same cap — one process.
@@ -74,7 +74,7 @@ func PeersSupported(callerDir string) bool {
 func PeerAgentName(peer string) string { return PeerAgentPrefix + peer }
 
 // PeerWorkSuffix marks the write-capable definition a hub session delegates
-// owned work to (ADR-0063): `mesh-<peer>-work`.
+// owned work to: `mesh-<peer>-work`.
 const PeerWorkSuffix = "-work"
 
 // PeerWorkAgentFile is the path of a peer's delegated-work definition.
@@ -100,8 +100,8 @@ func RenderPeerAgent(caller string, peer *Agent) (string, error) {
 	return renderPeer(caller, peer, false)
 }
 
-// RenderPeerWorkAgent renders the write-capable delegated-work definition
-// (ADR-0063). The peer edits and commits in its own workspace and declared
+// RenderPeerWorkAgent renders the write-capable delegated-work definition.
+// The peer edits and commits in its own workspace and declared
 // workdirs; the in-session work gate confines the writes, not this list.
 func RenderPeerWorkAgent(caller string, peer *Agent) (string, error) {
 	return renderPeer(caller, peer, true)
@@ -187,7 +187,7 @@ type opencodePermRule struct {
 	Effect   string `yaml:"effect"`
 }
 
-// renderOpencodePeer renders the opencode V2 form (ADR-0076). V2 has no
+// renderOpencodePeer renders the opencode V2 form. V2 has no
 // per-agent hooks: the caller's mesh plugin sees the child session's agent id
 // on every tool call and the hook maps it back to this file's flags comment
 // (ResolvePeerSubagent), so the peer gate and the capture fire as on Claude
@@ -532,7 +532,7 @@ func PoolAccessWired(poolRoot, callerDir string) bool {
 }
 
 // PeerWorkdirs is every declared workdir of the caller's work-delegable peers:
-// the repos a delegated peer may write from the caller's session (ADR-0063).
+// the repos a delegated peer may write from the caller's session.
 func PeerWorkdirs(poolRoot, callerDir string) []string {
 	agents, _, err := ScanAgents(poolRoot)
 	if err != nil {

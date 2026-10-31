@@ -15,8 +15,7 @@ import (
 	"github.com/kevinhamon/meshctl/internal/mesh"
 )
 
-// docs_test.go — documents listed and served read-only, sandboxed
-// (agent-docs ticket 03).
+// docs_test.go — documents listed and served read-only, sandboxed.
 
 func writeDoc(t *testing.T, a *mesh.Agent, rel, body string, age time.Duration) string {
 	t.Helper()

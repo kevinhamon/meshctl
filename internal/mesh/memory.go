@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Memory (ADR-0014 principle, ADR-0015 engineering) is a per-agent, generated,
+// Memory is a per-agent, generated,
 // disposable index computed purely from the agent's knowledge/ tree + agent.yaml.
 // It is advisory; the KB is authoritative. Deleting it and rebuilding fully
 // reconstructs it — no durable state lives only here. No DB, no embeddings.
@@ -98,7 +98,7 @@ func frontMatterTags(body string) []string {
 }
 
 // MemoryRebuild computes the KB topic index and writes it to index.json via
-// temp+atomic-rename. Idempotent. NOTE (ADR-0033): recall now reads live via
+// temp+atomic-rename. Idempotent. NOTE: recall now reads live via
 // computeTopics — the persisted index is legacy (kept for inspection/back-compat),
 // no longer on the routing path, so its staleness is no longer a doctor warning.
 func MemoryRebuild(agent *Agent) (*MemoryIndex, error) {
@@ -113,7 +113,7 @@ func MemoryRebuild(agent *Agent) (*MemoryIndex, error) {
 }
 
 // computeTopics scans <agent>/knowledge/**/*.md + the manifest and returns the
-// topic index WITHOUT writing it — the live-recall path (ADR-0033) and the
+// topic index WITHOUT writing it — the live-recall path and the
 // persisted rebuild share this pure computation.
 func computeTopics(agent *Agent) (*MemoryIndex, error) {
 	root := agent.Dir()
@@ -323,7 +323,7 @@ func LoadMemoryIndex(agent *Agent) (*MemoryIndex, error) {
 
 // MemoryRecall matches a query against topics+tags and returns locations +
 // familiarity facts, ranked by refs then freshness — WITHOUT reading source
-// bodies (ADR-0015: recall routes, the KB read that follows answers).
+// bodies (recall routes, the KB read that follows answers).
 func MemoryRecall(agent *Agent, query string) ([]MemoryTopic, error) {
 	idx, err := LoadMemoryIndex(agent)
 	if err != nil {
@@ -379,7 +379,7 @@ func MemoryRecall(agent *Agent, query string) ([]MemoryTopic, error) {
 }
 
 // MemoryStale reports whether the index is missing or older than the newest KB
-// file (doctor staleness check; warn-only per ADR-0014 tiered rule).
+// file (doctor staleness check; warn-only, like the other KB checks).
 func MemoryStale(agent *Agent) (stale bool, reason string) {
 	idx, err := LoadMemoryIndex(agent)
 	if err != nil {

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Recall marks what the human has not confirmed (ADR-0067, spec decision 28):
+// Recall marks what the human has not confirmed:
 // a current or log hit whose hash mismatches the ledger renders
 // `[kb/<tier>·unconfirmed]`, ranks below confirmed log and above inbox, and
 // inlines its body prefixed `_hypothesis_`. No ledger ⇒ everything unconfirmed.

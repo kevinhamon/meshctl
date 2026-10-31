@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// gate_log_test.go — step-aside for subagent calls (ADR-0068 amendment) and
+// gate_log_test.go — step-aside for subagent calls and
 // decision-log attribution: which check decided, logged per call.
 
 // lastGateLogLine returns the last line of an agent's gate decision log.

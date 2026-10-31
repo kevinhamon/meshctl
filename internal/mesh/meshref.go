@@ -9,12 +9,12 @@ import (
 	"strings"
 )
 
-// meshref.go — knowledge references (ADR-0065, ADR-0066; spec decision 14).
+// meshref.go — knowledge references.
 // A `mesh://<owner>/<path>#<slug>` names one entry in an owner's knowledge.
 // `pool` is the reserved owner: the pool's own knowledge (glossary, local
 // doctrine) under the pool directory, so a peer can never carry that name.
 // Peer owners (`mesh://<peer>/<kb-path>#<slug>`) resolve against the peer's
-// knowledge base (ADR-0065); whether a reader may follow one (canonical
+// knowledge base; whether a reader may follow one (canonical
 // targets only) is the caller's rule, not the resolver's.
 
 // ReservedOwner is the owner name of pool knowledge in a `mesh://` reference.
@@ -90,12 +90,13 @@ func meshRefBase(root, owner string) (string, error) {
 }
 
 // ResolveMeshRef reads the entry a `mesh://` reference names under the pool at
-// root: pool knowledge or a peer's knowledge base. With no slug the whole file is the text; with one, the matching
-// `**Term**:` entry (through the next term or heading) or the heading's section
-// (through the next heading of the same or a higher level), matched by kebab
-// slug, case-insensitively. ok=false with err=nil means the reference is well
-// formed but nothing is there (unknown slug, missing file): unresolved, which
-// is a finding, not a failure. err is a malformed or unsupported reference.
+// root: pool knowledge or a peer's knowledge base. With no slug the whole file
+// is the text; with one, the matching `**Term**:` entry (through the next term
+// or heading) or the heading's section (through the next heading of the same or
+// a higher level), matched by kebab slug, case-insensitively. ok=false with
+// err=nil means the reference is well formed but nothing is there (unknown
+// slug, missing file): unresolved, which is a finding, not a failure. err is a
+// malformed or unsupported reference.
 func ResolveMeshRef(root, ref string) (text string, ok bool, err error) {
 	r, err := ParseMeshRef(ref)
 	if err != nil {

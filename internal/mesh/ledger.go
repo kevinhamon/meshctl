@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-// ledger.go — the confirmation ledger (ADR-0067, spec decision 21). Confirmed
+// ledger.go — the confirmation ledger. Confirmed
 // knowledge is recorded per entry in a tracked content-hash ledger,
 // knowledge/.confirmed.yaml, one scheme for every entry type: path → hash of
 // the file bytes, or, for a sectioned file (the state digest, a legacy peer
@@ -181,8 +181,8 @@ func ledgerScalar(s string) string {
 	return strconv.Quote(s)
 }
 
-// RenderLedger writes the ledger with sorted keys, one entry per line, in the
-// shape of ADR-0067. An empty ledger renders as `{}`.
+// RenderLedger writes the ledger with sorted keys, one entry per line. An empty
+// ledger renders as `{}`.
 func RenderLedger(l Ledger) []byte {
 	if len(l.Entries) == 0 {
 		return []byte("{}\n")

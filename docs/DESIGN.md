@@ -44,13 +44,10 @@ approve.
   release lines (V1 1.x, V2 2.x), choosing by the installed binary's major; only V2 has a
   pre-tool hook, so only V2 (like Claude Code) runs the fail-closed gate — V1 is advisory.
 
-## A note on `ADR-NNNN` references
+## Your own ADRs
 
-Some code comments and docs cite `ADR-NNNN` — Architecture Decision Records, the standard
+`meshctl doctor` recognizes `ADR-NNNN` tokens when checking the consistency of your own
+`knowledge/decisions/` KB: Architecture Decision Records, the
 [Nygard](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions)
-convention for capturing the *why* behind a decision. The records are kept in the
-maintainer's private repository and are not published here; a citation such as `ADR-0031`
-is a stable label for the decision, and the public docs describe the behaviour it chose.
-`meshctl doctor` also recognizes `ADR-NNNN` tokens when checking
-consistency of an *end user's own* `knowledge/decisions/` KB — that is a supported feature
-for anyone who keeps ADRs, not a dependency on any external record.
+convention for capturing the *why* behind a decision. It is a supported feature for anyone
+who keeps ADRs; meshctl itself depends on no external record.

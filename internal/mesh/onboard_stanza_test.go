@@ -8,7 +8,7 @@ import (
 )
 
 // onboard_stanza_test.go — re-onboard refreshes the managed Cognition stanza
-// in an already-onboarded peer's CLAUDE.md in place (story 109: one
+// in an already-onboarded peer's CLAUDE.md in place (one
 // re-onboard picks everything up), and leaves human text around it alone.
 
 const oldCognitionStanza = `## Cognition — maintain your own knowledge base (standing order)
@@ -34,7 +34,7 @@ func TestOnboard_RefreshesStaleCognitionStanzaInPlace(t *testing.T) {
 	if start < 0 {
 		t.Fatalf("fresh CLAUDE.md lacks the stanza:\n%s", cur)
 	}
-	end := strings.Index(cur[start:], "(ADR-0014–0018).\n") + start + len("(ADR-0014–0018).\n")
+	end := strings.Index(cur[start:], cognitionStanzaEnd) + start + len(cognitionStanzaEnd)
 	stale := "# HUMAN-HEADER\n\n" + cur[:start] + oldCognitionStanza + cur[end:] + "\n## Human notes\n\nHUMAN-TRAILER keep me.\n"
 	if err := os.WriteFile(claude, []byte(stale), 0o644); err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestPoolUpgradePlan_NamesStaleCognitionStanza(t *testing.T) {
 	b, _ := os.ReadFile(claude)
 	cur := string(b)
 	start := strings.Index(cur, "## Cognition — ")
-	end := strings.Index(cur[start:], "(ADR-0014–0018).\n") + start + len("(ADR-0014–0018).\n")
+	end := strings.Index(cur[start:], cognitionStanzaEnd) + start + len(cognitionStanzaEnd)
 	if err := os.WriteFile(claude, []byte(cur[:start]+oldCognitionStanza+cur[end:]), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestPoolUpgradePlan_NamesStaleCognitionStanza(t *testing.T) {
 }
 
 // oldInboundBullet is the Agent Communication Inbound bullet every onboard
-// wrote before ADR-0073: it claimed the oldest request on "check intake".
+// wrote before the clean queue: it claimed the oldest request on "check intake".
 const oldInboundBullet = "- **Inbound:** at session start / on \"check intake\", run `meshctl inbox next --claim` (atomic claim) or scan `intake/*.md` for `status: pending`; process by `type`, then write the outcome back with `meshctl inbox respond <id> --status answered|filed|needs-info|needs-human --response \"…\"` (intake files are meshctl-owned — never hand-edit them). **Not yours?** `meshctl inbox decline <id> --reason \"…\" --redirect <owner>` — don't half-answer out-of-domain work.\n"
 
 func TestOnboard_RefreshesStaleInboundOrderInPlace(t *testing.T) {
@@ -153,7 +153,7 @@ func TestOnboard_RefreshesLegacyCognitionStanza(t *testing.T) {
 	b, _ := os.ReadFile(claude)
 	cur := string(b)
 	start := strings.Index(cur, "## Cognition — ")
-	end := strings.Index(cur[start:], "(ADR-0014–0018).\n") + start + len("(ADR-0014–0018).\n")
+	end := strings.Index(cur[start:], cognitionStanzaEnd) + start + len(cognitionStanzaEnd)
 	stale := cur[:start] + legacyCognitionStanza + "\n## Human notes\n\nHUMAN-TRAILER keep me.\n" + cur[end:]
 	if err := os.WriteFile(claude, []byte(stale), 0o644); err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func TestPoolUpgradePlan_WarnsOnUnrecognizedCognitionStanza(t *testing.T) {
 	b, _ := os.ReadFile(claude)
 	cur := string(b)
 	start := strings.Index(cur, "## Cognition — ")
-	end := strings.Index(cur[start:], "(ADR-0014–0018).\n") + start + len("(ADR-0014–0018).\n")
+	end := strings.Index(cur[start:], cognitionStanzaEnd) + start + len(cognitionStanzaEnd)
 	edited := cur[:start] + "## Cognition — maintain your own knowledge base (standing order)\n\nRun the mesh-cognition skill. Hand-rewritten, no known ending.\n" + cur[end:]
 	if err := os.WriteFile(claude, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)

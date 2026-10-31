@@ -29,7 +29,7 @@ type InSessionOptions struct {
 	Priority string
 	Related  []string
 	// Work delegates write-capable work to the peer's mesh-<peer>-work
-	// definition instead of a read-only consult (ADR-0063).
+	// definition instead of a read-only consult.
 	Work bool
 
 	Now    time.Time
@@ -132,7 +132,7 @@ func AskInSession(agentsDir string, target *Agent, o InSessionOptions) (*Request
 	// On Claude Code the subagent's `meshctl inbox respond` runs in the same
 	// harness session, so a claim under the harness session id is one it can
 	// release. An opencode V2 subagent runs in a child session with an id of
-	// its own (ADR-0076), and without an exported id the claim would be
+	// its own, and without an exported id the claim would be
 	// unreleasable by anyone but this process: both only mark the request
 	// in-progress — `inbox next` skips it either way.
 	if sid := harnessSessionID(); sid != "" && !opencode {
@@ -269,11 +269,11 @@ func Brief(agentsDir string, a *Agent, requestID string) (string, error) {
 }
 
 // onlyThisRequest keeps a consulted or delegated peer on the one request it
-// was handed (ADR-0073): the intake queue and its order belong to the human
+// was handed: the intake queue and its order belong to the human
 // in the owner's session.
 const onlyThisRequest = "- **Only this request.** No human is at your prompt to order a queue: work the one request you were given, claim or list nothing else, and put any decision you would ask the human for into `needs-human` as a decision round (`📝 **C<n> — <short title>**` … `➡️ ✅ Confirm`).\n"
 
-// writeWorkContract is the brief's contract for delegated work (ADR-0063):
+// writeWorkContract is the brief's contract for delegated work:
 // the peer edits and commits as itself, inside its own workspace (or the
 // request's worktree) and its workdirs, and ends with a receipt.
 func writeWorkContract(b *strings.Builder, a *Agent, r *Request) {

@@ -13,7 +13,7 @@ import (
 )
 
 // agentview_test.go — the agent page's knowledge, history and documents
-// summary (agent-docs ticket 04).
+// summary.
 
 func TestKnowledgeAreas_FilesFoldersAndSkips(t *testing.T) {
 	_, a := testPool(t)

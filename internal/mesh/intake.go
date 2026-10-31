@@ -29,13 +29,13 @@ type Request struct {
 	RedirectedTo string `yaml:"redirected_to,omitempty"`
 	ReadBack     string `yaml:"read_back,omitempty"`
 
-	// Set by `ask --in-session --work` (ADR-0063): Mode "work" marks delegated
+	// Set by `ask --in-session --work`: Mode "work" marks delegated
 	// write-capable work; Worktree is the peer's delegated-work checkout when
 	// its own session was live at dispatch.
 	Mode     string `yaml:"mode,omitempty"`
 	Worktree string `yaml:"worktree,omitempty"`
 
-	// Set by `inbox triage apply` (ADR-0072): `<verdict> → <ref>`, so a
+	// Set by `inbox triage apply`: `<verdict> → <ref>`, so a
 	// triage close is told from an answer without parsing prose.
 	Triage string `yaml:"triage,omitempty"`
 
@@ -48,16 +48,16 @@ type Request struct {
 // Path returns the file this request was read from / written to.
 func (r *Request) Path() string { return r.path }
 
-// IntakeArchiveDir is the local, git-ignored graveyard for closed intake requests
-// (ADR-0043). Intake is an ephemeral discussion; its durable residue is distilled
+// IntakeArchiveDir is the local, git-ignored graveyard for closed intake requests.
+// Intake is an ephemeral discussion; its durable residue is distilled
 // into the KB before archiving. Archiving (not deleting) keeps a recoverable trail
 // without polluting git or the live inbox.
 const IntakeArchiveDir = ".intake-archive"
 
 // ArchiveRequest moves a closed intake request out of the live inbox into
 // <agent>/.intake-archive/, and removes its runtime .claim sidecar. Returns the
-// archived path. (Distill the durable residue into the KB *before* calling this —
-// ADR-0043; the archive is a recoverable trail, not the record.)
+// archived path. (Distill the durable residue into the KB *before* calling this;
+// the archive is a recoverable trail, not the record.)
 func ArchiveRequest(agent *Agent, id string) (string, error) {
 	reqs, err := ListRequests(agent.InboxPath())
 	if err != nil {

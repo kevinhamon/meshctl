@@ -9,8 +9,8 @@ import (
 	"github.com/kevinhamon/meshctl/internal/mesh"
 )
 
-// push.go — the Push button on the pool repo's "ahead of its remote" finding
-// (ADR-0079 amendment): POST /api/pool/push/check lists the commits that would
+// push.go — the Push button on the pool repo's "ahead of its remote" finding:
+// POST /api/pool/push/check lists the commits that would
 // go; POST /api/pool/push pushes them, after the person confirmed. Only the
 // pool repo, only its tracked branch, never forced, never waiting for a
 // password.
@@ -58,7 +58,7 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, PushResult{Outcome: outcome, Output: out, Command: "git -C " + mesh.PoolDir(e.Dir()) + " push"})
 }
 
-// An agent repo's Commit and Push buttons (ADR-0079 amendment), on doctor's
+// An agent repo's Commit and Push buttons, on doctor's
 // "uncommitted path(s)" and "commit(s) ahead" findings. Both check endpoints
 // answer the repo's state; commit takes the person's message and the status
 // they saw, and refuses when the tree changed since.

@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// opencode_ask.go — the opencode V2 ask path for gate-asked promotions (ADR-0075).
+// opencode_ask.go — the opencode V2 ask path for gate-asked promotions.
 //
 // A V2 plugin cannot put a gate ask to the human: its pre-tool hook can only
 // let a call through or throw. opencode does ask the human itself through a
@@ -159,8 +159,8 @@ func (ps ocPerms) effect(action, resource string) string {
 }
 
 // mutatingWorkPeers are the in-session work definitions a caller holds for
-// state-mutating peers: each delegation to one is the human's call (ADR-0063),
-// which on opencode V2 is opencode's own ask on the subagent call (ADR-0076).
+// state-mutating peers: each delegation to one is the human's call,
+// which on opencode V2 is opencode's own ask on the subagent call.
 func mutatingWorkPeers(callerDir string) []string {
 	var out []string
 	agents, _, err := ScanAgents(filepath.Dir(callerDir))
@@ -280,7 +280,7 @@ func gatedRule(words []string) *opencodeAskRule {
 }
 
 // opencodeAskPath hands a gate ask on a promotion command to opencode's own
-// ask (ADR-0075). It applies only under the opencode harness, and lets the
+// ask. It applies only under the opencode harness, and lets the
 // call through only when opencode will ask the human on every invocation of a
 // gate-asked subcommand in it. opencode matches its rules against the raw
 // text of each simple command, so an invocation counts only as a top-level

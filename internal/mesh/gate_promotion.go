@@ -10,7 +10,7 @@ import (
 )
 
 // gate_promotion.go — the promotion ask at `kb finish` and the main-checkout
-// bypass it closes (ADR-0067 with amendment; spec decisions 18, 19, 20, 24).
+// bypass it closes.
 //
 // A KB session lands on main only through `meshctl kb finish`. When the
 // session branch touches nothing but knowledge/candidates/, the finish is a
@@ -262,7 +262,7 @@ func gatePromotion(agentsDir string, p HookPayload) GateDecision {
 		}
 		return deny("this `kb finish` promotes " + files + " and needs your confirmation summary first — " + why + " at " +
 			named + ". Write `## Intent` (one line, first), `## Grounding`, `## Precedent` and `## Changes`, read the " +
-			"confirmation round out in chat, then re-run the finish: the gate asks the human with your summary (ADR-0067)." +
+			"confirmation round out in chat, then re-run the finish: the gate asks the human with your summary." +
 			writeFirstHint(sumPath))
 	}
 	text := RenderPromotionAsk(a.Dir(), PromotionAsk{Agent: a.Name, Branch: branch, Summary: s, Promoted: promoted,
@@ -271,9 +271,9 @@ func gatePromotion(agentsDir string, p HookPayload) GateDecision {
 }
 
 // deniedKBMainWrite returns a reason when a file-tool or shell write targets a
-// peer's knowledge/ outside candidates/ and pending-decisions.md on its main checkout (<pool>/<peer>/).
-// KB and work worktrees live under the pool's worktrees dir, never there.
-// agentsDir "" ⇒ inert.
+// peer's knowledge/ outside candidates/ and pending-decisions.md on its main
+// checkout (<pool>/<peer>/). KB and work worktrees live under the pool's
+// worktrees dir, never there. agentsDir "" ⇒ inert.
 func deniedKBMainWrite(agentsDir string, p HookPayload) string {
 	if agentsDir == "" {
 		return ""
@@ -305,7 +305,7 @@ func deniedKBMainWrite(agentsDir string, p HookPayload) string {
 		return "mesh: `" + parts[0] + "/" + KnowledgeDir + "/" + parts[2] + "` is confirmed knowledge (current or log tier) on " +
 			"the main checkout — it changes only through a KB session, so the human confirms what becomes true: " +
 			"`meshctl kb begin`, edit in the worktree it prints, commit there, then `meshctl kb finish --summary-file " +
-			"<summary>` (ADR-0067). A draft may go straight to `" + KnowledgeDir + "/" + CandidatesDir + "/`."
+			"<summary>`. A draft may go straight to `" + KnowledgeDir + "/" + CandidatesDir + "/`."
 	}
 	return ""
 }

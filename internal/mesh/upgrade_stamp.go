@@ -11,9 +11,9 @@ import (
 )
 
 // upgrade_stamp.go — which meshctl last upgraded the pool, so a newer
-// installed binary can say the pool is behind (mesh-console ticket 06,
-// decision C6: shown in the console and doctor, not in agents' standing
-// orders). Local and ignored: it records what ran on this machine.
+// installed binary can say the pool is behind (shown
+// in the console and doctor, not in agents' standing orders). Local and
+// ignored: it records what ran on this machine.
 
 const upgradeStampFile = "upgraded.json"
 

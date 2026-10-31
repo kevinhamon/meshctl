@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Claim is the atomic intake-claim sidecar (ADR-0011 Race A). It is the
+// Claim is the atomic intake-claim sidecar (the claim race). It is the
 // mutual-exclusion authority; the request `status` field is only a human
 // display and must never be used for exclusion (TOCTOU).
 type Claim struct {

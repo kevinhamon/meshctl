@@ -454,7 +454,7 @@ func TestRecallActivity_ExcludesKB(t *testing.T) {
 	}
 }
 
-// The external engine switch is gone (ADR-0033, final stage): a leftover
+// The external engine switch is gone (final stage): a leftover
 // MESH_INTUITION_ENGINE setting changes nothing, the owned engine answers.
 func TestRecallIntuition_IgnoresRetiredEngineSwitch(t *testing.T) {
 	t.Setenv("MESH_INTUITION_ENGINE", "claude-mem")

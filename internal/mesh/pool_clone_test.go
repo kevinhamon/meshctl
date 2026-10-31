@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// pool_clone_test.go — the member list in the pool repo and `pool clone`
-// (pool-clone spec): the list is written from disk and committed alone, doctor
+// pool_clone_test.go — the member list in the pool repo and `pool clone`:
+// the list is written from disk and committed alone, doctor
 // says when it is stale or an agent cannot be rebuilt, and a clone of the pool
 // repo rebuilds the pool from it.
 

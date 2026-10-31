@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// --- pending work (ADR-0071) ---
+// --- pending work ---
 
 func pendingCmd() *cobra.Command {
 	var agent string

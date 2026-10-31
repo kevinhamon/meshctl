@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// state_confirm.go — `state set` is a promotion (ADR-0067; spec decision 25).
+// state_confirm.go — `state set` is a promotion.
 //
 // The current-state digest is current-tier knowledge written on main with no
 // KB session, so it meets the same confirmation as `kb finish`: the gate asks

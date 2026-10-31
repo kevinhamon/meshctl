@@ -154,7 +154,7 @@ type singleFlightLock struct {
 func acquireDispatchLock(ctx context.Context, agentsDir, caller, target string, pid int, now time.Time) (*singleFlightLock, error) {
 	lockPath := DispatchLockPath(agentsDir)
 	l := &singleFlightLock{path: lockPath}
-	_ = os.MkdirAll(filepath.Dir(lockPath), 0o755) // ensure the pool dir exists (ADR-0038)
+	_ = os.MkdirAll(filepath.Dir(lockPath), 0o755) // ensure the pool dir exists
 
 	mk := func() error { return os.Mkdir(lockPath, 0o755) }
 	reclaim := lockPath + ".reclaim"

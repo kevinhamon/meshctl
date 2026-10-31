@@ -8,10 +8,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// pool_config.go — the two pool files and the one loader that reads them
-// (ADR-0066, spec decision 10). `pool.yaml` is binary-managed identity: name,
+// pool_config.go — the two pool files and the one loader that reads them.
+// `pool.yaml` is binary-managed identity: name,
 // created, doctrine version. `config.yaml` is human-owned: knowledge kind,
-// outbound surfaces (ADR-0068), reconcile order and the mesh-wide tool
+// outbound surfaces, reconcile order and the mesh-wide tool
 // reference. Keeping them apart is what makes "an upgrade can never clobber
 // what the human wrote" true by construction: meshctl rewrites the identity
 // file and only ever appends to the config file (the one-time tools split).
@@ -20,7 +20,7 @@ import (
 // (merged after the config file's own) and doctor warns until `pool upgrade`
 // moves them.
 
-// OutboundSurface is one entry of the config's `outbound:` map (ADR-0068): the
+// OutboundSurface is one entry of the config's `outbound:` map: the
 // tool-name regexes and shell-command regexes that mutate the surface. The
 // surface name must equal a `mutates` tag on the peers that write it.
 type OutboundSurface struct {
@@ -28,7 +28,7 @@ type OutboundSurface struct {
 	Commands []string `yaml:"commands"`
 }
 
-// ReconcileSettings is the config's `reconcile:` block (ADR-0070).
+// ReconcileSettings is the config's `reconcile:` block.
 type ReconcileSettings struct {
 	Order []string `yaml:"order"` // overrides the computed peer walk order for reconciliation; empty ⇒ computed
 }
@@ -108,7 +108,7 @@ func mergeToolRefs(lists ...[]ToolRef) []ToolRef {
 
 // poolConfigFindings are doctor's pool-level findings about the two config
 // files: a config file that cannot be parsed (error — the outbound gate fails
-// closed on it), an invalid `knowledge` value (error, ADR-0069) and tool
+// closed on it), an invalid `knowledge` value (error) and tool
 // references still in the identity file (warn — moved by `pool upgrade`).
 func poolConfigFindings(poolRoot string, cfg PoolConfig) []DoctorFinding {
 	if !IsPool(poolRoot) {
@@ -196,7 +196,7 @@ func splitToolsFromIdentity(poolRoot string) error {
 	if err != nil {
 		return err
 	}
-	_, werr := f.WriteString("\n# moved from " + PoolMarkerFile + " by `meshctl pool upgrade` (ADR-0066)\n" + string(block))
+	_, werr := f.WriteString("\n# moved from " + PoolMarkerFile + " by `meshctl pool upgrade`\n" + string(block))
 	f.Close()
 	if werr != nil {
 		return werr

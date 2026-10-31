@@ -124,8 +124,8 @@ Agent tool and its gate denies dispatch, file writes, git and KB writes, so it c
 or drift. Limits: the caller's session pays the peer's tokens; opencode callers use plain
 `ask`.
 
-**`meshctl ask … --in-session --work`** (delegated work, the hub-session mode — meshctl
-ADR-0063): for when the task is the peer's *work* — its KB, decisions, repo — not its
+**`meshctl ask … --in-session --work`** (delegated work, the hub-session mode): for
+when the task is the peer's *work* — its KB, decisions, repo — not its
 advice. Same request file, guards and log (`mode=in-session-work`), but the delegation names
 `subagent_type: mesh-<peer>-work`, a write-capable definition rendered for every
 **work-delegable** peer (dispatchable, or declaring `mutates`). Inside it the peer:
@@ -295,7 +295,7 @@ knowledge (the KB). This is the retrieval loop's **Learn** stage, made concrete.
   engine; you distill *from* it, you don't curate *in* it.
 - **All writes via `kb begin/finish`** — git-tracked, reviewable, recoverable.
 
-**Standing rules are gated, not prose (meshctl ADR-0062).** A standing instruction ("never do X",
+**Standing rules are gated, not prose.** A standing instruction ("never do X",
 "do not repeat this", a recorded failure, a user directive) is written as a KB note whose
 frontmatter carries `rule:` + `triggers:`. `meshctl hook pre-tool-use` matches every
 Bash / Write|Edit / MCP tool call against those triggers; the first match per session is

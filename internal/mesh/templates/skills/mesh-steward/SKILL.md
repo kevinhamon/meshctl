@@ -34,7 +34,7 @@ Establish, conversationally:
 - **Tools & house rules.** Which CLI tools should agents in this mesh reach for, and any
   preferences? (e.g. "use `tea` for git hosting, not `gh`"; a bespoke deploy/scan command;
   a domain CLI.) Mesh-wide rules vs per-agent tools. You'll record these as a **tool
-  reference** (meshctl ADR-0042) — see step 4.
+  reference** — see step 4.
 
 Reflect back a one-paragraph summary of the mesh's purpose and get a nod before
 proposing the roster.
@@ -81,7 +81,7 @@ Give each a distinct badge colour so the human can tell them apart.
 
 Verify with `meshctl doctor` and show the new roster with `meshctl agent list`.
 
-## 4. Record the tool reference (meshctl ADR-0042)
+## 4. Record the tool reference
 
 Turn the tools/house-rules from the interview into a **tool reference** — pointers, not
 procedures (agents self-serve `<cmd> --help`; never paste help text). Two levels:

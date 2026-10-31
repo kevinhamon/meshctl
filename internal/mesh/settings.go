@@ -16,7 +16,7 @@ import (
 //   - a scoped set of Bash(meshctl <verb>:*) permissions so mesh messaging,
 //     inbox and cognition commands are preapproved — but not the destructive
 //     ones (pool teardown/forget, update), and
-//   - the status line, `meshctl hook status-line` (ADR-0074), only when the
+//   - the status line, `meshctl hook status-line`, only when the
 //     workspace has none: a hand-set status line is never replaced.
 //
 // EnsureAgentSettings is idempotent and near add-only: it inserts what is
@@ -51,8 +51,8 @@ var meshctlAllowRules = []string{
 // tell you to re-onboard. Bump it whenever hookWiring OR the gate's deny policy
 // (gate.go) changes materially. v3: scoped allow rules, shell-write gate.
 // v4: the gate also sees Agent/Task delegations (ask before delegating work to
-// a state-mutating peer, ADR-0063). v5: the gate matcher actually matches MCP
-// tool names (`mcp__.*`, ADR-0062/0068 amendments), the PostToolUse hook is
+// a state-mutating peer). v5: the gate matcher actually matches MCP
+// tool names (`mcp__.*`), the PostToolUse hook is
 // wired on the same matcher, and the gate policy changes of the
 // shared-understanding spec ride the same bump — one re-onboard per peer.
 // v6: a Stop hook (session-beat) records the session's heartbeat and its
@@ -66,7 +66,7 @@ const meshWiringStampFile = ".mesh-wiring.json"
 // in-session peer definitions. Claude Code applies a matcher as a FULL regex
 // match on the tool name, so an MCP tool (`mcp__<server>__<tool>`) needs the
 // `mcp__.*` alternative: the bare `mcp__` shipped in v1..v4 never matched one
-// and the gate had never seen an MCP call (ADR-0062 and ADR-0068 amendments).
+// and the gate had never seen an MCP call.
 // Doctor flags the bare form; see HasBareMCPMatcher.
 const GateHookMatcher = "Write|Edit|MultiEdit|NotebookEdit|Bash|mcp__.*|Agent|Task"
 
@@ -88,8 +88,8 @@ func HasBareMCPMatcher(matcher string) bool {
 
 // hookWiring is the (event, subcommand) set the mesh installs. PreToolUse is the
 // fail-closed enforcement gate (gate.go); PostToolUse is its after-the-fact
-// companion on the same matcher (the seam for pool commits and outbound acks:
-// ADR-0066, ADR-0068); the others are advisory (Stop, v6, is the end-of-turn heartbeat that also records the session's scheduled jobs). The gate matcher fires on
+// companion on the same matcher (the seam for pool commits and outbound
+// acks); the others are advisory (Stop, v6, is the end-of-turn heartbeat that also records the session's scheduled jobs). The gate matcher fires on
 // file-edit tools, Bash, every MCP tool and delegations — the gate denies
 // competing-store and intake paths, then checks the call against the
 // agent's KB rules (kbrules.go). v2 widened the matcher for the KB-rule gate;
@@ -231,7 +231,7 @@ func ensureMeshctlPermission(root map[string]any) string {
 	}
 }
 
-// StatusLineCommand is the status-line command the mesh wires (ADR-0074).
+// StatusLineCommand is the status-line command the mesh wires.
 const StatusLineCommand = "meshctl hook status-line"
 
 // ensureStatusLine sets statusLine when the workspace has none. Any existing

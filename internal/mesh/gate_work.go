@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// gate_work.go — the in-session peer gate in WORK mode (ADR-0063). A peer a
+// gate_work.go — the in-session peer gate in WORK mode. A peer a
 // hub session delegates owned work to may edit and commit, but only in its own
 // workspace (or its delegated-work worktree) and its declared workdirs. It may
 // never write the caller's workspace or another agent's, and never dispatch.

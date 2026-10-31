@@ -15,7 +15,7 @@ func TestFreshPoolFootprint_ConsolidatedUnderPoolDir(t *testing.T) {
 	if _, err := InitPool(root, "poly", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	// Everything under the visible pool/ (ADR-0066), which is a git repo.
+	// Everything under the visible pool/, which is a git repo.
 	for _, p := range []string{
 		"pool/pool.yaml",
 		"pool/doctrine/" + CommsFile,

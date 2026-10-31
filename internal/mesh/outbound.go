@@ -12,8 +12,7 @@ import (
 	"time"
 )
 
-// outbound.go — the outbound gate, deny side (ADR-0068 and its amendment; spec
-// decisions 7, 34, 35, 39–42). A peer that writes a tracker item, a wiki page
+// outbound.go — the outbound gate, deny side. A peer that writes a tracker item, a wiki page
 // or a pull request makes other people treat its claim as true; the KB gates
 // cannot see that, so this one does, at the tool call.
 //
@@ -24,7 +23,7 @@ import (
 // heredoc body or a `cat` of a script never matches; anchor with `^` to skip
 // mentions in another command's arguments) that reach it. File-edit tools are
 // never outbound. The surface name is the `mutates` tag: a peer without the
-// tag is denied, a peer with it is asked (ticket 41 fills the ask).
+// tag is denied, a peer with it is asked.
 //
 // This is the one exception to the gate's fail-open rule: a config that
 // cannot load or a matcher that cannot compile denies every outbound
@@ -43,7 +42,7 @@ type outboundMatcher struct {
 }
 
 // OutboundMatch is one call matched to one surface: what the deny names and
-// what the ask (ticket 41) renders as `Outbound: <surface> via <tool>`.
+// what the ask renders as `Outbound: <surface> via <tool>`.
 type OutboundMatch struct {
 	Surface string
 	Tool    string
@@ -178,7 +177,7 @@ func hasTag(tags []string, t string) bool {
 
 // harnessHasAskForm reports whether a harness can put an outbound gate ask to
 // the human. Only Claude Code's PreToolUse envelope can; opencode's own ask
-// covers only the promotion commands (ADR-0075), so an outbound ask is a deny.
+// covers only the promotion commands, so an outbound ask is a deny.
 func harnessHasAskForm(name string) bool {
 	return name == "" || name == HarnessClaude
 }
@@ -308,12 +307,12 @@ func outboundNoHumanReason(a *Agent, p HookPayload, mt OutboundMatch, cause stri
 	if p.InSession && !p.Work {
 		return head + "A consulted peer never writes outbound surfaces: respond `needs-human` naming the write, and stop."
 	}
-	return head + "Delegated and headless peers never write outbound surfaces (ADR-0068): stop, write your summary at " +
+	return head + "Delegated and headless peers never write outbound surfaces (no human is at their prompt to confirm): stop, write your summary at " +
 		outboundSessionSummary(a, p) + ", and return `needs-confirm` carrying the confirmation round and that summary path, " +
 		"so the human makes the write from `" + a.Name + "`'s own session."
 }
 
-// outboundFindings are doctor's outbound checks (spec decisions 41, 42): a
+// outboundFindings are doctor's outbound checks: a
 // config or matcher the gate cannot use (error; the unparseable file itself is
 // reported by poolConfigFindings), a `mutates` tag with no surface, a surface
 // no peer mutates, and a surface with `tools` but no `commands` (reachable

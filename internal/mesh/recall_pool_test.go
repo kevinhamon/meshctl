@@ -8,7 +8,7 @@ import (
 
 // Recall indexes the pool glossary as a current-tier source for every peer,
 // marked `via pool`, ranked and budgeted like the peer's own current tier, and
-// confirmed unless the pool repo is dirty (ADR-0066, spec decision 15).
+// confirmed unless the pool repo is dirty.
 
 const circulationGlossary = `# Pool glossary
 
@@ -43,7 +43,7 @@ func TestRecall_PoolGlossaryIsCurrentTierViaPool(t *testing.T) {
 	a := newTestAgent(t, root, "catalog-expert", true, nil)
 	writeKB(t, a, "architecture/circulation.md", "# Circulation window\n\nDaily since 0002.\n")
 	writeKB(t, a, "decisions/0002-circulation-window-daily.md", "---\nstatus: accepted\n---\n# 0002. Circulation window is daily\n")
-	confirmKB(t, a, "architecture/circulation.md", "decisions/0002-circulation-window-daily.md") // own entries confirmed (ADR-0067)
+	confirmKB(t, a, "architecture/circulation.md", "decisions/0002-circulation-window-daily.md") // own entries confirmed
 
 	hits, err := Recall(a, "circulation window", 20)
 	if err != nil {
@@ -130,7 +130,7 @@ func TestRecall_PoolGlossaryDirtyIsUnconfirmed(t *testing.T) {
 	commitPoolGlossary(t, root, circulationGlossary)
 	a := newTestAgent(t, root, "catalog-expert", true, nil)
 	writeKB(t, a, "architecture/circulation.md", "# Circulation window\n")
-	confirmKB(t, a, "architecture/circulation.md") // own entry confirmed (ADR-0067)
+	confirmKB(t, a, "architecture/circulation.md") // own entry confirmed
 
 	// An uncommitted edit to the glossary: the hit stays, unconfirmed.
 	if err := os.WriteFile(PoolGlossaryPath(root), []byte(circulationGlossary+"\n**Renewal**: Extending a loan.\n"), 0o644); err != nil {

@@ -12,7 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// members.go — the pool's member list (pool-clone spec C1): each agent's
+// members.go — the pool's member list: each agent's
 // folder, git remote and branch, kept in the pool repo so `meshctl pool
 // clone` can rebuild the pool on another machine. Membership itself is still
 // what ScanAgents finds on disk; this file is a record of it, binary-managed

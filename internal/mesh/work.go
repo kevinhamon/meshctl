@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// work.go — delegated-work worktrees (ADR-0063). When a hub session delegates
+// work.go — delegated-work worktrees. When a hub session delegates
 // work to a peer whose own session is live, the peer must not edit the checkout
 // that session holds: `ask --in-session --work` gives the request its own
 // worktree + branch (<pool dir>/worktrees/<peer>-work-<reqid>, branch

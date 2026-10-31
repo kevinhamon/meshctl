@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// recall_canonical.go — the canonical recall scope and one-hop references
-// (ADR-0065, ADR-0069; spec decision 30). A peer checks what the pool already
+// recall_canonical.go — the canonical recall scope and one-hop references.
+// A peer checks what the pool already
 // holds before it proposes: its own recall, plus every canonical peer's
 // current and log tiers, read-only, each hit tagged `via <peer>`. Candidates,
 // session records and the git spine of other peers are never read, and a
@@ -23,7 +23,7 @@ const (
 )
 
 // CanonicalPeerHitCap is the most cross-peer hits one canonical-scope call
-// returns (ADR-0069).
+// returns.
 const CanonicalPeerHitCap = 5
 
 // ValidRecallScope reports whether s names a recall scope ("" = own).
@@ -32,12 +32,13 @@ func ValidRecallScope(s string) bool {
 }
 
 // RecallScoped is recall in a named scope. The own scope is exactly
-// RecallWithBodies (own search; bodies still follow references one hop). The canonical scope returns the own-scope hits (ranked and
-// limited as before) followed by at most CanonicalPeerHitCap cross-peer hits
-// (CanonicalPeerHits order). Bodies are inlined only with budgetTokens > 0:
-// own bodies spend the budget first, peer bodies take the remainder, and an
-// inlined body's `mesh://` references are followed one hop to canonical
-// targets, read-only, marked via the owner, never transitively.
+// RecallWithBodies (own search; bodies still follow references one hop). The
+// canonical scope returns the own-scope hits (ranked and limited as before)
+// followed by at most CanonicalPeerHitCap cross-peer hits (CanonicalPeerHits
+// order). Bodies are inlined only with budgetTokens > 0: own bodies spend the
+// budget first, peer bodies take the remainder, and an inlined body's `mesh://`
+// references are followed one hop to canonical targets, read-only, marked via
+// the owner, never transitively.
 func RecallScoped(agent *Agent, query, scope string, limit, budgetTokens int) ([]RecallHit, error) {
 	switch scope {
 	case "", RecallScopeOwn:
@@ -62,7 +63,7 @@ func RecallScoped(agent *Agent, query, scope string, limit, budgetTokens int) ([
 }
 
 // CanonicalPeers lists the pool's canonical peers other than self, by name.
-// Perspective peers are never in it (ADR-0069: never read, neither index nor
+// Perspective peers are never in it (never read, neither index nor
 // bodies).
 func CanonicalPeers(root string, cfg PoolConfig, self string) ([]*Agent, error) {
 	agents, _, err := ScanAgents(root)
@@ -83,7 +84,7 @@ func CanonicalPeers(root string, cfg PoolConfig, self string) ([]*Agent, error) 
 // (not the caller's own KB) for query. Each hit is a kb hit with Via set to
 // the peer and Where holding `mesh://<peer>/<kb-path>` references, one per
 // source file. Hits are deduplicated per source set, ordered confirmed before
-// unconfirmed (ADR-0067 ledger of the owning peer), then by score and
+// unconfirmed (by the owning peer's ledger), then by score and
 // recency, and capped at CanonicalPeerHitCap. Read-only.
 func CanonicalPeerHits(agent *Agent, query string) ([]RecallHit, error) {
 	root := filepath.Dir(agent.Dir())

@@ -9,7 +9,7 @@ import (
 )
 
 // gate_promotion_related.go — what the promotion ask shows beyond the peer's
-// own summary (ADR-0065, ADR-0069; spec decisions 31 and 32). meshctl lists,
+// own summary. meshctl lists,
 // the agent classifies, the human decides; the gate never judges meaning.
 //
 //   - Related canonical entries: when a canonical peer promotes, the canonical
@@ -27,7 +27,7 @@ import (
 //
 // Everything is computed for the finishing peer — its kind and its roster
 // view — whoever runs the finish: a hub doing a peer's work in-session gets
-// that peer's, with no exemption (ADR-0069).
+// that peer's, with no exemption.
 
 // Caps that keep the ask near its 600–1200 character target.
 const (

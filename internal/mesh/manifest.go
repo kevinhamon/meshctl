@@ -25,8 +25,8 @@ type Badge struct {
 	B     float64 `yaml:"b"`
 }
 
-// Agent is the parsed agent.yaml — an agent's authoritative self-description
-// (ADR-0010). It is the single source of truth for identity + discovery.
+// Agent is the parsed agent.yaml — an agent's authoritative self-description.
+// It is the single source of truth for identity + discovery.
 type Agent struct {
 	Name    string   `yaml:"name"`
 	Title   string   `yaml:"title"`
@@ -43,14 +43,14 @@ type Agent struct {
 	Model        string   `yaml:"model,omitempty"`
 	Repo         string   `yaml:"repo,omitempty"`
 	// Workdirs are local repo paths (~ allowed) this agent may write when it
-	// does delegated work in a hub session (ADR-0063), besides its workspace.
+	// does delegated work in a hub session, besides its workspace.
 	Workdirs []string `yaml:"workdirs,omitempty"`
 	// Harness is the coding-agent harness this workspace runs under (claude |
-	// opencode). Determines how hooks/skills are wired (ADR-0032). Empty ⇒ claude.
+	// opencode). Determines how hooks/skills are wired. Empty ⇒ claude.
 	Harness string `yaml:"harness,omitempty"`
-	// Tools are agent-specific tool references (ADR-0042), merged over the pool's.
+	// Tools are agent-specific tool references, merged over the pool's.
 	Tools []ToolRef `yaml:"tools,omitempty"`
-	// Knowledge is this peer's knowledge kind (ADR-0069): canonical |
+	// Knowledge is this peer's knowledge kind: canonical |
 	// perspective. Empty ⇒ the pool config's default; read it through
 	// EffectiveKnowledge, never directly.
 	Knowledge string `yaml:"knowledge,omitempty"`
@@ -84,7 +84,7 @@ func (a *Agent) IsDispatchable() bool {
 }
 
 // IsWorkDelegable reports whether a hub session may delegate write-capable
-// work to this agent in-session (ADR-0063): any dispatchable agent, and any
+// work to this agent in-session: any dispatchable agent, and any
 // state-mutating one (those only with the human's per-delegation approval).
 // An agent that is neither stays send-only.
 func (a *Agent) IsWorkDelegable() bool {
@@ -228,7 +228,7 @@ func ValidName(kind, s string) error {
 }
 
 // ValidAgentName is ValidName for a peer name, which additionally may not be
-// the reserved owner `pool` (ADR-0066): `mesh://pool/...` must always mean the
+// the reserved owner `pool`: `mesh://pool/...` must always mean the
 // pool itself, and on a case-folding filesystem `Pool/` would collide with the
 // pool directory, so the comparison ignores case.
 func ValidAgentName(name string) error {
@@ -272,7 +272,7 @@ func (a *Agent) Validate() []string {
 	if len(a.Accepts) == 0 {
 		problems = append(problems, "accepts is empty (inbox handles no request types)")
 	}
-	// The core safety invariant (ADR-0010).
+	// The core safety invariant.
 	if len(a.Mutates) > 0 && a.Dispatchable != nil && *a.Dispatchable {
 		problems = append(problems, fmt.Sprintf("dispatchable:true conflicts with mutates:%v — a state-mutating agent must not be headlessly dispatchable", a.Mutates))
 	}

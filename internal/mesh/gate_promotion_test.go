@@ -8,8 +8,7 @@ import (
 	"time"
 )
 
-// gate_promotion_test.go — the promotion ask at `kb finish` (ADR-0067 with
-// amendment; spec decisions 18, 19, 20, 24): candidates-only finishes pass,
+// gate_promotion_test.go — the promotion ask at `kb finish`: candidates-only finishes pass,
 // a promotion is asked with the summary as its signature, a missing summary
 // or an undiffable branch is a deny, and the main-checkout bypass is closed.
 

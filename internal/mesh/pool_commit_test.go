@@ -11,8 +11,8 @@ import (
 )
 
 // pool_commit_test.go — the PostToolUse hook commits a confirmed agent write
-// under pool/ with the user's identity (ADR-0066, spec decision 12), and
-// meshctl's own doctrine upgrade commits the same way (decision 67).
+// under pool/ with the user's identity, and
+// meshctl's own doctrine upgrade commits the same way.
 
 // poolCommitFixture is a migrated pool repo with one peer and a distinct user
 // identity, so the commit author is observable.

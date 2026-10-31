@@ -82,7 +82,7 @@ user whether that counts as mutation), plus domain experts (e.g. a database expe
   from `go:embed`, creates runtime dirs (all under `pool/`), writes the
   `pool/pool.yaml` marker and `pool/glossary.md`, makes `pool/` a git repo on `main` with an
   ignore file (dispatch runtime files, worktrees) and a first commit in the user's git identity
-  (ADR-0066), and scaffolds a `steward-agent`. **No git clone, no network.** `--name` sets pool identity; `--no-steward` skips the steward.
+  and scaffolds a `steward-agent`. **No git clone, no network.** `--name` sets pool identity; `--no-steward` skips the steward.
 - `meshctl pool init` (no path) targets the **current directory**: repairs it
   if already a pool, else creates one there — never falls back to `~/agents`.
 - `meshctl pool upgrade` refreshes the embedded doctrine without clobbering local edits:

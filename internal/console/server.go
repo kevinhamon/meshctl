@@ -18,7 +18,7 @@ import (
 	"github.com/kevinhamon/meshctl/internal/mesh"
 )
 
-// DefaultPort is the console's fixed port (decision C9: the login item and a
+// DefaultPort is the console's fixed port (the login item and a
 // pinned browser window both need a stable address).
 const DefaultPort = 7717
 
@@ -104,7 +104,7 @@ type Server struct {
 	Run      Runner
 	Engine   *Engine
 	Settings Settings
-	UI       http.Handler // the page (ticket 04); nil serves a placeholder
+	UI       http.Handler // the page; nil serves a placeholder
 
 	caps caps // document capabilities (docs.go)
 }
@@ -300,7 +300,7 @@ type FixResult struct {
 }
 
 // fix runs doctor's automatic repairs: the console's one action that changes
-// the pool (ADR-0079). The POST guard (token, Host, Origin) applies.
+// the pool. The POST guard (token, Host, Origin) applies.
 func (s *Server) fix(w http.ResponseWriter, r *http.Request) {
 	e, ok := s.engine(w, r)
 	if !ok {

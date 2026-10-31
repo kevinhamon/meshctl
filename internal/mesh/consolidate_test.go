@@ -115,7 +115,7 @@ func TestRecall_TiersAndSupersededDropped(t *testing.T) {
 	writeKB(t, a, "architecture/circulation.md", "# Circulation window\n\nDaily since 0002. The depot exposes it as a view.\n")
 	writeKB(t, a, "candidates/circulation-window-idea.md", "# Circulation window idea\n")
 	writeKB(t, a, "handoff.md", "## Current State\ncirculation window WIP\n")
-	// Confirmed entries (ADR-0067): without a ledger every hit would rank in
+	// Confirmed entries: without a ledger every hit would rank in
 	// the one unconfirmed slot and the tier order would not show.
 	confirmKB(t, a, "architecture/circulation.md", "decisions/0002-circulation-window-daily.md")
 

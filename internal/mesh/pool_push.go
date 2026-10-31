@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-// pool_push.go — the console's Push button for the pool repo (ADR-0079
-// amendment). ADR-0066 has meshctl commit and the person push; the button is
+// pool_push.go — the console's Push button for the pool repo.
+// meshctl commits and the person pushes; the button is
 // the person pushing, from the page. It pushes only the pool repo's current
 // branch to the branch it tracks, never with --force, and never waits for a
 // password. Agents never reach it: the gate denies a shell call naming the

@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 jobs:
-  # Harness parity (ADR-0075): every command classified per harness and the
+  # Harness parity: every command classified per harness and the
   # README table current. Fast and deterministic; nothing is released without it.
   parity:
     runs-on: ubuntu-latest

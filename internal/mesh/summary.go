@@ -9,8 +9,7 @@ import (
 	"time"
 )
 
-// summary.go — the confirmation summary file and the ask-text renderer
-// (ADR-0067 with amendment, ADR-0068, spec decisions 19 and 69).
+// summary.go — the confirmation summary file and the ask-text renderer.
 //
 // Before a peer changes what others treat as true — a promotion at `kb
 // finish`, a `state set`, a pool write, an outbound write, a `kb confirm` or
@@ -23,7 +22,7 @@ import (
 // learns its session id from the first deny.
 //
 // Required sections: `Intent` (one line, first), `Grounding`, `Precedent`.
-// `Coherence` is required when related entries exist (ADR-0069) and parsed
+// `Coherence` is required when related entries exist and parsed
 // when present; `## Changes` holds one `### <path>` block per promoted file
 // with added/removed bullets and is parsed when present (its full use lands
 // with the promotion gate). Headings are matched case-insensitively at any
@@ -224,8 +223,8 @@ type AskText struct {
 // RenderAsk renders the ask text in the one shape every gate shares — header,
 // `Intent: …` first, body, footer — and logs the rendered length to the
 // agent's gate log (`ask-rendered check=<check> chars=<n>`), since the
-// harness prompt truncates past a few thousand characters (ADR-0067:
-// about 600–1200 render whole) and a truncated signature is otherwise
+// harness prompt truncates past a few thousand characters
+// (about 600–1200 render whole) and a truncated signature is otherwise
 // invisible. agentDir "" ⇒ only $AGENT_MESH_GATE_LOG receives the line.
 func RenderAsk(agentDir string, a AskText) string {
 	// An empty header puts the Intent line first (the promotion ask).

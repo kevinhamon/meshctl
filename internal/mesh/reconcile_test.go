@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// kb reconcile: walk order and worksheet (ADR-0070; spec decisions 43, 44).
+// kb reconcile: walk order and worksheet.
 
 func walkNames(w ReconcileWalk) []string {
 	var out []string

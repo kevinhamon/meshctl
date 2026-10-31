@@ -6,9 +6,9 @@ How the engineering skills should consume this repo's domain documentation when 
 
 - **`GLOSSARY.md`** at the repo root, or
 - **`GLOSSARY-MAP.md`** at the repo root if it exists: it points at one `GLOSSARY.md` per context. Read each one relevant to the topic.
-- **`docs/decisions/`**: read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/decisions/` for context-scoped decisions.
+- **`private-docs/`**: if it exists, read the decision records that touch the area you're about to work in. Its README says how to add one.
 
-In this repo, ADRs live in `docs/decisions/`, not `docs/adr/`. That folder is private: the public mirror never carries it, so write ADRs as the maintainer's record and keep public docs readable without them. New ADRs copy `docs/decisions/template.md`, continue the numbering from the next free number listed in `docs/decisions/README.md` (gaps are historical), and add a row to that README's index.
+Decision records are kept privately: the public mirror never carries `private-docs/`, so keep public docs, code and comments readable without them.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 
@@ -19,9 +19,7 @@ Single-context repo (most repos):
 ```
 /
 ├── GLOSSARY.md
-├── docs/decisions/
-│   ├── 0001-event-sourced-orders.md
-│   └── 0002-postgres-for-write-model.md
+├── private-docs/                            ← private: decision records
 └── src/
 ```
 
@@ -30,14 +28,11 @@ Multi-context repo (presence of `GLOSSARY-MAP.md` at the root):
 ```
 /
 ├── GLOSSARY-MAP.md
-├── docs/decisions/                          ← system-wide decisions
 └── src/
     ├── ordering/
-    │   ├── GLOSSARY.md
-    │   └── docs/decisions/                  ← context-specific decisions
+    │   └── GLOSSARY.md
     └── billing/
-        ├── GLOSSARY.md
-        └── docs/decisions/
+        └── GLOSSARY.md
 ```
 
 ## Use the glossary's vocabulary

@@ -166,7 +166,7 @@ func anyStr(xs []any, want string) bool {
 // TestSettings_GateMatcherFullMatchesMCPToolName reproduces how Claude Code
 // applies a hook matcher: as a full regex match on the tool name. The bare
 // `mcp__` alternative shipped in v1..v4 never matched an MCP tool, so the gate
-// had never seen an MCP call (ADR-0062 and ADR-0068 amendments).
+// had never seen an MCP call.
 func TestSettings_GateMatcherFullMatchesMCPToolName(t *testing.T) {
 	full := regexp.MustCompile("^(?:" + GateHookMatcher + ")$")
 	for _, tool := range []string{"mcp__tracker__createTicket", "mcp__tracker__search", "Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task"} {

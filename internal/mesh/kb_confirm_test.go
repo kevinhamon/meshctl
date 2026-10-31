@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// kb confirm: bulk confirmation from a reconcile report (ADR-0070; spec
-// decision 46): ledger lines and the Confirm: commit on main in one step, at
-// most five paths per call, refusals by latest verdict.
+// kb confirm: bulk confirmation from a reconcile report: ledger lines and the
+// Confirm: commit on main in one step, at most five paths per call, refusals by
+// latest verdict.
 
 const confirmGlossary = "# Glossary\n\n## Circulation window\n\n**Circulation window**: the renewal period.\n\n## Fact owner\n\n**Fact owner**: the peer that owns a fact.\n"
 

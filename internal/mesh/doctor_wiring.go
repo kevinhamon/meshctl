@@ -274,7 +274,7 @@ func opencodeGateFindings(a *Agent) []DoctorFinding {
 			out = append(out, f("warn", "leftover opencode V1 plugin ("+opencodePluginV1Rel+") — V2 warns on it every start; "+onboard))
 		}
 		if !opencodeAskWired(a.Dir(), false) {
-			out = append(out, f("error", "opencode.json lacks the ask rules for promotions (ADR-0075), so `kb finish`, `kb confirm` "+
+			out = append(out, f("error", "opencode.json lacks the ask rules for promotions, so `kb finish`, `kb confirm` "+
 				"and `state set` are refused; "+onboard))
 		}
 		if plan := PlanPeerAgents(filepath.Dir(a.Dir()), a.Dir()); !plan.Empty() {

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// inbox_list_test.go — `meshctl inbox list` is the clean queue (ADR-0073 C3):
+// inbox_list_test.go — `meshctl inbox list` is the clean queue:
 // pending + in-progress only by default, ordered priority then age, one line
 // per request with a one-line ask; --all shows every status.
 

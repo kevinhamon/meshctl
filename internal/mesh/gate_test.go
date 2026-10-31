@@ -143,7 +143,7 @@ func TestGate_DoctorRequiresGate(t *testing.T) {
 
 // TestGate_ShellParsingFalsePositives: fd-dups, /dev/null redirections and
 // heredoc bodies are not the command's own arguments, and a subcommand match
-// is an invocation only at a command start (ticket 14 prototype findings).
+// is an invocation only at a command start (both seen in practice).
 func TestGate_ShellParsingFalsePositives(t *testing.T) {
 	dir, caller, arch, _ := workPool(t)
 	req := filepath.Join(arch.Dir(), IntakeDir, "2026-01-01-developer-x.md")
@@ -285,8 +285,8 @@ func TestShellOwnArguments(t *testing.T) {
 
 // TestGate_KBBranchDeny: a shell command naming a mesh/kb/ branch outside
 // `meshctl kb` is denied, so a KB branch is never merged, rebased or deleted by
-// hand (spec decision 24, ADR-0067 "bypass closed"). The matcher is ticket 22's:
-// a mention in a script, a heredoc or a `meshctl kb` invocation is not a hit.
+// hand (a closed bypass). A mention in a script, a heredoc or a `meshctl kb`
+// invocation is not a hit.
 func TestGate_KBBranchDeny(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)
@@ -322,7 +322,7 @@ func TestGate_KBBranchDeny(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			for _, pool := range []string{dir, ""} {
 				// Only the branch rule is under test: a `kb finish` with no
-				// KB session is denied by the promotion rule (ticket 33).
+				// KB session is denied by the promotion rule.
 				d := GatePreToolUse(pool, bash(c.cmd))
 				if (d.Deny && d.Check == GateCheckKBBranch) != c.deny {
 					t.Fatalf("pool=%q Deny=%v, want %v (reason=%q)", pool, d.Deny, c.deny, d.Reason)

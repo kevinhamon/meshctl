@@ -24,13 +24,13 @@ type AgentSpec struct {
 	Badge        Badge
 	Model        string
 	Repo         string
-	Workdirs     []string // local repo paths writable in delegated work (ADR-0063)
-	Harness      string   // claude | opencode (ADR-0032); empty ⇒ claude
+	Workdirs     []string // local repo paths writable in delegated work
+	Harness      string   // claude | opencode; empty ⇒ claude
 	// HarnessVersion pins the opencode major (1|2) to wire for; 0 ⇒ the
 	// installed binary's. Not persisted: the installed binary is the truth at
 	// runtime, and doctor flags wiring that no longer matches it.
 	HarnessVersion int
-	Bare           bool // if false, New appends the "-agent" repo suffix (ADR-0038)
+	Bare           bool // if false, New appends the "-agent" repo suffix
 }
 
 // ScaffoldOptions controls optional extras when creating/onboarding an agent.
@@ -41,7 +41,7 @@ type ScaffoldOptions struct {
 	ITerm bool
 }
 
-// scaffoldKnowledgeAreas creates the ADR-0014 KB areas. Add-only: it never
+// scaffoldKnowledgeAreas creates the KB areas. Add-only: it never
 // touches an area that already has a README, and a second run is a no-op.
 func scaffoldKnowledgeAreas(dest string) ([]string, error) {
 	var added []string
@@ -61,7 +61,7 @@ func scaffoldKnowledgeAreas(dest string) ([]string, error) {
 	return added, nil
 }
 
-// scaffoldLedger writes an empty confirmation ledger (ADR-0067) when none
+// scaffoldLedger writes an empty confirmation ledger when none
 // exists. Add-only: an existing ledger is never touched. The ledger is
 // tracked; the scaffold commit (New) or the peer's next commit carries it.
 func scaffoldLedger(dest string) (bool, error) {
@@ -72,9 +72,9 @@ func scaffoldLedger(dest string) (bool, error) {
 }
 
 // scaffoldSkills installs the shared mesh skills, rendered into the given
-// harness's native location (ADR-0032). Add-only: never clobbers an existing
+// harness's native location. Add-only: never clobbers an existing
 // skill; a second run is a no-op. mesh-cognition is every agent's primary
-// cognition instructions (ADR-0014–0018).
+// cognition instructions.
 func scaffoldSkills(poolRoot, dest string, h Harness) ([]string, error) {
 	var added []string
 	skills := []string{"mesh-cognition"}
@@ -102,7 +102,7 @@ func scaffoldSkills(poolRoot, dest string, h Harness) ([]string, error) {
 // poolDirToken is the template placeholder for the pool directory's name
 // (`pool`, or the legacy hidden name until `pool upgrade`), so every rendered
 // pointer — CLAUDE.md stanzas, intake README, skills, the distiller binding —
-// follows the resolver (ADR-0066).
+// follows the resolver.
 const poolDirToken = "__POOL_DIR__"
 
 // renderPoolTokens fills the pool directory token for one pool.
@@ -146,8 +146,8 @@ func refreshPoolPointers(poolRoot string, paths ...string) (int, error) {
 }
 
 // ensureMemoryIgnored appends the meshctl-managed .gitignore block if absent:
-// the disposable memory index (ADR-0015) AND the ephemeral intake queue + its
-// archive (ADR-0043 — intake is transient discussion; durable residue lives in the
+// the disposable memory index AND the ephemeral intake queue + its
+// archive (intake is transient discussion; durable residue lives in the
 // KB, not in git). intake/README.md stays tracked. Idempotent via a marker line.
 const gitignoreMarker = "# meshctl-managed ignores"
 
@@ -157,10 +157,10 @@ const gitignoreEnd = "# end meshctl-managed ignores"
 // managedIgnores are the managed block's lines, in order.
 var managedIgnores = []string{
 	".memory/",             // generated, disposable (meshctl memory rebuild)
-	IntakeArchiveDir + "/", // archived closed requests (ADR-0043)
+	IntakeArchiveDir + "/", // archived closed requests
 	"intake/*.md",          // ephemeral inbox traffic
 	"!intake/README.md",    // …but keep the inbox doc
-	"intake/*.claim",       // runtime claim locks (ADR-0011)
+	"intake/*.claim",       // runtime claim locks
 	DocsLocalDir + "/",     // documents that must never leave the machine
 }
 
@@ -184,7 +184,7 @@ func ensureMemoryIgnored(dest string) error {
 // New scaffolds a brand-new agent workspace as a sibling of the mesh, including
 // its agent.yaml manifest. dest must not exist.
 func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error) {
-	// Poly-repo repo-naming (ADR-0038): an agent repo is flagged `<name>-agent`
+	// Poly-repo repo-naming: an agent repo is flagged `<name>-agent`
 	// unless --bare. dir == manifest name (discovery is unchanged).
 	if !spec.Bare && spec.Name != "" && !strings.HasSuffix(spec.Name, "-agent") {
 		spec.Name += "-agent"
@@ -230,7 +230,7 @@ func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error)
 		return "", err
 	}
 
-	// ADR-0014 KB areas + ADR-0015 memory gitignore.
+	// KB areas + memory gitignore.
 	if _, err := scaffoldKnowledgeAreas(dest); err != nil {
 		return "", err
 	}
@@ -243,7 +243,7 @@ func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error)
 	if err := ensureMemoryIgnored(dest); err != nil {
 		return "", err
 	}
-	// Shared mesh skills + harness integration (ADR-0032), rendered per harness.
+	// Shared mesh skills + harness integration, rendered per harness.
 	h := HarnessByNameVersion(spec.Harness, spec.HarnessVersion)
 	if _, err := scaffoldSkills(agentsDir, dest, h); err != nil {
 		return "", err
@@ -251,7 +251,7 @@ func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error)
 	if _, err := h.WireAgent(dest); err != nil {
 		return "", err
 	}
-	// Repo hygiene (ADR-0039): make the workspace a local git repo so knowledge/
+	// Repo hygiene: make the workspace a local git repo so knowledge/
 	// is version-controlled from creation. Remote push is the human's job (nagged
 	// by the session-start hook until done).
 	initAgentRepo(dest)
@@ -298,7 +298,7 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 	claudePath := filepath.Join(abs, "CLAUDE.md")
 	claudeBody, _ := os.ReadFile(claudePath)
 
-	// Resolve the harness (ADR-0032): explicit flag, else an existing manifest's
+	// Resolve the harness: explicit flag, else an existing manifest's
 	// value, else detect from the workspace, else claude. Persisted on the manifest.
 	mp := filepath.Join(abs, ManifestName)
 	if spec.Harness == "" {
@@ -371,8 +371,8 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 	} else if len(claudeBody) == 0 {
 		res.Notes = append(res.Notes, "no CLAUDE.md — skipped intake-section injection")
 	} else if fresh, stale := refreshedCommsSection(string(claudeBody)); stale {
-		// A known older Inbound bullet becomes the current intake order
-		// (ADR-0073); human text around it is untouched.
+		// A known older Inbound bullet becomes the current intake order;
+		// human text around it is untouched.
 		if err := os.WriteFile(claudePath, []byte(fresh), 0o644); err != nil {
 			return nil, err
 		}
@@ -380,9 +380,9 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 		res.Notes = append(res.Notes, "refreshed Agent Communication Inbound order in CLAUDE.md")
 	}
 
-	// 3b. CLAUDE.md cognition standing-order stanza (ADR-0026): added when
+	// 3b. CLAUDE.md cognition standing-order stanza: added when
 	// missing, refreshed in place when an earlier onboard wrote an older text
-	// (story 109: one re-onboard picks everything up). Human text outside the
+	// (one re-onboard picks everything up). Human text outside the
 	// managed stanza is never touched.
 	if len(claudeBody) > 0 && !hasCognitionSection(string(claudeBody)) {
 		if err := appendCognitionSection(claudePath, agentsDir); err != nil {
@@ -398,7 +398,7 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 		}
 	}
 
-	// 3c. Rendered pointers follow the pool directory (ADR-0066): after `pool
+	// 3c. Rendered pointers follow the pool directory: after `pool
 	// upgrade` moved it, the next onboard re-points what earlier renders wrote.
 	if n, err := refreshPoolPointers(agentsDir, claudePath, filepath.Join(intake, "README.md")); err != nil {
 		return nil, err
@@ -406,7 +406,7 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 		res.Notes = append(res.Notes, fmt.Sprintf("re-pointed %d file(s) at %s/", n, PoolDirName(agentsDir)))
 	}
 
-	// 4. KB areas (ADR-0014) + 5. memory gitignore (ADR-0015) — add-only.
+	// 4. KB areas + 5. memory gitignore — add-only.
 	if added, err := scaffoldKnowledgeAreas(abs); err != nil {
 		return nil, err
 	} else if len(added) > 0 {
@@ -425,7 +425,7 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 	if err := ensureMemoryIgnored(abs); err != nil {
 		return nil, err
 	}
-	// 6. Shared mesh skills — rendered per harness (ADR-0032), add-only.
+	// 6. Shared mesh skills — rendered per harness, add-only.
 	if added, err := scaffoldSkills(agentsDir, abs, h); err != nil {
 		return nil, err
 	} else if len(added) > 0 {
@@ -461,11 +461,11 @@ func hasSkill(dest, name string) bool {
 }
 
 // StewardName is the mesh onboarding-hub agent scaffolded by `pool init` /
-// `agent bootstrap` (ADR-0035).
+// `agent bootstrap`.
 const StewardName = "steward-agent"
 
 // ScaffoldSteward stands up the mesh steward — the interview-and-build onboarding
-// hub (ADR-0035): a normal agent workspace whose CLAUDE.md is the steward role and
+// hub: a normal agent workspace whose CLAUDE.md is the steward role and
 // which carries the mesh-steward skill (the interview → roster → scaffold playbook)
 // on top of mesh-cognition. Idempotent: if the steward already exists, it is left
 // untouched. harness is the steward's own harness (claude|opencode).
@@ -579,7 +579,7 @@ func writeManifest(dir string, spec AgentSpec) error {
 	dispatchable := spec.Dispatchable && len(spec.Mutates) == 0
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# %s/agent.yaml — the agent's authoritative self-description (ADR-0010).\n", spec.Name)
+	fmt.Fprintf(&b, "# %s/agent.yaml — the agent's authoritative self-description.\n", spec.Name)
 	fmt.Fprintf(&b, "# Discovery is computed from these manifests; there is no committed roster.\n")
 	fmt.Fprintf(&b, "name: %s\n", spec.Name)
 	fmt.Fprintf(&b, "title: %s\n", yamlScalar(spec.Title))
@@ -736,7 +736,7 @@ Bidirectional file-based handoff — canonical protocol: your pool's ` + "`../__
 `
 
 // inboundStanza is the managed intake order inside the Agent Communication
-// section (ADR-0073): "check intake" shows the queue and stops, work runs in
+// section: "check intake" shows the queue and stops, work runs in
 // the human's order by id, and decisions are asked as a decision round. The
 // scaffold template carries the same text; re-onboard swaps a known older
 // Inbound bullet for it (refreshedCommsSection).
@@ -761,7 +761,7 @@ var (
 // refreshedCommsSection returns claude with a known stale Inbound bullet
 // replaced by the current intake order, or, in a hand-customised Inbound
 // bullet, only its claim-the-oldest command swapped for the queue-and-wait
-// order (ADR-0073); stale=false when there is nothing to change.
+// order; stale=false when there is nothing to change.
 func refreshedCommsSection(claude string) (fresh string, stale bool) {
 	for _, old := range staleInboundBullets {
 		if i := strings.Index(claude, old); i >= 0 && (i == 0 || claude[i-1] == '\n') {
@@ -797,7 +797,7 @@ func appendCommsSection(claudePath, poolRoot string) error {
 	return err
 }
 
-// hasCognitionSection detects the ADR-0026 cognition standing-order stanza.
+// hasCognitionSection detects the cognition standing-order stanza.
 func hasCognitionSection(claude string) bool {
 	return strings.Contains(claude, "## Cognition") &&
 		strings.Contains(claude, "mesh-cognition")
@@ -861,22 +861,22 @@ Run the **` + "`mesh-cognition`" + ` skill** for the full procedure; its short f
   commit it now. Then create a remote and push. Session start will keep reminding you
   until a remote exists — clear it by pushing.
 
-Authoritative spec: ` + "`../__POOL_DIR__/doctrine/agent-comms.md`" + ` §Knowledge & Memory
-(ADR-0014–0018).
+Authoritative spec: ` + "`../__POOL_DIR__/doctrine/agent-comms.md`" + ` §Knowledge & Memory.
 `
 
-// cognitionStanzaHeading and cognitionStanzaEnd bound the managed stanza
-// every onboard has written: from its heading line through its closing
-// ADR line. Text before or after is the human's.
+// cognitionStanzaHeading and cognitionStanzaEnd bound the managed stanza:
+// from its heading line through its `Authoritative spec: … §Knowledge &
+// Memory.` line. Text before or after is the human's. The retired
+// templates/ tree closed its stanza with the same line (issue #11).
 //
-// cognitionStanzaLegacyEnd closes the stanza the retired templates/ tree
-// wrote (`Authoritative spec: your pool's … §Knowledge & Memory.`, no ADR
-// line); peers onboarded from it carry it still (issue #11).
+// cognitionStanzaADREnd closes the stanza onboards wrote up to v1.12.x,
+// whose spec line ended on a separate ADR line; peers onboarded then carry
+// it until their next refresh.
 const (
-	cognitionToken           = "__COGNITION__" // where templates/CLAUDE.md takes the stanza
-	cognitionStanzaHeading   = "## Cognition — maintain your own knowledge base (standing order)"
-	cognitionStanzaEnd       = "(ADR-0014–0018).\n"
-	cognitionStanzaLegacyEnd = "§Knowledge & Memory.\n"
+	cognitionToken         = "__COGNITION__" // where templates/CLAUDE.md takes the stanza
+	cognitionStanzaHeading = "## Cognition — maintain your own knowledge base (standing order)"
+	cognitionStanzaEnd     = "§Knowledge & Memory.\n"
+	cognitionStanzaADREnd  = "(ADR-0014–0018).\n"
 )
 
 // cognitionStanzaBounds locates the managed stanza: from its heading line
@@ -888,7 +888,7 @@ func cognitionStanzaBounds(claude string) (start, end int, ok bool) {
 		return 0, 0, false
 	}
 	end = -1
-	for _, e := range []string{cognitionStanzaEnd, cognitionStanzaLegacyEnd} {
+	for _, e := range []string{cognitionStanzaEnd, cognitionStanzaADREnd} {
 		if n := strings.Index(claude[start:], e); n >= 0 && (end < 0 || start+n+len(e) < end) {
 			end = start + n + len(e)
 		}
@@ -935,7 +935,7 @@ func appendCognitionSection(claudePath, poolRoot string) error {
 
 // emitDoctrine writes the embedded doctrine docs (agent-comms.md, distiller.md)
 // into <poolRoot>/agent-mesh/, the path agents' CLAUDE.md reference. Binary is
-// the source (ADR-0031); this replaces the ADR-0029 git clone. overwrite=false
+// the source; this replaces the old git clone. overwrite=false
 // skips files already present (fresh init), true re-emits unconditionally.
 // Upgrades go through UpgradeDoctrine, which protects local edits.
 func emitDoctrine(poolRoot string, overwrite bool) ([]string, error) {
@@ -966,11 +966,11 @@ func emitDoctrine(poolRoot string, overwrite bool) ([]string, error) {
 	return did, stampEmitted(dest, written)
 }
 
-// InitPool bootstraps a NEW, isolated mesh pool at poolRoot FROM THE BINARY
-// (ADR-0031): emits the doctrine docs from embed, creates the runtime dirs,
+// InitPool bootstraps a NEW, isolated mesh pool at poolRoot FROM THE BINARY:
+// emits the doctrine docs from embed, creates the runtime dirs,
 // writes the pool/pool.yaml marker and the glossary, and makes pool/ a git repo
-// on main with its ignore file and a first commit in the user's identity
-// (ADR-0066). No git clone, no network. Aborts if poolRoot is already a pool.
+// on main with its ignore file and a first commit in the user's identity.
+// No git clone, no network. Aborts if poolRoot is already a pool.
 // name defaults to the pool dir's basename.
 func InitPool(poolRoot, name string, now time.Time) ([]string, error) {
 	abs, err := filepath.Abs(poolRoot)
@@ -1004,7 +1004,7 @@ func InitPool(poolRoot, name string, now time.Time) ([]string, error) {
 	}
 	did = append(did, more...)
 
-	// The pool directory is a git repo (ADR-0066): same steps as `pool upgrade`.
+	// The pool directory is a git repo: same steps as `pool upgrade`.
 	repo, err := UpgradePoolDir(abs, now)
 	if err != nil {
 		return did, err
@@ -1013,7 +1013,7 @@ func InitPool(poolRoot, name string, now time.Time) ([]string, error) {
 	return did, nil
 }
 
-// IsLegacyLayout reports whether a pool still uses the pre-ADR-0038 layout: a
+// IsLegacyLayout reports whether a pool still uses the old layout: a
 // STALE top-level `agent-mesh/` doctrine emit, or `.worktrees`/`.dispatch.*` at the
 // root. A git-repo `agent-mesh/` is NOT legacy — it's the intentional build-source
 // repo that `pool migrate` keeps (e.g. a `~/agents` pool), so it must not trip this.
@@ -1030,7 +1030,7 @@ func IsLegacyLayout(poolRoot string) bool {
 	return false
 }
 
-// MigratePool reconciles a legacy (pre-ADR-0038) pool to the consolidated
+// MigratePool reconciles a legacy pool to the consolidated
 // pool-directory layout: emits doctrine under `<pool dir>/doctrine`, moves
 // `.worktrees` → `<pool dir>/worktrees` and `.dispatch.*` → `<pool dir>/`, and
 // removes the legacy top-level `agent-mesh/` doctrine dir — but ONLY if it is not a
@@ -1149,7 +1149,7 @@ func InitMesh(agentsDir string) ([]string, error) {
 		}
 	}
 	// Ensure the pool marker exists (add-only; never overwrites identity). This is
-	// how an existing (pre-ADR-0031) pool like ~/agents gains the marker without
+	// how an existing pool from before markers gains the marker without
 	// touching its agent-mesh/ dir.
 	if !IsPool(agentsDir) {
 		if err := WritePoolMarker(agentsDir, "", doctrineVersion(), time.Now(), false); err != nil {

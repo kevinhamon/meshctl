@@ -59,7 +59,7 @@ func TestPoolUpgrade_CheckPreviewsWithoutWriting(t *testing.T) {
 
 func TestPoolUpgrade_ApplyRewiresThenConverges(t *testing.T) {
 	pool, a := v1Pool(t)
-	// The apply path in order: pool directory (ADR-0066), doctrine, agents.
+	// The apply path in order: pool directory, doctrine, agents.
 	gitIdentity(t)
 	if _, err := UpgradePoolDir(pool, time.Now()); err != nil {
 		t.Fatal(err)

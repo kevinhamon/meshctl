@@ -13,7 +13,7 @@ import (
 )
 
 // ocPeerPool: an opencode V2 caller `hub` with a dispatchable `architect`, a
-// state-mutating `pm` and a send-only `scout` in the pool (ADR-0076).
+// state-mutating `pm` and a send-only `scout` in the pool.
 func ocPeerPool(t *testing.T) (dir string, hub, arch, pm *Agent) {
 	t.Helper()
 	t.Setenv(opencodeMajorEnv, "2")

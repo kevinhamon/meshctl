@@ -83,7 +83,7 @@ func TestAgentRepo_NoRemoteHasNoButton(t *testing.T) {
 	gitOut(t, dir, "init", "-q", "-b", "main")
 	os.WriteFile(filepath.Join(dir, "x.md"), []byte("x\n"), 0o644)
 	if st := AgentRepoSync(dir); st.Action != "" {
-		t.Fatalf("no remote is the ADR-0039 finding, not a commit button: %+v", st)
+		t.Fatalf("no remote is the repo-hygiene finding, not a commit button: %+v", st)
 	}
 }
 

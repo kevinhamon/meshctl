@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Tool reference (ADR-0042) is the capability-awareness layer — distinct from
+// Tool reference is the capability-awareness layer — distinct from
 // skills (procedures) and the KB (knowledge). It declares which CLI tools an agent
 // should use and the house rules ("prefer tea over gh"), as POINTERS: name +
 // one-line purpose + how to self-serve help. meshctl never fetches/embeds the help

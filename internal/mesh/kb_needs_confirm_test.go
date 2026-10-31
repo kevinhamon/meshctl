@@ -8,7 +8,7 @@ import (
 )
 
 // kb_needs_confirm_test.go — headless and delegated promotion parks as
-// `needs-confirm` (ADR-0067; spec decision 26).
+// `needs-confirm`.
 
 // assertParked checks a finish refused with needs-confirm and left the branch,
 // the worktree and main alone.

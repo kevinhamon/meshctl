@@ -11,11 +11,11 @@ import (
 	"time"
 )
 
-// reconcile.go — the reconciliation pass's walk order and worksheet (ADR-0070;
-// spec decisions 43 and 44). meshctl judges nothing here: it ranks canonical
+// reconcile.go — the reconciliation pass's walk order and worksheet.
+// meshctl judges nothing here: it ranks canonical
 // peers from pool facts and, for one peer, gathers the evidence an agent needs
-// to write the reconcile report (ticket 43 validates that report and confirms
-// in bulk). Perspective peers are never walked and never read.
+// to write the reconcile report (kb_confirm.go validates that report and
+// confirms in bulk). Perspective peers are never walked and never read.
 
 // ReconcileDirName is the runtime directory under a peer's .memory/ holding
 // worksheets and reconcile reports (never committed: .memory/ is ignored).
@@ -111,8 +111,8 @@ type ReconcileWalk struct {
 	Skipped []string        `json:"skipped"` // perspective peers, never walked
 }
 
-// ReconcileWalkOrder computes the walk across the pool's canonical peers
-// (ADR-0070): more declared `mutates` surfaces first, then more conflicts in
+// ReconcileWalkOrder computes the walk across the pool's canonical peers:
+// more declared `mutates` surfaces first, then more conflicts in
 // the latest reconcile report, then more inbound `mesh://` links, then more
 // unconfirmed entries, then name. A peer's conflict counterparts are walked
 // right after it (pairs interleaved). The pool config's `reconcile.order`
@@ -252,7 +252,7 @@ func (w ReconcileWalk) Markdown() string {
 	return b.String()
 }
 
-// ReconcileWalkRank is an entry's place in the in-peer walk (ADR-0070): state,
+// ReconcileWalkRank is an entry's place in the in-peer walk: state,
 // handoff, glossary, decisions, architecture and reference, playbooks,
 // experience, then anything else.
 func ReconcileWalkRank(rel string) int {
@@ -284,7 +284,7 @@ const (
 )
 
 // Citation is one reference an entry carries, marked resolved or not. No
-// content is verified and no URL is fetched (ADR-0070).
+// content is verified and no URL is fetched.
 type Citation struct {
 	Kind     string `json:"kind"` // CitationMesh | CitationPath | CitationURL
 	Ref      string `json:"ref"`  // as written
@@ -339,7 +339,7 @@ func reconcilePeer(root, peer string) (*Agent, error) {
 		return nil, err
 	}
 	if !IsCanonical(LoadPoolConfig(root), a) {
-		return nil, fmt.Errorf("%s is a perspective peer (knowledge: %s) — reconciliation reads and confirms canonical knowledge only (ADR-0069, ADR-0070); nothing to reconcile",
+		return nil, fmt.Errorf("%s is a perspective peer (knowledge: %s) — reconciliation reads and confirms canonical knowledge only; nothing to reconcile",
 			peer, KnowledgePerspective)
 	}
 	return a, nil
@@ -396,7 +396,7 @@ func BuildReconcileWorksheet(root, peer string, now time.Time) (*ReconcileWorksh
 			if len(terms) > 0 {
 				e.Hits, _ = CanonicalPeerHits(a, strings.Join(terms, " "))
 			}
-			// Incremental (spec decision 47): a confirmed entry's pairs with
+			// Incremental: a confirmed entry's pairs with
 			// entries confirmed in their owners' ledgers were reconciled and
 			// have not changed since; skip them, and skip the entry when no
 			// open pair is left. An edit on either side unconfirms it.
@@ -685,7 +685,7 @@ func wellFormedURL(s string) bool {
 func (ws *ReconcileWorksheet) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Reconcile worksheet — %s (%s)\n\n", ws.Peer, ws.Date)
-	fmt.Fprintf(&b, "Evidence for the reconciliation pass (ADR-0070). meshctl judged nothing: read each entry against its "+
+	fmt.Fprintf(&b, "Evidence for the reconciliation pass. meshctl judged nothing: read each entry against its "+
 		"canonical hits, citations and doctrine or standing-order passages, then write the reconcile report at `%s`, "+
 		"an optional `## Standing orders` section first, then one line per entry:\n\n", ws.Report)
 	b.WriteString("    - <kb-relative path>[#<slug>] · <verdict>[ → <mesh://… | doctrine | owner <peer>, pending>] · \"<quoted grounding>\"\n\n")

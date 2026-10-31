@@ -10,8 +10,7 @@ import (
 )
 
 // gate_promotion_related_test.go — related canonical entries, coherence,
-// ownership routing and inbound links at the promotion ask (ADR-0065,
-// ADR-0069; spec decisions 31 and 32). Fixture: a four-peer pool — architect
+// ownership routing and inbound links at the promotion ask. Fixture: a four-peer pool — architect
 // (the promoter, a git repo with KB session sess-1) and catalog canonical,
 // lending canonical owning `circulation`, critic perspective.
 

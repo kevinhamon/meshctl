@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Repo hygiene (ADR-0039): an agent's durable knowledge lives in its `knowledge/`
+// Repo hygiene: an agent's durable knowledge lives in its `knowledge/`
 // tree and is only safe once committed to a git repo AND pushed to a remote. The
 // pool container isn't a repo, so each agent must be its own repo. `agent new`
 // inits the local repo here; the session-start hook nags until a remote exists.

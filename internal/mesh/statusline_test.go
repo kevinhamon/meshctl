@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// statusline_test.go — the Claude Code status line (ADR-0074).
+// statusline_test.go — the Claude Code status line.
 
 var reANSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 

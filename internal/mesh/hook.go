@@ -55,7 +55,7 @@ type HookPayload struct {
 	// payload fields.
 	PeerAgent string `json:"-"`
 	InSession bool   `json:"-"`
-	// Work marks a peer doing delegated work (ADR-0063): the work gate
+	// Work marks a peer doing delegated work: the work gate
 	// applies instead of the consult contract.
 	Work bool `json:"-"`
 	// Harness is the --harness flag the hook ran under ("" ⇒ the agent's):
@@ -77,7 +77,7 @@ func payloadAgent(agentsDir string, p HookPayload) *Agent {
 }
 
 // ResolvePeerSubagent stamps the in-session peer flags onto a payload from an
-// opencode V2 child session (ADR-0076). V2 has no per-agent hooks, so the one
+// opencode V2 child session. V2 has no per-agent hooks, so the one
 // project plugin forwards every tool call with the child's agent id as
 // agent_type, the caller's session as session_id and the child's as agent_id
 // (the shape Claude Code's subagent hooks have). An agent id with the mesh-
@@ -145,8 +145,8 @@ func HookPreToolUse(agentsDir string, p HookPayload, now time.Time) GateDecision
 
 // HookPostToolUse is the after-the-fact companion of the gate, wired on the
 // same matcher (GateHookMatcher) since wiring v5. It commits a successful
-// write under pool/ to the pool repo (ADR-0066, pool_commit.go). The per-batch
-// outbound ack (ADR-0068) records through RecordSessionAck here too. It never
+// write under pool/ to the pool repo (pool_commit.go). The per-batch
+// outbound ack records through RecordSessionAck here too. It never
 // emits output and never fails a turn.
 func HookPostToolUse(agentsDir string, p HookPayload, now time.Time) {
 	hookPoolCommit(agentsDir, p, now)
@@ -215,19 +215,19 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 		b.WriteString(warn)
 		b.WriteString("\n\n")
 	}
-	// Repo-hygiene nag (ADR-0039): persistent until a remote exists.
+	// Repo-hygiene nag: persistent until a remote exists.
 	if nag := RepoNag(a.Dir()); nag != "" {
 		b.WriteString(nag)
 		b.WriteString("\n\n")
 	}
-	// Pool repo nag (ADR-0066): the same reminder for pool/, on every peer,
+	// Pool repo nag: the same reminder for pool/, on every peer,
 	// until the human pushes. Stays with the repo warnings, above any
 	// pending-work block.
 	if nag := PoolRepoNag(agentsDir); nag != "" {
 		b.WriteString("⚠ " + nag)
 		b.WriteString("\n\n")
 	}
-	// Pending work (ADR-0071): what waits on the human — parked KB branches,
+	// Pending work: what waits on the human — parked KB branches,
 	// open conflicts, own pending intake, read-back, delegated work, KB health.
 	// Only in the peer's own interactive session: omitted under dispatch
 	// depth (distil runs returned above).
@@ -237,7 +237,7 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 			b.WriteString("\n\n")
 		}
 	}
-	// Tool reference (ADR-0042): mesh-wide + agent tools, self-serve --help.
+	// Tool reference: mesh-wide + agent tools, self-serve --help.
 	if resumed {
 		return strings.TrimSpace(b.String())
 	}
@@ -283,7 +283,7 @@ func IdentityLine(poolRoot string, a *Agent) string {
 	return s
 }
 
-// HookSessionEnd captures an extractive session-record (ADR-0033) then
+// HookSessionEnd captures an extractive session-record then
 // deregisters session presence. No output. Fail-open throughout.
 func HookSessionEnd(agentsDir string, p HookPayload, pid int, now time.Time) {
 	a := payloadAgent(agentsDir, p)
@@ -345,8 +345,8 @@ func HookSessionBeat(agentsDir string, p HookPayload, now time.Time) {
 }
 
 // HookUserPrompt returns the block to inject on a user prompt: compact intuition
-// pointers (ADR-0016) followed by a one-shot distillation boundary nudge
-// (ADR-0027) when a work boundary is detected. Either half may be empty.
+// pointers followed by a one-shot distillation boundary nudge
+// when a work boundary is detected. Either half may be empty.
 func HookUserPrompt(agentsDir string, p HookPayload, now time.Time) string {
 	a := hookAgent(agentsDir, p.Cwd)
 	project := ""
@@ -372,7 +372,7 @@ func HookUserPrompt(agentsDir string, p HookPayload, now time.Time) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// --- distillation boundary nudge (ADR-0027) ---
+// --- distillation boundary nudge ---
 
 const (
 	distillThreshold  = 8 // prompts into a session before a staleness nudge

@@ -47,7 +47,7 @@ func outboundBash(cwd, c string) HookPayload {
 func TestGate_OutboundSurfaces(t *testing.T) {
 	dir, pm, dev := outboundPool(t, outboundTestConfig)
 	mcp := "mcp__tracker__createIssue"
-	// A tagged peer is asked only with a usable summary (ticket 41).
+	// A tagged peer is asked only with a usable summary.
 	writeSummary(t, pm, "sess-1", outboundSummary)
 
 	cases := []struct {

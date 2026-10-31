@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// kb_needs_confirm.go — headless and delegated promotion (ADR-0067; spec
-// decision 26).
+// kb_needs_confirm.go — headless and delegated promotion.
 //
 // A peer with no human at the prompt (`kb finish --headless`, dispatch depth
 // set and non-zero, a distil run, or in-session delegated work, which the

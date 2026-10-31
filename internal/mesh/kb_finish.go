@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// kb_finish.go — the atomic finish (ADR-0067; spec decisions 21, 22, 23).
+// kb_finish.go — the atomic finish.
 //
 // A KB session lands on main through `kb finish`. A candidates-only branch is
 // a proposal: it fast-forwards main as it always has, with no ledger change.
@@ -22,7 +22,7 @@ import (
 // fast-forwards main, writes the ledger and commits `Confirm: <Intent line>`
 // as one operation: when the ledger write or the commit fails, main is reset
 // to its pre-merge ref and the branch and worktree stay, so main is never left
-// merged and unconfirmed (the failure the ticket 14 prototype hit).
+// merged and unconfirmed (a failure seen in practice).
 //
 // The ledger trusts the gate: the signature leaves no trace except this commit, so
 // a promotion is refused where the gate could not have asked (KBTrustGuard).
@@ -92,7 +92,7 @@ func kbFinishStage(stage string) error {
 // the promotion ask to a human: the call runs under a different harness than
 // the one the workspace is wired for (that harness's gate never saw it); an
 // opencode peer without the V2 plugin or without opencode's ask rules
-// (ADR-0075; V1 has no pre-tool hook at all); a Claude Code peer whose
+// (V1 has no pre-tool hook at all); a Claude Code peer whose
 // PreToolUse gate is not wired or whose wiring is stamped below
 // PromotionAskWiringVersion. nil means the ledger may trust the gate.
 // `kb finish`, `kb confirm` and `state set` run it before touching main.

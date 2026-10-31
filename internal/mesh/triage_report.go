@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// triage_report.go — the triage report (ADR-0072; spec decision 57). An agent
+// triage_report.go — the triage report. An agent
 // writes it at TriageReportPath beside the worksheet: an optional
 // `Consulted:` section first, quoting each requester peer consulted
 // in-session, then one line per request:
@@ -394,7 +394,7 @@ func ResolveTriageRef(agentsDir, ref string) (TriageRef, error) {
 	return unresolved("unknown ref kind")
 }
 
-// --- incremental (spec decision 62) ---
+// --- incremental ---
 
 const triageSkippedNote = "stands, signals unchanged"
 
@@ -474,7 +474,7 @@ func worksheetSignalHashes(path string) map[string]string {
 	return out
 }
 
-// --- doctor (spec decision 63) ---
+// --- doctor ---
 
 // LatestTriageReport is the newest dated report (<date>.md, worksheets
 // excluded) in the peer's triage directory; ok=false when there is none

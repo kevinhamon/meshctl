@@ -8,8 +8,8 @@ import (
 )
 
 // The pool directory is resolved once per pool root; every runtime path is
-// built from that result. A fresh root resolves to the visible `pool/`
-// (ADR-0066); a root still carrying the hidden legacy directory resolves to it
+// built from that result. A fresh root resolves to the visible `pool/`;
+// a root still carrying the hidden legacy directory resolves to it
 // until `pool upgrade` moves it.
 func TestPoolDir_ResolvesEveryRuntimePath(t *testing.T) {
 	for _, layout := range []struct {

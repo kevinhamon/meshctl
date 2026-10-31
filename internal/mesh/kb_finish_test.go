@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// kb_finish_test.go — the atomic finish (ADR-0067; spec decisions 21, 22,
-// 23): a promotion lands on main together with its ledger lines and a
+// kb_finish_test.go — the atomic finish: a promotion lands on main together with its ledger lines and a
 // `Confirm: <Intent line>` commit, or main does not move.
 
 var finishNow = time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
@@ -115,7 +114,7 @@ func TestKBFinish_PromotionWritesLedgerAndConfirmCommit(t *testing.T) {
 }
 
 // kbFinishConfirmed finishes a session that promotes, with a usable summary
-// (a promotion needs one since the atomic finish, ADR-0067).
+// (a promotion needs one since the atomic finish).
 func kbFinishConfirmed(t *testing.T, dir string, a *Agent, session string) error {
 	t.Helper()
 	gitIdentity(t)

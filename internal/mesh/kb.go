@@ -13,7 +13,7 @@ import (
 )
 
 // ErrKBConflict signals that a KB merge hit a conflict a headless run must not
-// auto-resolve (ADR-0011): the branch + worktree are left intact and the caller
+// auto-resolve: the branch + worktree are left intact and the caller
 // sets the driving request to needs-human.
 var ErrKBConflict = errors.New("kb merge conflict — needs human")
 
@@ -23,7 +23,7 @@ func worktreePath(agentsDir, agent, session string) string {
 }
 
 // KBBranchPrefix namespaces KB session branches in the agent's repo, beside
-// WorkBranchPrefix (spec: shared understanding, decision 17; ADR-0067).
+// WorkBranchPrefix.
 // LegacyKBBranchPrefix is the form earlier meshctl versions created; finish,
 // --abort and the listing still accept it, and hygiene renames it once no
 // worktree references it.
@@ -73,7 +73,7 @@ func gitRefExists(dir, branch string) bool {
 }
 
 // KBHolder returns the live session holding the KB worktree of a session id
-// (one worktree, one session: spec decision 6), or nil when no worktree exists
+// (one worktree, one session), or nil when no worktree exists
 // or no live session is registered under that id.
 func KBHolder(agentsDir string, agent *Agent, session string, now time.Time) *Session {
 	if !dirExists(worktreePath(agentsDir, agent.Name, session)) {
@@ -184,7 +184,7 @@ func canonicalPath(p string) string {
 // write and points the session at it. Returns the worktree path. Re-running it
 // from the session that holds the worktree is idempotent; when another live
 // session holds it, begin refuses and creates nothing, so a confirmation
-// signed in one session never covers edits from another (spec decision 6).
+// signed in one session never covers edits from another.
 // The caller's identity is the harness session id, resolved as claims resolve
 // it (ResolveAgentSessionID).
 func KBBegin(agentsDir string, agent *Agent, session string, now time.Time) (string, error) {

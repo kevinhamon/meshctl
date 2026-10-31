@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// cron.go — scheduled jobs in plain words (console layout spec, C11). The
+// cron.go — scheduled jobs in plain words. The
 // harness reports a job's schedule as a five-field cron expression in local
 // time; DescribeCron turns the common shapes into a phrase and gives up (ok
 // false) on anything else, which the page then shows raw.

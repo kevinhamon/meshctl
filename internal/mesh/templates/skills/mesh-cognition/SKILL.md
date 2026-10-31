@@ -8,7 +8,7 @@ description: How this agent maintains its own knowledge base and learns over tim
 Coordination (intake) is how agents *talk*. **Cognition** is how one agent
 organizes what it knows and recognizes what it has seen — on the same file
 substrate, no new store. This skill is the operative trigger; the **authoritative
-full spec is `../__POOL_DIR__/doctrine/agent-comms.md` §Knowledge & Memory (meshctl ADR-0014–0018)**.
+full spec is `../__POOL_DIR__/doctrine/agent-comms.md` §Knowledge & Memory**.
 When this skill and that section disagree, that section wins — read it.
 
 Your KB is your own git-tracked `knowledge/` tree, in **two tiers**:
@@ -216,14 +216,14 @@ Guardrails: **review gate** (only the human confirms before a candidate becomes 
 after the confirmation round; you never confirm your own writes) · **KB is authoritative**
 (distill *into* it) · **all writes via `kb begin`/`kb finish`** (git-tracked, recoverable).
 
-**Standing rules → gated (meshctl ADR-0062).** A "never / do not repeat / user directive" note gets
+**Standing rules → gated.** A "never / do not repeat / user directive" note gets
 `rule: "<one line>"` + `triggers: ['<case-insensitive Go regex on the action text>']`
 frontmatter, so `meshctl hook pre-tool-use` denies the first matching tool call with the
 rule. Match the command/path/MCP args, not the topic; allow flags between words
 (`git\b.*\bremote\b`). Verify by piping a sample payload into the hook (match → deny,
 unrelated → empty). Chat-only rules stay prose. Every new standing rule is written this way.
 
-## Cross-agent learning capture on dispatch return (meshctl ADR-0018)
+## Cross-agent learning capture on dispatch return
 
 A consulted peer (headless `meshctl ask`, or `--in-session` as a subagent) may not
 commit, so anything the answering peer learned lives only in the answered `intake/`
@@ -242,7 +242,7 @@ org-level pattern → the peer that owns architecture). It lands as a candidate 
 review gate holds; the owner proposes it in its next interactive session, where the
 human confirms it.
 
-**Delegated work is different** (`--in-session --work`, meshctl ADR-0063): the peer runs
+**Delegated work is different** (`--in-session --work`): the peer runs
 write-capable, so it commits its *own* learning through `kb begin|finish --agent <peer>`
 and lists it in its receipt. Don't re-file it — relay the receipt. When **you** are the
 delegated peer, do the same: KB writes via `--agent <you>`, commits in your workspace (or
@@ -250,7 +250,7 @@ the worktree the brief names), a standalone receipt at the end. A promotion or a
 outbound write ends in `needs-confirm` with the round and your summary path — you never
 relay a confirmation.
 
-## Closing an intake exchange (meshctl ADR-0043)
+## Closing an intake exchange
 
 Intake is an **ephemeral, git-ignored discussion** — the record is the KB, not the
 inbox. To close a request: write the outcome back, let the requester read it, **distill
@@ -261,7 +261,7 @@ experience note; `fyi`/routine → often nothing — then `meshctl inbox archive
 `--answered`). The coordination audit lives in `dispatch.log`.
 A triage-closed request owes no distillation: its residue already lives at the verdict's ref.
 
-## Intake triage — closing what no longer stands (meshctl ADR-0072)
+## Intake triage — closing what no longer stands
 
 `meshctl inbox triage` writes a worksheet of signals over your open requests; you judge
 each and write the report beside it, one line per request:
@@ -276,7 +276,7 @@ Read the report to the human as a confirmation round, item by item, then
 `meshctl inbox triage apply --report <file> <id>...` (at most five) closes what they
 confirmed.
 
-## Session handoff — resume point (meshctl ADR-0017)
+## Session handoff — resume point
 
 Keep an authoritative, git-tracked `knowledge/handoff.md`: *where we are + the next
 concrete step*. Read at start (auto-injected). Write it at session end, or when the
@@ -319,7 +319,7 @@ fences, which the console renders. Put anything that must never leave the machin
 `docs/local/` (ignored). If `agent.yaml` lists other folders under `docs:`, those count too.
 A document is for reading, not knowledge: distill what should last into `candidates/`.
 
-## Repo hygiene — knowledge is only safe once pushed (meshctl ADR-0039)
+## Repo hygiene — knowledge is only safe once pushed
 
 Your workspace must be its own git repo **with a remote**. `knowledge/` (KB + handoff)
 is durable only once committed **and pushed** — otherwise it dies with this machine.

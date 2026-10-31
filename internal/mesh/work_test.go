@@ -255,7 +255,7 @@ func TestHygiene_WorkWorktrees(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitCommitAll(t, wt, "work")
-	// Spec decision 54: the branch-age warning is 14 days, not 7.
+	// The branch-age warning is 14 days, not 7.
 	if got := find(time.Now().Add(8 * 24 * time.Hour)); len(got) != 0 {
 		t.Fatalf("unmerged work younger than 14 days must be left alone: %+v", got)
 	}

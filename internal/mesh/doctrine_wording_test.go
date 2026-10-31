@@ -3,13 +3,14 @@ package mesh
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 )
 
 // A pool at the previous doctrine version: `pool upgrade --check` shows the
-// doctrine change as a diff (spec decision 67), writes nothing, and the apply
+// doctrine change as a diff, writes nothing, and the apply
 // commits `doctrine: upgrade to <version>`.
 func TestPoolUpgradeCheck_ShowsDoctrineDiff(t *testing.T) {
 	dir, _ := poolCommitFixture(t)
@@ -88,8 +89,22 @@ func templateTexts(t *testing.T) map[string]string {
 	return out
 }
 
+// The standing orders cite no meshctl ADRs: a pool's peers and humans cannot
+// read them, so each rule carries its reason inline. The one ADR number left
+// is the ledger example's refs column, which stands for the pool's own KB.
+func TestTemplateStandingOrders_NoMeshctlADRRefs(t *testing.T) {
+	adr := regexp.MustCompile(`ADR-[0-9]{4}`)
+	for name, text := range templateTexts(t) {
+		for i, line := range strings.Split(text, "\n") {
+			if adr.MatchString(line) && !strings.Contains(line, "| ADR-0008, R-12 |") {
+				t.Errorf("%s:%d cites an ADR: %s", name, i+1, line)
+			}
+		}
+	}
+}
+
 // The scaffolded standing orders carry the align-before-act order, the
-// summary-first KB and outbound flow, and the pending-work order (spec 64).
+// summary-first KB and outbound flow, and the pending-work order.
 func TestTemplateStandingOrders_AlignBeforeAct(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)
@@ -125,7 +140,7 @@ func TestTemplateStandingOrders_AlignBeforeAct(t *testing.T) {
 	}
 }
 
-// The mesh-cognition skill matches the gates (spec 65).
+// The mesh-cognition skill matches the gates.
 func TestCognitionSkill_AlignStepAndConfirmationRound(t *testing.T) {
 	skill, err := renderedSkill(meshRoot(t), "mesh-cognition")
 	if err != nil {
@@ -156,7 +171,7 @@ func TestCognitionSkill_AlignStepAndConfirmationRound(t *testing.T) {
 }
 
 // Doctrine and templates name the human as the only approver and agree with
-// the outbound and delegated-work gates (spec 66).
+// the outbound and delegated-work gates.
 func TestDoctrine_HumanConfirmsAndOutboundIsGateAsked(t *testing.T) {
 	for name, text := range templateTexts(t) {
 		if strings.Contains(text, "or the owning agent") || strings.Contains(text, "human/the owning agent") {
@@ -184,8 +199,8 @@ func TestDoctrine_HumanConfirmsAndOutboundIsGateAsked(t *testing.T) {
 }
 
 // Every `meshctl state set` example shows the summary it is gated on
-// (ticket 36: the gate denies the bare form), and the triage grammar says
-// which verdicts carry a ref (ticket 46).
+// (the gate denies the bare form), and the triage grammar says
+// which verdicts carry a ref.
 func TestTemplates_StateSetAndTriageGrammar(t *testing.T) {
 	texts := templateTexts(t)
 	texts["consolidate"] = ConsolidateReport{Agent: "x", StateMissing: true,
@@ -216,7 +231,7 @@ func TestTemplates_StateSetAndTriageGrammar(t *testing.T) {
 }
 
 // The handoff template has a place for the deferral line, and a filled
-// handoff carrying one lints clean (ADR-0071).
+// handoff carrying one lints clean.
 func TestHandoffTemplate_DeferredLine(t *testing.T) {
 	if !strings.Contains(HandoffTemplate, "Deferred: <ids>") {
 		t.Fatalf("handoff template has no Deferred line:\n%s", HandoffTemplate)
@@ -249,7 +264,7 @@ func TestTemplates_ConfirmNotApprove(t *testing.T) {
 }
 
 // "check intake" shows the queue and stops; work runs in the human's order
-// by id; decisions are asked as a decision round (ADR-0073 C1, C2, C4).
+// by id; decisions are asked as a decision round.
 func TestStandingOrders_IntakeOrderAndDecisionRound(t *testing.T) {
 	texts := templateTexts(t)
 	for name, text := range texts {

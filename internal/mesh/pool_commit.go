@@ -12,17 +12,17 @@ import (
 	"time"
 )
 
-// pool_commit.go — the pool repo's history is the audit trail (ADR-0066, spec
-// decision 12). After the human confirms an agent's write under pool/ (the
-// gate asked, the tool ran), the PostToolUse hook commits exactly the files
-// that write touched, with the user's git identity (none is set here) and a
-// subject naming what changed: `glossary: <term>`, `doctrine: <section>`,
-// `config: <key>`. Agents never change git state in pool/ (the gate denies it); meshctl's
-// own writes commit the same way (`doctrine: upgrade to <version>`). Ignored
-// runtime state is never staged.
+// pool_commit.go — the pool repo's history is the audit trail. After the human
+// confirms an agent's write under pool/ (the gate asked, the tool ran), the
+// PostToolUse hook commits exactly the files that write touched, with the
+// user's git identity (none is set here) and a subject naming what changed:
+// `glossary: <term>`, `doctrine: <section>`, `config: <key>`. Agents never
+// change git state in pool/ (the gate denies it); meshctl's own writes commit
+// the same way (`doctrine: upgrade to <version>`). Ignored runtime state is
+// never staged.
 
 // doctrineUpgradeSubject is the subject of the commit `pool upgrade` makes when
-// it rewrites stamped doctrine (spec decision 67).
+// it rewrites stamped doctrine.
 func doctrineUpgradeSubject(version string) string { return "doctrine: upgrade to " + version }
 
 // poolToolFailed reports whether a PostToolUse tool_response says the call did
@@ -329,8 +329,8 @@ func commitDoctrineUpgrade(poolRoot string, written []string) error {
 const SessionAckFileExt = ".acks"
 
 // SessionAckPath is the per-session acknowledgement file: one hash per line,
-// each a batch the human already confirmed in that session (ADR-0068 decision
-// 37 uses the summary hash). Session-scoped; hygiene removes old ones.
+// each a batch the human already confirmed in that session (keyed by
+// the summary hash). Session-scoped; hygiene removes old ones.
 func SessionAckPath(agentDir, session string) string {
 	if session == "" {
 		session = "no-session"

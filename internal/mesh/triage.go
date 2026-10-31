@@ -15,14 +15,13 @@ import (
 	"time"
 )
 
-// triage.go — the intake triage pass, worksheet half (ADR-0072; spec
-// decisions 55, 56). `meshctl inbox triage` without a peer, from a hub,
-// prints pool-wide open counts and a walk order (oldest stale first) and
-// judges nothing. With a peer it gathers, per `pending` or `in-progress`
-// request, the cheap pool-local signals an agent needs to judge whether the
-// request still stands, and writes them as a worksheet under the peer's
-// runtime memory. meshctl lists; the agent judges and writes the triage
-// report (ticket 46). Nothing outside the pool is queried.
+// triage.go — the intake triage pass, worksheet half. `meshctl inbox triage`
+// without a peer, from a hub, prints pool-wide open counts and a walk order
+// (oldest stale first) and judges nothing. With a peer it gathers, per
+// `pending` or `in-progress` request, the cheap pool-local signals an agent
+// needs to judge whether the request still stands, and writes them as a
+// worksheet under the peer's runtime memory. meshctl lists; the agent judges
+// and writes the triage report. Nothing outside the pool is queried.
 
 const (
 	// TriageDir holds a peer's triage worksheets and reports:
@@ -61,7 +60,7 @@ func TriageOpen(status string) bool {
 	return s == StatusPending || s == StatusInProgress
 }
 
-// --- refusal (cross-cutting decision 68) ---
+// --- refusal (no human at the prompt) ---
 
 // TriageMode is the in-session mode of the calling session, as the hook
 // flags carry it: InSession with Work is a hub doing the peer's delegated
@@ -345,7 +344,7 @@ func BuildTriageWorksheet(agentsDir string, peer *Agent, now time.Time) (*Triage
 		it.Siblings = pool.siblings(r)
 		it.Redirects = pool.redirects(r)
 		it.Mentions, it.RequesterPeer = pool.mentions(r)
-		// Incremental (spec decision 62): latest verdict `stands` and the
+		// Incremental: latest verdict `stands` and the
 		// signals unchanged since that pass — nothing new to judge.
 		if h := it.SignalHash(); prior[r.ID] != "" && prior[r.ID] == h {
 			ws.Skipped = append(ws.Skipped, TriageSkip{ID: r.ID, Hash: h})

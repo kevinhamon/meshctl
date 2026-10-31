@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// pool_repo.go — the pool repo nag (ADR-0066, spec decision 13). ADR-0039 gave
-// each peer a repo and a persistent reminder until a remote exists; the pool
+// pool_repo.go — the pool repo nag. Each peer has
+// a repo and a persistent reminder until a remote exists; the pool
 // directory is a repo too and gets the same treatment, one step further: the
 // human is nagged while pool/ is not a repository, has no remote, is dirty,
 // or is ahead of its remote. The line is recomputed on every call and
@@ -67,7 +67,7 @@ func PoolRepoNag(poolRoot string) string {
 	dir := PoolDir(poolRoot)
 	switch {
 	case !st.IsRepo:
-		return fmt.Sprintf("pool directory %s is not a git repository — run `meshctl pool upgrade` to make it one (ADR-0066); "+
+		return fmt.Sprintf("pool directory %s is not a git repository — run `meshctl pool upgrade` to make it one; "+
 			"the pool's glossary and doctrine are unversioned until then", name)
 	case !st.HasRemote:
 		return fmt.Sprintf("pool directory %s has no git remote — create one, then `git -C %s remote add origin <url>` and "+

@@ -2,7 +2,7 @@ package mesh
 
 import "strings"
 
-// parity.go — what works on which harness (ADR-0075). The table is rendered
+// parity.go — what works on which harness. The table is rendered
 // into the README between the parity markers, and a test in cmd/meshctl walks
 // the command tree: every meshctl command is either covered by a row or listed
 // as harness-neutral, and the README block must match ParityMarkdown. A new

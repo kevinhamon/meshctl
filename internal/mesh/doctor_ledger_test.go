@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Doctor and the ledger (ADR-0067, spec decision 33): a ledger line with no
+// Doctor and the ledger: a ledger line with no
 // matching file or section, an accepted ADR that is unconfirmed, and the count
 // of unconfirmed current-tier entries per peer.
 

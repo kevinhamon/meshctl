@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// triage_apply.go — `meshctl inbox triage apply --report <file> <id>...`
-// (ADR-0072; spec decisions 59–61, cross-cutting 70). After the human has
+// triage_apply.go — `meshctl inbox triage apply --report <file> <id>...`.
+// After the human has
 // confirmed the report item by item in the confirmation round, apply closes
 // the confirmed requests through the respond path, so claim rules and
 // read-back work unchanged: `superseded` and `done` set `filed`, `withdrawn`
@@ -230,7 +230,7 @@ func gateTriageApply(agentsDir string, p HookPayload) GateDecision {
 	}
 	if call.report == "" {
 		return deny("mesh: `inbox triage apply` closes requests on the triage report's word — pass it: `--report " + where +
-			"`, after reading its lines to the human in the confirmation round (ADR-0072).")
+			"`, after reading its lines to the human in the confirmation round.")
 	}
 	path := resolveShellPath(call.report, p.Cwd)
 	rep, err := ReadTriageReport(path)

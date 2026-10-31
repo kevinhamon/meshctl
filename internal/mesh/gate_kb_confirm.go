@@ -4,14 +4,13 @@ import (
 	"fmt"
 )
 
-// gate_kb_confirm.go — the ask at `meshctl kb confirm` (ADR-0070; spec
-// decision 46). Bulk confirmation is a promotion of existing entries, so it
-// meets the `kb finish` ask: the report is the summary, and the ask text is
-// the report's Intent line and its lines for exactly the named paths, then
-// the deny-if-not-read line. No --report, an unreadable or malformed report,
-// more than KBConfirmMax paths, or no human at the prompt is a deny. The
-// command enforces the same refusals (KBConfirm); the gate is where the human
-// reads the verdicts.
+// gate_kb_confirm.go — the ask at `meshctl kb confirm`. Bulk confirmation is a
+// promotion of existing entries, so it meets the `kb finish` ask: the report is
+// the summary, and the ask text is the report's Intent line and its lines for
+// exactly the named paths, then the deny-if-not-read line. No --report, an
+// unreadable or malformed report, more than KBConfirmMax paths, or no human at
+// the prompt is a deny. The command enforces the same refusals (KBConfirm); the
+// gate is where the human reads the verdicts.
 
 // kbConfirmCall is a parsed `meshctl kb confirm` invocation.
 type kbConfirmCall struct {
@@ -69,7 +68,7 @@ func gateKBConfirm(agentsDir string, p HookPayload) GateDecision {
 	if call.report == "" {
 		return deny("`kb confirm` needs `--report <file>`: the reconcile report holding these entries' verdicts (" +
 			ReconcileDir(a.Dir()) + "/<date>.md). Read the round out in chat, then re-run with the report: the gate asks the " +
-			"human with its lines for these paths (ADR-0070).")
+			"human with its lines for these paths.")
 	}
 	repPath := resolveShellPath(call.report, p.Cwd)
 	r, err := ReadReconcileReport(repPath)

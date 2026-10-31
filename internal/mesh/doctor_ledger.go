@@ -8,11 +8,10 @@ import (
 	"strings"
 )
 
-// doctor_ledger.go — doctor's view of the confirmation ledger (ADR-0067, spec
-// decision 33). Warnings only, never an auto-fix: a ledger line with no
-// matching file or section, an accepted ADR that is unconfirmed (ADR status
-// is decision state, not confirmation), and the count of unconfirmed
-// current-tier entries.
+// doctor_ledger.go — doctor's view of the confirmation ledger. Warnings only,
+// never an auto-fix: a ledger line with no matching file or section, an
+// accepted ADR that is unconfirmed (ADR status is decision state, not
+// confirmation), and the count of unconfirmed current-tier entries.
 
 // UnconfirmedCurrentEntries lists a peer's current-tier entries that do not
 // match its ledger, knowledge-relative and sorted: whole files, or

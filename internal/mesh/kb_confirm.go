@@ -9,12 +9,12 @@ import (
 	"time"
 )
 
-// kb_confirm.go — bulk confirmation from a reconcile report (ADR-0070; spec
-// decision 46). `meshctl kb confirm <path>... --report <file>` runs on the
-// peer's main checkout with no KB branch: it writes the ledger lines for the
-// named entries and commits them as `Confirm: <report Intent>` in one step
-// (ADR-0067 atomicity). The gate asks on it like `kb finish`, with the
-// report's lines for the named paths as the ask text (gate_kb_confirm.go).
+// kb_confirm.go — bulk confirmation from a reconcile report. `meshctl kb
+// confirm <path>... --report <file>` runs on the peer's main checkout with no
+// KB branch: it writes the ledger lines for the named entries and commits them
+// as `Confirm: <report Intent>` in one step (atomically). The gate asks on it
+// like `kb finish`, with the report's lines for the named paths as the ask text
+// (gate_kb_confirm.go).
 //
 // A unit is `<path>` (a whole file; for a sectioned file every section) or
 // `<path>#<slug>` (one section of a sectioned file). At most KBConfirmMax
@@ -24,7 +24,7 @@ import (
 // pending` once the owner's ledger confirms the counterpart. Every refusal is
 // computed before anything is written.
 
-// KBConfirmMax caps the units of one `kb confirm` call (spec decision 70).
+// KBConfirmMax caps the units of one `kb confirm` call.
 const KBConfirmMax = 5
 
 // ErrKBConfirmRefused: `kb confirm` refused before writing anything.
@@ -138,7 +138,7 @@ func kbConfirmVerdict(agentsDir, id string, l ReconcileReportLine, found, accept
 			return id + " is a conflict pending its owner " + l.OwnerPending + at + " — refused until " + l.OwnerPending +
 				"'s ledger confirms " + l.Counterpart
 		}
-		return id + " is a conflict with " + l.Counterpart + at + " — resolve it (ADR-0069 outcomes), re-verdict, then confirm"
+		return id + " is a conflict with " + l.Counterpart + at + " — resolve it (fix this entry, correct the owner, or replace it with a mesh:// reference), re-verdict, then confirm"
 	}
 	return id + ": verdict " + l.Verdict + at + " cannot be confirmed"
 }

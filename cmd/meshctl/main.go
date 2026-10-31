@@ -186,7 +186,7 @@ func poolCmd() *cobra.Command {
 func poolMigrateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "migrate",
-		Short: "Reconcile a legacy pool layout to the consolidated pool directory (ADR-0038)",
+		Short: "Reconcile a legacy pool layout to the consolidated pool directory",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {
@@ -339,8 +339,8 @@ func identityCmd() *cobra.Command {
 	return c
 }
 
-// bootstrapCmd scaffolds the mesh steward (onboarding hub) into the current pool
-// (ADR-0035). Idempotent; use when a pool was created with --no-steward or to add
+// bootstrapCmd scaffolds the mesh steward (onboarding hub) into the current pool.
+// Idempotent; use when a pool was created with --no-steward or to add
 // the hub to a pre-existing pool.
 func bootstrapCmd() *cobra.Command {
 	var harness string
@@ -466,7 +466,7 @@ func poolInitCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			now := time.Now()
 			// Target the given path, else the CURRENT directory. No path never
-			// falls back to ~/agents (ADR-0037) — bare `pool init` means "here".
+			// falls back to ~/agents — bare `pool init` means "here".
 			target := "."
 			if len(args) == 1 {
 				target = args[0]
@@ -537,7 +537,7 @@ func poolUpgradeCmd() *cobra.Command {
 			"  0. pool directory — moves a legacy hidden pool directory to pool/, makes it a git repo on main with an\n" +
 			"     ignore file for runtime state, writes pool/config.yaml (human-owned settings) and moves any `tools`\n" +
 			"     still in pool/pool.yaml into it, refreshes pool/members.yaml (the agents and their remotes, for\n" +
-			"     `pool clone`), and commits with your git identity (ADR-0066, ADR-0081).\n" +
+			"     `pool clone`), and commits with your git identity.\n" +
 			"  1. doctrine — replaces doctrine files unchanged since meshctl wrote them. A file edited locally is\n" +
 			"     left alone: the new version is written beside it as <file>.upstream for a manual merge, and the\n" +
 			"     command exits non-zero. --force overwrites edited files after backing each up to <file>.bak-<timestamp>.\n" +
@@ -798,7 +798,7 @@ func printUpgradePlan(plan mesh.PoolUpgradePlan, doctrineOnly bool) {
 	for _, w := range plan.Warnings {
 		fmt.Println("⚠ " + w)
 	}
-	// Pool repo nag (ADR-0066): last, so it is the line the human sees. The
+	// Pool repo nag: last, so it is the line the human sees. The
 	// apply path reports it through hygiene's manual items, in the same spot.
 	if nag := mesh.PoolRepoNag(plan.PoolRoot); nag != "" {
 		fmt.Println("⚠ " + nag)
@@ -1411,7 +1411,7 @@ func inboxCmd() *cobra.Command {
 	var archiveAnswered, archiveClosed, archiveForce bool
 	archive := &cobra.Command{
 		Use:   "archive [id]",
-		Short: "Archive a closed request out of the inbox (distill its residue to the KB FIRST) — ADR-0043",
+		Short: "Archive a closed request out of the inbox (distill its residue to the KB FIRST)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
@@ -1555,7 +1555,7 @@ func requestPathByID(a *mesh.Agent, id string) (string, error) {
 
 // --- kb ---
 
-// memoryCmd — the disposable, generated knowledge index (ADR-0014/0015).
+// memoryCmd — the disposable, generated knowledge index.
 func memoryCmd() *cobra.Command {
 	var agent string
 	var asJSON bool
@@ -1701,7 +1701,7 @@ func truncateCLI(s string, n int) string {
 	return strings.TrimSpace(s[:n]) + "…"
 }
 
-// intuitionCmd — the owned intuition contract over the episodic engine (ADR-0016).
+// intuitionCmd — the owned intuition contract over the episodic engine.
 func intuitionCmd() *cobra.Command {
 	var agent string
 	var limit int
@@ -1745,7 +1745,7 @@ func intuitionCmd() *cobra.Command {
 	return cmd
 }
 
-// handoffCmd — the resumable session handoff (ADR-0017): where we are + next step.
+// handoffCmd — the resumable session handoff: where we are + next step.
 func handoffCmd() *cobra.Command {
 	var agent string
 	var force bool
@@ -1900,7 +1900,7 @@ func stateCmd() *cobra.Command {
 			"  - none\n" +
 			"  EOF\n\n" +
 			"A body with a missing section, a leftover placeholder or over budget is refused (--force overrides).\n\n" +
-			"The digest is current-tier knowledge, so `state set` is a promotion (ADR-0067): the gate asks the human\n" +
+			"The digest is current-tier knowledge, so `state set` is a promotion: the gate asks the human\n" +
 			"with your confirmation summary, and the command writes one ledger hash per digest section and commits\n" +
 			"state.md with the ledger as `Confirm: <Intent line>`. No --summary-file, or no human at the prompt\n" +
 			"(dispatch depth, a distil run), is refused.",
@@ -2063,7 +2063,7 @@ func hookCmd() *cobra.Command {
 				_ = mesh.HarnessForPayload(dir, p, harness).EmitGate(os.Stdout, mesh.GateUnavailable(perr.Error()))
 				return nil
 			}
-			// An opencode child session is mapped to its peer here (ADR-0076);
+			// An opencode child session is mapped to its peer here;
 			// a mesh- subagent that cannot be mapped is refused.
 			if p, perr = mesh.ResolvePeerSubagent(dir, p); perr != nil {
 				_ = mesh.HarnessForPayload(dir, p, harness).EmitGate(os.Stdout, mesh.GateUnavailable(perr.Error()))
@@ -2075,7 +2075,7 @@ func hookCmd() *cobra.Command {
 	}
 
 	// PostToolUse runs after a gated call on the same matcher. No output ever:
-	// it is the seam where pool commits (ADR-0066) and outbound acks (ADR-0068)
+	// it is the seam where pool commits and outbound acks
 	// record what the gate let through. Fail-open, like the advisory hooks.
 	postToolUse := &cobra.Command{
 		Use:   "post-tool-use",
@@ -2096,7 +2096,7 @@ func hookCmd() *cobra.Command {
 	}
 
 	// The status line is not a hook event but rides the same wiring: Claude
-	// Code runs it with its own stdin JSON and shows stdout verbatim (ADR-0074).
+	// Code runs it with its own stdin JSON and shows stdout verbatim.
 	statusLine := &cobra.Command{
 		Use:   "status-line",
 		Short: "Status line: the agent and the pending work waiting on you, one line",
@@ -2128,7 +2128,7 @@ decisions not landed in the docs they update or in the state digest, a missing o
 over-budget state.md, candidates older than 14 days, handoff problems — in the order to
 work it off. Nothing is changed; the agent does the consolidation in a kb begin/finish
 worktree and rewrites the digest with "meshctl state set --summary-file <summary>".
-reconcile: the reconciliation pass (ADR-0070) — the walk order, or one peer's worksheet.
+reconcile: the reconciliation pass — the walk order, or one peer's worksheet.
 confirm: bulk confirmation of reviewed entries from a reconcile report, five at a time.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
@@ -2226,7 +2226,7 @@ confirm: bulk confirmation of reviewed entries from a reconcile report, five at 
 	cmd.PersistentFlags().BoolVar(&abort, "abort", false, "discard the branch + worktree (finish)")
 	cmd.PersistentFlags().BoolVar(&headless, "headless", false, "no human at the prompt: never auto-resolve conflicts; a promotion parks as needs-confirm (finish)")
 	cmd.PersistentFlags().StringVar(&session, "session", "", "explicit KB session id (finish auto-detects the sole worktree if unset)")
-	// Read by the gate (the promotion ask) and by finish itself (the Confirm: commit, ADR-0067); candidates-only finishes ignore it.
+	// Read by the gate (the promotion ask) and by finish itself (the Confirm: commit); candidates-only finishes ignore it.
 	cmd.PersistentFlags().StringVar(&summaryFile, "summary-file", "", "your confirmation summary, <you>/.memory/confirm/<session>.md (finish; required when it promotes)")
 	cmd.PersistentFlags().BoolVar(&asJSON, "json", false, "machine-readable report (consolidate)")
 	return cmd

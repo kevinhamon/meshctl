@@ -8,13 +8,13 @@ import (
 	"time"
 )
 
-// recall_pool.go — the pool glossary as a recall source (ADR-0066, spec
-// decision 15). Every peer sees the one shared vocabulary in recall as
-// current-tier hits via the reserved owner, scored exactly like its own
-// current tier (term name as the topic, no refs prior) so a term and the
-// peer's own entry on the same subject rank side by side. Confirmed by
-// construction (pool writes are gate-asked and committed by meshctl) unless
-// the pool repo is dirty, which means something there has not been committed.
+// recall_pool.go — the pool glossary as a recall source. Every peer sees the
+// one shared vocabulary in recall as current-tier hits via the reserved owner,
+// scored exactly like its own current tier (term name as the topic, no refs
+// prior) so a term and the peer's own entry on the same subject rank side by
+// side. Confirmed by construction (pool writes are gate-asked and committed by
+// meshctl) unless the pool repo is dirty, which means something there has not
+// been committed.
 
 // poolGlossaryHits indexes `**Term**:` lines of the pool glossary against the
 // query tokens. An empty query lists every term at score 0, as own topics do.

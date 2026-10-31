@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// --- delegated work (ADR-0063) ---
+// --- delegated work ---
 
 func workCmd() *cobra.Command {
 	c := &cobra.Command{

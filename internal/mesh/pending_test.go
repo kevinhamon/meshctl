@@ -10,7 +10,7 @@ import (
 )
 
 // pending_test.go — the session-start pending-work block and `meshctl
-// pending` (ADR-0071; spec decisions 50–54).
+// pending`.
 
 // pendingLine returns the block's line that opens with the given label, "".
 func pendingLine(block, label string) string {
@@ -120,7 +120,7 @@ func TestHook_SessionStart_PendingBlockFiveLinesInOrder(t *testing.T) {
 		}
 	}
 	if strings.Contains(in, "inbox next") {
-		t.Errorf("the intake line must not claim the oldest request (ADR-0073): %s", in)
+		t.Errorf("the intake line must not claim the oldest request: %s", in)
 	}
 	if strings.Contains(in, "triage signals") {
 		t.Errorf("no signals ⇒ no triage clause: %s", in)
@@ -368,7 +368,7 @@ func TestPending_AllPrintsPerPeerSkippingEmpty(t *testing.T) {
 	}
 }
 
-// Doctor's branch-age warning (spec decision 54): 14 days, not 7, for
+// Doctor's branch-age warning: 14 days, not 7, for
 // delegated-work and KB branches; an unmerged KB branch is never reaped.
 func TestPoolHygiene_KBBranchAgeIs14Days(t *testing.T) {
 	gitIdentity(t)

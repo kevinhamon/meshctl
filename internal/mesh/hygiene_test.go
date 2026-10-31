@@ -135,8 +135,8 @@ func TestPoolHygiene_OrphanWorktreeRemoved(t *testing.T) {
 }
 
 // TestPoolHygiene_LegacyKBBranchRenamed: a legacy session/<id> branch that no
-// worktree references is a fixable item; the fix renames it to mesh/kb/<id>
-// (spec decision 17). One still checked out in a worktree is left to kb finish.
+// worktree references is a fixable item; the fix renames it to mesh/kb/<id>.
+// One still checked out in a worktree is left to kb finish.
 func TestPoolHygiene_LegacyKBBranchRenamed(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)

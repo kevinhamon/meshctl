@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// kbReconcileCmd is `meshctl kb reconcile` (ADR-0070). Without --peer it prints
+// kbReconcileCmd is `meshctl kb reconcile`. Without --peer it prints
 // the walk order and writes nothing; with --peer it writes that canonical
 // peer's dated worksheet and prints its path. asJSON is kb's shared --json.
 func kbReconcileCmd(asJSON *bool) *cobra.Command {

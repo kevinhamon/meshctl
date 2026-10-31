@@ -102,7 +102,7 @@ func poolLevelHygiene(agentsDir string, now time.Time) []HygieneItem {
 		items = append(items, HygieneItem{Agent: "pool", Message: msg, Fix: fix})
 	}
 
-	// Pool repo nag (ADR-0066): manual by construction — meshctl never pushes.
+	// Pool repo nag: manual by construction — meshctl never pushes.
 	if nag := PoolRepoNag(agentsDir); nag != "" {
 		pool(nag, nil)
 	}
@@ -185,7 +185,7 @@ func poolLevelHygiene(agentsDir string, now time.Time) []HygieneItem {
 			}
 			// A KB branch holding commits main lacks (a needs-confirm park, or
 			// an unfinished session) may be real work: never reaped, and
-			// warned only past BranchMaxAge (spec decision 54).
+			// warned only past BranchMaxAge.
 			if agent != "" {
 				if it, held := kbBranchHygiene(agentsDir, agent, session, wt, now); held {
 					if it.Message != "" {
@@ -218,7 +218,7 @@ func poolLevelHygiene(agentsDir string, now time.Time) []HygieneItem {
 // this does merged-and-clean mean "landed by hand, worktree left behind".
 const hygieneWorkGrace = 24 * time.Hour
 
-// workWorktreeHygiene classifies one delegated-work worktree (ADR-0063). It
+// workWorktreeHygiene classifies one delegated-work worktree. It
 // normally lives until `meshctl work merge`; hygiene only steps in when the
 // branch was already landed some other way (fixable: remove worktree +
 // branch) or has sat unmerged past the state window (manual: a human decides

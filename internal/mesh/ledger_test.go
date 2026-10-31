@@ -10,7 +10,7 @@ import (
 
 var ledgerNow = time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
 
-// The confirmation ledger (ADR-0067, spec decision 21): a tracked content-hash
+// The confirmation ledger: a tracked content-hash
 // ledger at knowledge/.confirmed.yaml, one scheme for every entry type.
 
 const ledgerShape = `playbooks/release.md:

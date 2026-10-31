@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// summary_test.go — the confirmation summary file (ADR-0067, spec decision 19)
-// and the ask-text renderer every gate reuses (spec decision 69).
+// summary_test.go — the confirmation summary file
+// and the ask-text renderer every gate reuses.
 
 const fullSummary = `## Intent
 Add the term "fact owner" to the pool glossary and retire "owner" where it meant that.
@@ -18,7 +18,7 @@ Second intent paragraph is not the Intent line.
 
 ## Grounding
 - GLOSSARY.md:12 defines fact owner (pool repo).
-- ADR-0065 names one owner per canonical fact.
+- ADR-0004 names one owner per catalog record.
 
 ## Precedent
 - *new*: searched doctrine/agent-comms.md and the architect KB.
@@ -46,7 +46,7 @@ func TestSummary_ParsesRequiredAndOptionalSections(t *testing.T) {
 	if !s.HasIntent() {
 		t.Fatal("HasIntent must be true with an Intent line")
 	}
-	if !strings.Contains(s.Grounding, "GLOSSARY.md:12") || !strings.Contains(s.Grounding, "ADR-0065") {
+	if !strings.Contains(s.Grounding, "GLOSSARY.md:12") || !strings.Contains(s.Grounding, "ADR-0004") {
 		t.Fatalf("Grounding=%q", s.Grounding)
 	}
 	if !strings.Contains(s.Precedent, "*new*") {

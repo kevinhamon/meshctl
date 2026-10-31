@@ -33,7 +33,7 @@ type AgentUpgradePlan struct {
 type PoolUpgradePlan struct {
 	PoolRoot      string
 	OpencodeMajor int      // installed opencode major (0 ⇒ none on $PATH)
-	Pool          []string // pool directory steps (ADR-0066): rename, repo, ignore file, first commit
+	Pool          []string // pool directory steps: rename, repo, ignore file, first commit
 	Doctrine      []string // doctrine files that will be added or replaced
 	Conflicts     []string // locally-edited doctrine: left alone, .upstream written for a merge
 	DoctrineDiff  string   // unified diff of the Doctrine updates, for review before applying
@@ -126,8 +126,8 @@ func planDoctrine(poolRoot string) (update, conflicts []string, err error) {
 
 // doctrineDiff renders, as one unified diff, what the upgrade would change in
 // each doctrine file it may replace (missing, or unchanged since meshctl wrote
-// it), so the human reviews the doctrine before `pool upgrade` commits it
-// (spec decision 67). Locally-edited files are conflicts, not updates, and are
+// it), so the human reviews the doctrine before `pool upgrade` commits it.
+// Locally-edited files are conflicts, not updates, and are
 // left out. Nothing in the pool is written: both sides are copied to a
 // temporary directory and compared there.
 func doctrineDiff(poolRoot string) (string, error) {

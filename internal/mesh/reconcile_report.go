@@ -9,11 +9,10 @@ import (
 	"time"
 )
 
-// reconcile_report.go — the reconcile report's grammar (ADR-0070; spec
-// decision 45). An agent writes the report beside the worksheet at
-// <peer>/.memory/reconcile/<date>.md: an optional `## Standing orders` section
-// first (standing orders contradicting doctrine, fixed by hand, never
-// ledgered), then one line per entry:
+// reconcile_report.go — the reconcile report's grammar. An agent writes the
+// report beside the worksheet at <peer>/.memory/reconcile/<date>.md: an
+// optional `## Standing orders` section first (standing orders contradicting
+// doctrine, fixed by hand, never ledgered), then one line per entry:
 //
 //	- <kb-relative path>[#<slug>] · <verdict>[ → <mesh://… | doctrine | owner <peer>, pending>] · "<quoted grounding>"
 //
@@ -262,10 +261,10 @@ func (r ReconcileReport) openConflictLines() []ReconcileReportLine {
 	return out
 }
 
-// reconcileFindings is doctor's reconcile line for one peer (spec decision
-// 49): the days since its latest reconcile report and that report's open
-// conflicts, or the report's malformed lines. Nothing when it has no report.
-// Reads only the peer's own reconcile directory.
+// reconcileFindings is doctor's reconcile line for one peer: the days since its
+// latest reconcile report and that report's open conflicts, or the report's
+// malformed lines. Nothing when it has no report. Reads only the peer's own
+// reconcile directory.
 func reconcileFindings(a *Agent, now time.Time) []DoctorFinding {
 	path, ok := LatestReconcileReport(a.Dir())
 	if !ok {
@@ -291,7 +290,7 @@ func reconcileFindings(a *Agent, now time.Time) []DoctorFinding {
 	}
 	msg := fmt.Sprintf("latest reconcile report %s is %d day(s) ago with %d open conflict(s)", rel, days, r.OpenConflicts())
 	if n := r.OpenConflicts(); n > 0 {
-		msg += " — resolve them in the fact owner's session (ADR-0070), then re-verdict and `kb confirm`"
+		msg += " — resolve them in the fact owner's session, then re-verdict and `kb confirm`"
 	}
 	return []DoctorFinding{{Agent: a.Name, Level: "warn", Message: msg}}
 }

@@ -14,7 +14,7 @@ import (
 //   - one session-end fires after the idle window;
 //   - the gate throws when meshctl cannot run (fail-closed), and relays a
 //     deny reason when it can;
-//   - subagent children (ADR-0076): a mesh peer's calls carry the caller's
+//   - subagent children: a mesh peer's calls carry the caller's
 //     session, the child id and the agent; a peer child gets no session
 //     lifecycle or caller doctrine, and its finished run is one session-end;
 //     a general child runs as the caller; a child whose agent cannot be told

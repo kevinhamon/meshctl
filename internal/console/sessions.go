@@ -13,7 +13,7 @@ import (
 )
 
 // SessionReport is one open session of a peer and the jobs it has
-// scheduled (tickets 11–12).
+// scheduled.
 type SessionReport struct {
 	Agent       string      `json:"agent"`
 	ID          string      `json:"id"`

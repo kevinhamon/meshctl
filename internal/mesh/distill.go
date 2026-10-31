@@ -9,7 +9,7 @@ import (
 
 // Background distillation — the enforcement half of the cognition loop.
 //
-// The boundary nudge (hook.go, ADR-0027) ASKS the model to distil. A capable
+// The boundary nudge (hook.go) ASKS the model to distil. A capable
 // model obliges; a weaker one reads the nudge and carries on, so the KB never
 // fills and the mesh degrades to a pile of empty knowledge/ trees. Distillation
 // therefore cannot be discretionary. This runs it at session end regardless of
@@ -92,7 +92,7 @@ func SpawnDistill(poolRoot string, a *Agent, sessionID string) bool {
 }
 
 // SpawnPeerDistill distils a peer's in-session window (a subagent that ran
-// under a caller's Claude Code session, ADR-0063) into the PEER's own KB. The
+// under a caller's Claude Code session) into the PEER's own KB. The
 // in-session subagent has no session end of its own and the caller's session
 // end distils the caller, so without this a correction made to a consulted or
 // delegated peer is never learned by it.

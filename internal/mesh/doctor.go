@@ -21,8 +21,8 @@ var (
 	reEffective    = regexp.MustCompile(`(?im)^\s*effective\s*:`)
 )
 
-// referenceMissingEffective warns on reference notes lacking an `effective:` date
-// (ADR-0019): external source knowledge without a version/effective date silently
+// referenceMissingEffective warns on reference notes lacking an `effective:` date:
+// external source knowledge without a version/effective date silently
 // goes stale. Only checks knowledge/reference/*.md when that (optional) area exists.
 func referenceMissingEffective(kbRoot string) []string {
 	dir := filepath.Join(kbRoot, "reference")
@@ -40,7 +40,7 @@ func referenceMissingEffective(kbRoot string) []string {
 			continue
 		}
 		if !reEffective.Match(b) {
-			out = append(out, "knowledge/reference/"+e.Name()+" has no `effective:` date — reference notes must be dated (ADR-0019); it may be stale")
+			out = append(out, "knowledge/reference/"+e.Name()+" has no `effective:` date — reference notes must be dated; it may be stale")
 		}
 	}
 	return out
@@ -168,7 +168,7 @@ func dirEmptyish(dir string) bool {
 }
 
 // supersededDefects finds decisions marked "superseded by NNNN" whose target is
-// missing or doesn't back-reference them — the one mechanizable KB defect (ADR-0014).
+// missing or doesn't back-reference them — the one mechanizable KB defect.
 func supersededDefects(decisionsDir string) []string {
 	if !dirExists(decisionsDir) {
 		return nil
@@ -228,7 +228,7 @@ type DoctorFinding struct {
 	// Fixable marks a hygiene item `doctor --fix` repairs.
 	Fixable bool
 	// Action names the console button the finding carries: commit or push
-	// for an agent repo (ADR-0079 amendment); "" for none.
+	// for an agent repo; "" for none.
 	Action string
 	// Kind tags a finding the console counts: FindingNotRestorable for an
 	// agent that could not be rebuilt on another machine; "" for the rest.
@@ -241,12 +241,11 @@ const FindingNotRestorable = "not-restorable"
 
 // reservedOwnerFindings errors on a workspace at the pool root whose name is
 // the reserved owner `pool` (any case) and which carries an agent manifest: a
-// peer with that name would make `mesh://pool/...` ambiguous (ADR-0066, spec
-// decision 14). ScanAgents may or may not load it (the pool directory itself
-// has no manifest; a stray one would), so this reads the directory, not the
-// roster.
-// Workspaces in validated (loaded agents' directories) are skipped: their
-// manifest validation already reports the reserved name.
+// peer with that name would make `mesh://pool/...` ambiguous. ScanAgents may or
+// may not load it (the pool directory itself has no manifest; a stray one
+// would), so this reads the directory, not the roster. Workspaces in validated
+// (loaded agents' directories) are skipped: their manifest validation already
+// reports the reserved name.
 func reservedOwnerFindings(agentsDir string, validated map[string]bool) []DoctorFinding {
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
@@ -278,30 +277,30 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 		findings = append(findings, DoctorFinding{Agent: name, Level: "error", Message: "unparseable agent.yaml: " + e.Error()})
 	}
 
-	poolCfg := LoadPoolConfig(agentsDir) // identity + human-owned settings (ADR-0066), mesh-wide tool refs (ADR-0042)
+	poolCfg := LoadPoolConfig(agentsDir) // identity + human-owned settings, mesh-wide tool refs
 
 	// Pool-level: config file health and the tools-in-identity-file transition.
 	findings = append(findings, poolConfigFindings(agentsDir, poolCfg)...)
-	// Pool-level: outbound gate config vs the peers' `mutates` tags (ADR-0068).
+	// Pool-level: outbound gate config vs the peers' `mutates` tags.
 	findings = append(findings, outboundFindings(agentsDir, poolCfg, agents)...)
 
 	// Pool-level: doctrine that instructs agents to run invalid commands.
 	findings = append(findings, doctrineFlagFindings(agentsDir)...)
 
-	// Pool-level: legacy (pre-ADR-0038) layout → nudge `pool migrate`.
+	// Pool-level: legacy (pre-pool-directory) layout → nudge `pool migrate`.
 	if IsPool(agentsDir) && IsLegacyLayout(agentsDir) {
 		findings = append(findings, DoctorFinding{Agent: "pool", Level: "warn", Message: "legacy layout detected (top-level agent-mesh/ or .worktrees/.dispatch.*) — run `meshctl pool migrate`"})
 	}
 	if IsPool(agentsDir) && PoolDirIsLegacy(agentsDir) {
-		findings = append(findings, DoctorFinding{Agent: "pool", Level: "warn", Message: "pool directory is the legacy hidden " + LegacyPoolDir + "/ — run `meshctl pool upgrade` to move it to " + CurrentPoolDir + "/ (a git repo, ADR-0066)"})
+		findings = append(findings, DoctorFinding{Agent: "pool", Level: "warn", Message: "pool directory is the legacy hidden " + LegacyPoolDir + "/ — run `meshctl pool upgrade` to move it to " + CurrentPoolDir + "/ (a git repo)"})
 	}
-	// Pool-level: pool repo nag (ADR-0066) — not a repo, no remote, dirty, or
+	// Pool-level: pool repo nag — not a repo, no remote, dirty, or
 	// ahead of its remote. Warn, never error: durability is the human's call.
 	if nag := PoolRepoNag(agentsDir); nag != "" {
 		findings = append(findings, DoctorFinding{Agent: "pool", Level: "warn", Message: nag})
 	}
 
-	// Pool-level: a peer carrying the reserved owner name (ADR-0066).
+	// Pool-level: a peer carrying the reserved owner name.
 	validated := map[string]bool{}
 	for _, a := range agents {
 		if a.Dir() != "" && strings.EqualFold(a.Name, ReservedOwner) {
@@ -341,9 +340,9 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 		findings = append(findings, fs...)
 	}
 
-	// `owns` uniqueness across canonical peers (ADR-0065, ADR-0069).
+	// `owns` uniqueness across canonical peers.
 	findings = append(findings, canonicalOwnsFindings(poolCfg, agents)...)
-	// Knowledge references: dangling links, canonical→perspective (ADR-0065).
+	// Knowledge references: dangling links, canonical→perspective.
 	findings = append(findings, meshRefFindings(agentsDir, poolCfg, agents)...)
 
 	for label, names := range byLabel {
@@ -414,7 +413,7 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no CLAUDE.md"})
 	}
 
-	// Peer glossaries retire (ADR-0066): leftover file, `owns` coupling.
+	// Peer glossaries retire: leftover file, `owns` coupling.
 	findings = append(findings, glossaryFindings(a, poolTerms, poolGlossary)...)
 	findings = append(findings, docFolderFindings(a)...)
 
@@ -427,7 +426,7 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 	for _, msg := range InboxStatusFindings(a) {
 		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
 	}
-	// Intake triage age (ADR-0072): reports, never closes.
+	// Intake triage age: reports, never closes.
 	if msg := TriageDoctorFinding(a, time.Now()); msg != "" {
 		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
 	}
@@ -440,7 +439,7 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 	// knowledge/ tree: EVERY claude agent must enforce doctrine, KB or not.)
 	findings = append(findings, gateWiringFindings(a)...)
 
-	// ADR-0014 knowledge-base areas (tiered: warn on missing/empty, never error;
+	// Knowledge-base areas (tiered: warn on missing/empty, never error;
 	// a fresh agent legitimately has empty Experience). Only checked if the
 	// agent keeps a knowledge/ tree at all.
 	kbRoot := filepath.Join(a.Dir(), KnowledgeDir)
@@ -454,7 +453,7 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + area + "/ has no entries yet"})
 			}
 		}
-		// The one structurally-enforceable KB defect (ADR-0014): a decision marked
+		// The one structurally-enforceable KB defect: a decision marked
 		// "superseded by NNNN" where NNNN is missing or doesn't back-reference it.
 		for _, msg := range supersededDefects(filepath.Join(kbRoot, "decisions")) {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: msg})
@@ -462,7 +461,7 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 		// KB consistency drift (README parity, broken ADR refs, stale "pending ADR"
 		// markers) — all warn-level, advisory.
 		findings = append(findings, kbConsistencyFindings(a.Name, kbRoot)...)
-		// ADR-0019: reference notes must carry an `effective:` date (warn).
+		// Reference notes must carry an `effective:` date (warn).
 		for _, msg := range referenceMissingEffective(kbRoot) {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
 		}
@@ -492,9 +491,9 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 				}
 			}
 		}
-		// ADR-0067: confirmation ledger drift and unconfirmed knowledge.
+		// Confirmation ledger drift and unconfirmed knowledge.
 		findings = append(findings, ledgerFindings(a)...)
-		// ADR-0070: the latest reconcile report's age and open conflicts.
+		// The latest reconcile report's age and open conflicts.
 		findings = append(findings, reconcileFindings(a, time.Now())...)
 		if aged := agedCandidates(a.Dir(), time.Now()); len(aged) > 0 {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: fmt.Sprintf(
@@ -505,12 +504,12 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "knowledge/" + HandoffFile + ": " + strings.Join(w, "; ") + " — rewrite with `meshctl handoff set`"})
 			}
 		}
-		// (ADR-0033) The persisted memory index is off the routing path — recall
+		// The persisted memory index is off the routing path — recall
 		// reads live — so its staleness is no longer a doctor warning.
-		// ADR-0026 cognition wiring: the mesh-cognition skill + the always-present
+		// Cognition wiring: the mesh-cognition skill + the always-present
 		// "## Cognition" standing-order stanza in CLAUDE.md. An agent with a knowledge/
 		// tree must have both, else the learn loop has no trigger (warn only).
-		// Skill location is harness-specific (ADR-0032): .claude/skills vs .opencode/skills.
+		// Skill location is harness-specific: .claude/skills vs .opencode/skills.
 		skillDir := ".claude"
 		if a.HarnessName() == HarnessOpencode {
 			skillDir = ".opencode"
@@ -519,11 +518,11 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "mesh-cognition skill not installed (" + skillDir + "/skills/mesh-cognition/) — run `meshctl agent onboard " + a.Name + "`"})
 		}
 		if b, err := os.ReadFile(claude); err == nil && !hasCognitionSection(string(b)) {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md missing the Cognition standing-order stanza (ADR-0026) — run `meshctl agent onboard " + a.Name + "`"})
+			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md missing the Cognition standing-order stanza — run `meshctl agent onboard " + a.Name + "`"})
 		} else if err == nil && cognitionStanzaUnrecognized(string(b)) {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md Cognition stanza has no ending meshctl recognises, so onboard cannot refresh it — replace it by hand with the current stanza"})
 		}
-		// Harness wiring present? (ADR-0032)
+		// Harness wiring present?
 		if a.HarnessName() == HarnessOpencode && !fileExists(filepath.Join(a.Dir(), "opencode.json")) {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "harness=opencode but no opencode.json — run `meshctl agent onboard " + a.Name + "`"})
 		}
@@ -531,7 +530,7 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 		// Both fail silently otherwise — see doctor_wiring.go.
 		findings = append(findings, cognitionTriggerFindings(a)...)
 		findings = append(findings, sessionSignalFindings(a)...)
-		// Repo hygiene (ADR-0039): knowledge is only safe once pushed to a remote.
+		// Repo hygiene: knowledge is only safe once pushed to a remote.
 		if h := AgentRepoHygiene(a.Dir()); !h.IsRepo {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Kind: FindingNotRestorable, Message: "workspace is not a git repo — `git init` + commit (knowledge/ unsafe until versioned + pushed; it cannot be rebuilt on another machine)"})
 		} else if !h.HasRemote {
@@ -539,7 +538,7 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 		} else if msg, action := AgentRepoFinding(a.Dir()); msg != "" {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg, Action: action})
 		}
-		// Tool reference (ADR-0042): referenced tools should be installed; an
+		// Tool reference: referenced tools should be installed; an
 		// `avoid` tool being present is a nudge, not an error.
 		for _, tr := range EffectiveTools(poolCfg, a) {
 			if tr.Avoid != "" {

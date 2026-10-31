@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Episodic memory (ADR-0033) is the owned, extractive-capture tier: one
+// Episodic memory is the owned, extractive-capture tier: one
 // session-record per session, parsed structurally from the harness transcript at
 // session end — NO LLM. It records facts (opening ask, files touched, commands,
 // tools, commits, handoff, refs), not generated prose, so there is little to get
@@ -20,7 +20,7 @@ import (
 // records are recall material that routes back to the KB/handoff/commits.
 const SessionsSubdir = "sessions"
 
-// SessionRecord is one captured session (ADR-0033 schema).
+// SessionRecord is one captured session.
 type SessionRecord struct {
 	ID           string   `json:"id"`
 	Agent        string   `json:"agent"`
@@ -35,10 +35,10 @@ type SessionRecord struct {
 	// Confirms lists the session's `Confirm:` commits on main (KBConfirmCommits):
 	// what this session's human confirmed into the KB.
 	Confirms []string `json:"confirms,omitempty"`
-	Handoff      string   `json:"handoff_ref,omitempty"`
-	Refs         []string `json:"refs,omitempty"`
+	Handoff  string   `json:"handoff_ref,omitempty"`
+	Refs     []string `json:"refs,omitempty"`
 	// Outbound lists the outbound calls the session made under a signed
-	// batch (ADR-0068 audit, outbound_batch.go), in order.
+	// batch (the audit trail, outbound_batch.go), in order.
 	Outbound []OutboundAuditEntry `json:"outbound,omitempty"`
 }
 

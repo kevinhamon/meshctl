@@ -40,7 +40,7 @@ type DoctrineUpgrade struct {
 	Conflicts []string // locally-edited files left alone; `<file>.upstream` holds the new version
 }
 
-// UpgradeDoctrine refreshes the pool's doctrine from the embedded copy (ADR-0031)
+// UpgradeDoctrine refreshes the pool's doctrine from the embedded copy
 // without clobbering local edits. Per file:
 //   - missing, or unchanged since meshctl wrote it → (re)written;
 //   - already identical to the embedded copy → left as is;
@@ -106,7 +106,7 @@ func UpgradeDoctrine(poolRoot string, force bool, now time.Time) (DoctrineUpgrad
 	if err := writeDoctrineStamps(dest, stamps); err != nil {
 		return res, err
 	}
-	// The rewrite is a reviewable commit in the pool repo (spec decision 67).
+	// The rewrite is a reviewable commit in the pool repo.
 	return res, commitDoctrineUpgrade(poolRoot, written)
 }
 

@@ -10,8 +10,8 @@ import (
 	"github.com/kevinhamon/meshctl/internal/selfupdate"
 )
 
-// pool_clone.go — rebuild a pool on another machine from its pool repo
-// (pool-clone spec C2): clone the pool repo into <root>/pool, then every
+// pool_clone.go — rebuild a pool on another machine from its pool repo:
+// clone the pool repo into <root>/pool, then every
 // member and extra it lists beside it. Registering the root and running
 // `pool upgrade` (the machine-specific wiring) is the command's job, after
 // this. Never pushes, never forces: an existing folder is left alone.
@@ -151,7 +151,7 @@ func cloneOne(root, name, path, remote, branch string) ClonedRepo {
 }
 
 // CloneLeftovers lists what a rebuilt pool still needs by hand on this
-// machine: workdirs (ADR-0063) repos missing here and harnesses not
+// machine: workdirs repos missing here and harnesses not
 // installed, one line each, sorted.
 func CloneLeftovers(poolRoot string) []string {
 	agents, _, err := ScanAgents(poolRoot)

@@ -7,11 +7,11 @@ import (
 	"time"
 )
 
-// The pool registry (ADR-0037) is meshctl's ONE piece of global state: a
+// The pool registry is meshctl's ONE piece of global state: a
 // discovery-only index of the pools on this machine, so `meshctl pool list` can
 // enumerate them from anywhere. It is NOT authoritative and NOT a comms channel —
 // AgentsDir() still scopes every roster/comms/KB operation to the cwd pool, so the
-// ADR-0029 "pools can't see each other" guarantee is untouched. Losing the registry
+// "pools can't see each other" guarantee is untouched. Losing the registry
 // loses no pool data (re-register with `pool register`).
 //
 // Location is the single platform-specific point (registryPath); *nix uses XDG.

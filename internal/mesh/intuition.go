@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// The intuition tier (ADR-0016, ADR-0033): compact, deduped pointers (title +
+// The intuition tier: compact, deduped pointers (title +
 // date) to past work, from the owned engine — episodic session records plus the
 // git time-spine. Fail-open: any error yields no hits (intuition is advisory;
 // it must never break a caller).

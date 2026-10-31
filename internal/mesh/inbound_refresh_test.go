@@ -6,7 +6,7 @@ import (
 )
 
 // A hand-customised Inbound bullet keeps its own words; only the claim-the-oldest
-// command becomes the queue-and-wait order (ADR-0073).
+// command becomes the queue-and-wait order.
 func TestRefreshedCommsSection_CustomisedBulletSwapsOnlyTheClaimCommand(t *testing.T) {
 	custom := "# Role\n\n## Agent Communication\n" +
 		"- **Inbound:** the user targets you at a tracker issue directly, or drops a request in `intake/`. " +

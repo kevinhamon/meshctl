@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Session is a live presence record (ADR-0011 substrate). One file per session
+// Session is a live presence record. One file per session
 // under <agent>/.sessions/<session-id>.
 type Session struct {
 	ID           string `json:"id"`

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// pending.go — the pending-work block (ADR-0071; spec decisions 50–54).
+// pending.go — the pending-work block.
 //
 // One renderer computes a peer's pending work: what waits on the human, how
 // old it is and the command that clears it. The session-start hook injects it
@@ -67,7 +67,7 @@ type PendingLine struct {
 	// Aged counts candidates past PendingStaleDays (health only).
 	Aged int
 	// Unconfirmed counts current-tier entries no confirmation has covered
-	// (health only); the reconcile pass works them off (ADR-0070).
+	// (health only); the reconcile pass works them off.
 	Unconfirmed int
 }
 
@@ -147,7 +147,7 @@ func (l PendingLine) Markdown() string {
 }
 
 // PendingBlockOmitted reports the audiences that get no block: dispatch depth
-// set and non-zero, or a distil run (ADR-0071 "audience"). `agent brief`
+// set and non-zero, or a distil run. `agent brief`
 // never renders it.
 func PendingBlockOmitted() bool { return HeadlessNow() }
 
@@ -240,7 +240,7 @@ type PendingKBBranch struct {
 }
 
 // ParkedKBBranches lists a peer's KB branches awaiting confirmation (the
-// `needs-confirm` parks of ADR-0067), by session id: the park markers
+// `needs-confirm` parks), by session id: the park markers
 // (ParkMarkerPath) whose worktree still exists and that no live session
 // holds. An unheld branch that never parked is not listed.
 func ParkedKBBranches(agentsDir string, a *Agent, now time.Time) []PendingKBBranch {
@@ -321,7 +321,7 @@ func pendingIntake(agentsDir string, a *Agent, now time.Time) *PendingLine {
 }
 
 // pendingTriageSignals counts open requests with one of the two exact, cheap
-// triage signals (ADR-0071 amendment): the request's id names a
+// triage signals: the request's id names a
 // `mesh/work/<id>` branch, live or merged, in any peer's repo; or a
 // `redirected_to` chain from the request or a request it names in related:
 // ends in a closed request. The full worksheet stays in `inbox triage`.

@@ -15,7 +15,7 @@ import (
 	"github.com/kevinhamon/meshctl/internal/mesh"
 )
 
-// hub_test.go — one console for every pool (ADR-0077 amendment, v1.8.2).
+// hub_test.go — one console for every pool (v1.8.2).
 
 // livePool is testPool with the pool marker, so the registry counts it live.
 func livePool(t *testing.T) (string, *mesh.Agent) {

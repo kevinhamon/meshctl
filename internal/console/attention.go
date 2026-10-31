@@ -3,7 +3,7 @@ package console
 import "github.com/kevinhamon/meshctl/internal/mesh"
 
 // attention.go — how the console counts an agent for the person: the pool
-// summaries behind Home and the switcher (console layout spec, C18).
+// summaries behind Home and the switcher.
 
 type attention int
 

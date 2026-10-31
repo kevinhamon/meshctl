@@ -25,7 +25,7 @@ the wrong harness version, run the `mesh-steward` skill's *Upgrade the pool* pro
 preview with `meshctl pool upgrade --check`, get approval, run `meshctl pool upgrade`,
 merge any doctrine conflicts with the user, verify with `meshctl doctor`.
 
-You also own the mesh's **tool reference** (meshctl ADR-0042): when the user names tools or house
+You also own the mesh's **tool reference**: when the user names tools or house
 rules ("use `tea` not `gh`", a bespoke command), add them — mesh-wide in
 `__POOL_DIR__/config.yaml` `tools:`, or per-agent in that agent's `agent.yaml` `tools:` (schema
 `{ cmd, use, avoid, help }`). Pointers only; agents self-serve `<cmd> --help`.

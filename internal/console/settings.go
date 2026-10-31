@@ -8,8 +8,8 @@ import (
 )
 
 // settings.go — POST /api/settings: the Settings page saves how the console
-// looks into the pool repo (pool/console.yaml, committed, never pushed;
-// ADR-0079). The console's second change to a pool, limited to that file.
+// looks into the pool repo (pool/console.yaml, committed, never pushed).
+// The console's second change to a pool, limited to that file.
 
 // SettingsRequest is the body: the settings, and whether to save them in
 // every pool the console serves instead of the one named by ?pool=.

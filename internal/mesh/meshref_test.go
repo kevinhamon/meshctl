@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Reserved owner (ADR-0066, spec decision 14): `pool` names the pool itself, so
+// Reserved owner: `pool` names the pool itself, so
 // `mesh://pool/...` can never mean a peer.
 
 func TestReservedOwner_CreateRefusesPeerNamedPool(t *testing.T) {
@@ -109,7 +109,7 @@ func TestReservedOwner_DoctorErrorsOnExistingPeerNamedPool(t *testing.T) {
 	}
 }
 
-// Resolver (spec decision 14, ADR-0065/0066): `mesh://pool/<path>#<slug>` reads
+// Resolver: `mesh://pool/<path>#<slug>` reads
 // `pool/<path>` and matches a `**Term**:` line or a heading by kebab slug,
 // case-insensitively.
 
@@ -205,7 +205,7 @@ func TestResolveMeshRef_LegacyPoolAndMalformedRefs(t *testing.T) {
 		"mesh://pool",                   // no path
 		"mesh://pool/../agent.yaml",     // escapes the owner
 		"mesh://pool//etc/passwd",       // absolute path
-		"mesh://architect/glossary.md",  // not the reserved owner (ticket 38 extends)
+		"mesh://architect/glossary.md",  // not the reserved owner
 		"mesh://bad name/glossary.md#x", // invalid owner
 	} {
 		if _, ok, err := ResolveMeshRef(root, bad); err == nil || ok {

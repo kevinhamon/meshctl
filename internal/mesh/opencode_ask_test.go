@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// opencode_ask_test.go — the opencode V2 ask path for promotions (ADR-0075).
+// opencode_ask_test.go — the opencode V2 ask path for promotions.
 
 func writeOpencodeJSON(t *testing.T, dir, body string) {
 	t.Helper()

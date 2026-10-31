@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// inbox_list.go — the clean intake queue `meshctl inbox list` prints
-// (ADR-0073): open requests only by default, in the order an agent proposes
+// inbox_list.go — the clean intake queue `meshctl inbox list` prints:
+// open requests only by default, in the order an agent proposes
 // to the human on "check intake" — priority, then age.
 
 // InboxQueue returns the agent's requests in queue order: priority (P1 first;

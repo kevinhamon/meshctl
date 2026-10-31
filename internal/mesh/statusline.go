@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-// statusline.go — the Claude Code status line (ADR-0074).
+// statusline.go — the Claude Code status line.
 //
 // One line under the prompt: the agent this session runs as, then the pending
-// work (ADR-0071) that waits on the human, recomputed from Pending on every
+// work that waits on the human, recomputed from Pending on every
 // call. No cache and no subprocess: Pending is directory listings plus one hash
 // pass, cheap enough to run on every refresh. Claude Code re-runs the command
 // on its own events and every StatusLineRefreshSeconds, so counts move while

@@ -16,7 +16,7 @@ const ReportSchema = 1
 type PendingReport struct {
 	Schema    int    `json:"schema"`
 	Generated string `json:"generated"` // RFC 3339, UTC
-	// StaleDays is the age at which an item renders ⚠ stale (ADR-0071).
+	// StaleDays is the age at which an item renders ⚠ stale.
 	StaleDays int                  `json:"stale_days"`
 	Agents    []PendingAgentReport `json:"agents"`
 }

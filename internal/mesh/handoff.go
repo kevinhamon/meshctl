@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Handoff (ADR-0017) is a per-agent, git-tracked, authoritative "where we are +
+// Handoff is a per-agent, git-tracked, authoritative "where we are +
 // next step" record — the deliberate-tier complement to the fuzzy episodic
 // recall of session records. Written at session end (or when attention shifts), read at
 // session start, so work resumes precisely. Distinct from strategic State

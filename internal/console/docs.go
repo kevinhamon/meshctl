@@ -25,7 +25,7 @@ import (
 )
 
 // docs.go — the documents an agent writes for the person, listed and served
-// read-only (spec .scratch/agent-docs; ticket 01 settled the scheme).
+// read-only.
 //
 // A document is code the console did not write, so it never runs with the
 // console's credentials. It is served from a capability path,

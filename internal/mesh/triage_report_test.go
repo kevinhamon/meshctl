@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// triage_report_test.go — the triage report grammar (ADR-0072; spec decision
-// 57): the validator, its line-numbered failures, and the writer helper.
+// triage_report_test.go — the triage report grammar: the validator, its
+// line-numbered failures, and the writer helper.
 
 func TestTriageReport_ValidatorAcceptsGrammar(t *testing.T) {
 	text := strings.Join([]string{

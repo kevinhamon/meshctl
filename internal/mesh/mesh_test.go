@@ -41,8 +41,8 @@ func meshRoot(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(dir, "agent-mesh", CommsFile), []byte("protocol"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Legacy-layout pool dir (ADR-0031/0038): the hidden directory, no marker, no
-	// git — the shape of every pool before ADR-0066. Tests that need the
+	// Legacy-layout pool dir: the hidden directory, no marker, no
+	// git — the shape of every pool before the pool repo. Tests that need the
 	// migrated pool/ repo use migratedRoot (pool_dir_test.go).
 	if err := os.MkdirAll(filepath.Join(dir, LegacyPoolDir), 0o755); err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ func indexOf(s, sub string) int {
 
 var _ = errors.Is
 
-// TestMemory_RebuildRecallRecovery covers ADR-0015: structural rebuild, recall
+// TestMemory_RebuildRecallRecovery covers structural rebuild, recall
 // routing, and the recovery property (delete + rebuild reconstructs the index).
 func TestMemory_RebuildRecallRecovery(t *testing.T) {
 	dir := meshRoot(t)

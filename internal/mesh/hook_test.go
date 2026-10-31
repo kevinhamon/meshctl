@@ -36,7 +36,7 @@ func TestHook_SessionStart_PresenceAndHandoff(t *testing.T) {
 func TestHook_SessionStart_NoHandoffOnlyIdentity(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)
-	// Give it a remote so the ADR-0039 repo-hygiene nag is silent — isolating the
+	// Give it a remote so the repo-hygiene nag is silent — isolating the
 	// "no handoff ⇒ only the identity anchor" behavior under test.
 	_ = exec.Command("git", "-C", a.Dir(), "remote", "add", "origin", "https://example.test/x.git").Run()
 	ctx := HookSessionStart(dir, HookPayload{Cwd: a.Dir(), SessionID: "s"}, 1, time.Now())

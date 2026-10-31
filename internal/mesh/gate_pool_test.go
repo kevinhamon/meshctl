@@ -10,8 +10,8 @@ import (
 )
 
 // gate_pool_test.go — pool writes are gate-asked with the peer's summary as
-// the ask text (ADR-0066, spec decision 11); shell git under pool/ is denied
-// (decision 12); no human at the prompt ⇒ deny (cross-cutting 68).
+// the ask text; shell git under pool/ is denied;
+// no human at the prompt ⇒ deny.
 
 // poolGateFixture is a migrated pool with one peer whose session is sess-1.
 func poolGateFixture(t *testing.T) (dir string, a *Agent) {
@@ -41,7 +41,7 @@ const poolSummary = `## Intent
 Add the term "fact owner" to the pool glossary.
 
 ## Grounding
-- ADR-0065 names one owner per canonical fact.
+- ADR-0004 names one owner per catalog record.
 
 ## Precedent
 - *new*: searched the doctrine and the architect KB.
@@ -79,7 +79,7 @@ func TestGate_PoolWriteAsksWithSummary(t *testing.T) {
 			if !d.Ask || d.Deny || d.Check != GateCheckPoolPath {
 				t.Fatalf("want ask/pool-path, got %+v", d)
 			}
-			for _, want := range []string{`Intent: Add the term "fact owner" to the pool glossary.`, "ADR-0065 names one owner", "*new*: searched", "deny if this was not read to you as a confirmation round"} {
+			for _, want := range []string{`Intent: Add the term "fact owner" to the pool glossary.`, "ADR-0004 names one owner", "*new*: searched", "deny if this was not read to you as a confirmation round"} {
 				if !strings.Contains(d.Reason, want) {
 					t.Fatalf("ask text %q lacks %q", d.Reason, want)
 				}

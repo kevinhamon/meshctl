@@ -8,7 +8,7 @@ import (
 
 // terminal.go — which process and terminal run a session. Hooks run with no
 // controlling terminal, so the walk goes up the process tree to the first
-// ancestor that has one: the harness itself (mesh-console tickets 11–12).
+// ancestor that has one: the harness itself.
 
 // psParentTTY returns a process's parent pid and terminal name ("" when it
 // has none); a var so tests can fake the process tree.

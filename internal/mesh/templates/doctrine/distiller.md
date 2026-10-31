@@ -1,7 +1,7 @@
 # Background distiller — harness-neutral procedure
 
 The distiller is the **Learn** stage of the retrieval loop (agent-comms.md §Knowledge
-& Memory, meshctl ADR-0016) run **off the main thread**. It exists so an agent learns over
+& Memory) run **off the main thread**. It exists so an agent learns over
 time *without* the user driving the slow steps and *without* blocking the live
 session. It drafts; it never promotes consequential knowledge on its own.
 
@@ -85,7 +85,7 @@ silently queries the WRONG namespace and returns nothing. Pass `--agent <agent>`
   `experience/`, `decisions/` (ADRs), `glossary.md`, or `direction.md`, and never runs
   `meshctl kb finish`. Promotion of a candidate into truth stays a **reviewed** step:
   the owning agent proposes it in an interactive session, reads the confirmation round,
-  and the human confirms at `kb finish` (meshctl ADR-0064). A headless run has no human
+  and the human confirms at `kb finish`. A headless run has no human
   at its prompt, so it can land candidates only.
 - **Writes confined to `knowledge/candidates/` + `knowledge/pending-decisions.md`.**
 - **Idempotent** — re-running must not duplicate an existing candidate; skip slugs that

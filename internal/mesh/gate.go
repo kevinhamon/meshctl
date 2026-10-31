@@ -17,7 +17,7 @@ import (
 // This one can REFUSE a tool call. It exists because doctrine delivered as
 // injected prose is optional, and the only way to make "route memory through the
 // mesh" non-optional is to deny the competing paths so the mesh is the one road
-// left (introduced in v1.2.0; the KB-rule gate, ADR-0062, extends it).
+// left (introduced in v1.2.0; the KB-rule gate extends it).
 //
 // Scope of "fail-closed": it denies the patterns it recognises, reliably —
 // including by tool NAME alone, so a malformed tool_input cannot smuggle a write
@@ -74,7 +74,7 @@ func GatePreToolUse(agentsDir string, p HookPayload) GateDecision {
 // gateEvaluate is the decision without the log. Every return names its check.
 func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 	// 1. A delegation (Agent/Task call) from the caller's session. Delegating
-	//    work to a state-mutating peer (ADR-0063) is the human's call, every
+	//    work to a state-mutating peer is the human's call, every
 	//    time: ask. Nothing else about a delegation is the gate's business.
 	if delegationTools[p.ToolName] {
 		if p.InSession {
@@ -83,7 +83,7 @@ func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 		return gateDelegation(agentsDir, p)
 	}
 
-	// 1a'. Pool knowledge (ADR-0066), the deny half: git in pool/ is never an
+	// 1a'. Pool knowledge, the deny half: git in pool/ is never an
 	//      agent's to run, and a pool write with no human at the prompt is
 	//      refused outright. Before the peer contract, so a delegated or
 	//      consulted peer reads the cause ("no human at the prompt") rather
@@ -99,7 +99,7 @@ func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 	//     no-commit contract is enforced here. Work: writes confined to the
 	//     peer's own workspace and workdirs, still no dispatch.
 	if p.InSession {
-		// A consult may not run the intake triage pass (ADR-0072; triage.go).
+		// A consult may not run the intake triage pass (triage.go).
 		if d := gateTriage(p); d.Deny {
 			return d
 		}
@@ -128,21 +128,21 @@ func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 		return GateDecision{Deny: true, Check: GateCheckShellWrite, Reason: reason}
 	}
 
-	// 2c. A KB session branch named by hand (ADR-0067 "bypass closed"): only
+	// 2c. A KB session branch named by hand (a closed bypass): only
 	//     `meshctl kb` merges, rebases or deletes mesh/kb/<session>, so the
 	//     confirmation at finish covers exactly what was promoted.
 	if reason := deniedKBBranchCommand(p); reason != "" {
 		return GateDecision{Deny: true, Check: GateCheckKBBranch, Reason: reason}
 	}
 
-	// 2d. Confirmed knowledge on a peer's main checkout (ADR-0067 "bypass
-	//     closed"): outside candidates/ it changes only through `kb finish`.
+	// 2d. Confirmed knowledge on a peer's main checkout (a closed
+	//     bypass): outside candidates/ it changes only through `kb finish`.
 	if reason := deniedKBMainWrite(agentsDir, p); reason != "" {
 		return GateDecision{Deny: true, Check: GateCheckKBMainWrite, Reason: reason}
 	}
 
 	// The machine-global rules end here. A hub hook seeing a subagent's call
-	// (ADR-0068 amendment, gate_log.go) steps aside for everything below: the
+	// (gate_log.go) steps aside for everything below: the
 	// subagent's own frontmatter hook, run with the peer flag, owns it.
 	if p.StepAside() {
 		return GateDecision{}
@@ -156,14 +156,14 @@ func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 		return d
 	}
 
-	// 5. Pool knowledge, the ask half (ADR-0066): a write under pool/ is asked
+	// 5. Pool knowledge, the ask half: a write under pool/ is asked
 	//    with the peer's summary as the text, or denied naming the summary
 	//    path. After the KB rules, so a rule deny-once delays the ask to the
 	//    retry rather than skipping it; never in step-aside mode, since the
 	//    summary is the subagent's, not the hub's.
 	//    Every ask in steps 5–5e goes through opencodeAskPath: under opencode
-	//    it becomes opencode's own permission ask where one is wired
-	//    (ADR-0075), else a deny naming why.
+	//    it becomes opencode's own permission ask where one is wired,
+	// else a deny naming why.
 	if d := gatePoolPathAsk(agentsDir, p); d.Ask || d.Deny {
 		return opencodeAskPath(p, d)
 	}
@@ -174,31 +174,31 @@ func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 		return gateOutbound(agentsDir, p)
 	}
 
-	// 5b. Promotion at `kb finish` (ADR-0067, gate_promotion.go): asked with
+	// 5b. Promotion at `kb finish` (gate_promotion.go): asked with
 	//     the peer's summary as the signature; candidates-only passes.
 	if d := gatePromotion(agentsDir, p); d.Ask || d.Deny {
 		return opencodeAskPath(p, d)
 	}
 
-	// 5c. Promotion at `state set` (ADR-0067, gate_state.go): the digest meets
+	// 5c. Promotion at `state set` (gate_state.go): the digest meets
 	//     the same ask; no summary or no human at the prompt is a deny.
 	if d := gateStateSet(agentsDir, p); d.Ask || d.Deny {
 		return opencodeAskPath(p, d)
 	}
 
-	// 5d. Bulk confirmation at `kb confirm` (ADR-0070, gate_kb_confirm.go):
+	// 5d. Bulk confirmation at `kb confirm` (gate_kb_confirm.go):
 	//     asked with the reconcile report's lines for the named paths.
 	if d := gateKBConfirm(agentsDir, p); d.Ask || d.Deny {
 		return opencodeAskPath(p, d)
 	}
 
-	// 5e. Intake triage apply (ADR-0072, triage_apply.go): asked with the
+	// 5e. Intake triage apply (triage_apply.go): asked with the
 	//     report lines for the named ids; no report is a deny.
 	if d := gateTriageApply(agentsDir, p); d.Ask || d.Deny {
 		return opencodeAskPath(p, d)
 	}
 
-	// 6. Outbound gate (ADR-0068, outbound.go): after the KB rules and never in
+	// 6. Outbound gate (outbound.go): after the KB rules and never in
 	//    step-aside mode. The one fail-closed exception: an unusable outbound
 	//    config denies every outbound candidate.
 	return gateOutbound(agentsDir, p)
@@ -229,7 +229,7 @@ func meshctlHelpOnly(p HookPayload) bool {
 	return seen
 }
 
-// --- pool knowledge (ADR-0066; spec decisions 11, 12; cross-cutting 68) ---
+// --- pool knowledge ---
 //
 // The pool glossary, the local doctrine and the pool config live in the pool
 // repo (`pool/`), owned by no single peer. There is no `kb begin`/`kb finish`
@@ -241,9 +241,9 @@ func meshctlHelpOnly(p HookPayload) bool {
 // the pool repo — meshctl commits the pool repo after an allowed write, the
 // human pushes, agents never change git state there (read-only git is fine).
 
-// HeadlessNow reports the headless environment signals of the spec's
-// cross-cutting decision 68: a dispatch depth set and non-zero, or a distil
-// run. Every "no human at the prompt" rule keys on this and the gate mode.
+// HeadlessNow reports the headless environment signals: a dispatch depth set
+// and non-zero, or a distil run. Every "no human at the prompt" rule keys on
+// this and the gate mode.
 func HeadlessNow() bool {
 	return envInt("AGENT_DISPATCH_DEPTH", 0) != 0 || DistillingNow()
 }
@@ -407,7 +407,7 @@ func gitWritesOutput(words []string) bool {
 // the pool repo, a shell call to the console's pool push or an agent repo's
 // Commit and Push buttons, and a pool write with no human at the prompt.
 func gatePoolPathDeny(agentsDir string, p HookPayload) GateDecision {
-	// The console's Push button is the person pushing (ADR-0079 amendment);
+	// The console's Push button is the person pushing;
 	// an agent calling its endpoint is an agent pushing the pool repo.
 	if strings.Contains(shellCommandInput(p), ConsolePoolPushPath) {
 		return GateDecision{Deny: true, Check: GateCheckPoolPath, Reason: "mesh: this calls the console's pool push (`" +
@@ -447,7 +447,7 @@ func gatePoolPathAsk(agentsDir string, p HookPayload) GateDecision {
 		return GateDecision{}
 	}
 	targets := "`" + strings.Join(t.writes, "`, `") + "`"
-	// Mesh-wide tools moved to the config file (ADR-0066 config split); a
+	// Mesh-wide tools moved to the config file (the config split); a
 	// charter written before the move still names the identity file. Say
 	// where they go instead of asking the human to sign a write upgrade
 	// would undo (issue #14).
@@ -475,11 +475,11 @@ func gatePoolPathAsk(agentsDir string, p HookPayload) GateDecision {
 		return GateDecision{Deny: true, Check: GateCheckPoolPath, Reason: "mesh: this writes pool knowledge (" + targets +
 			") and needs your confirmation summary first — " + why + " at " + summaryPath + ". Write it with `## Intent` " +
 			"(one line, first), `## Grounding` and `## Precedent`, read the confirmation round out in chat, then re-issue " +
-			"this write: the gate asks the human with your summary as the text (ADR-0066)."}
+			"this write: the gate asks the human with your summary as the text."}
 	}
 	text := RenderAsk(a.Dir(), AskText{
 		Check:  GateCheckPoolPath,
-		Header: "mesh: pool write — " + targets + " becomes pool knowledge for every peer (ADR-0066). `" + a.Name + "` says:",
+		Header: "mesh: pool write — " + targets + " becomes pool knowledge for every peer. `" + a.Name + "` says:",
 		Intent: s.Intent,
 		Body:   s.SectionLines(),
 		Footer: "You may deny if this was not read to you as a confirmation round, or if a claim is uncited and not marked *assumption*.",
@@ -496,7 +496,7 @@ var delegationTools = map[string]bool{"Agent": true, "Task": true, "subagent": t
 
 // gateDelegation asks the human before work is delegated in-session to a
 // state-mutating peer; any other delegation is allowed. On opencode V2 the
-// ask is opencode's own, on the subagent call (ADR-0076).
+// ask is opencode's own, on the subagent call.
 func gateDelegation(agentsDir string, p HookPayload) GateDecision {
 	var in struct {
 		SubagentType string `json:"subagent_type"`
@@ -624,7 +624,7 @@ func deniedShellWrite(agentsDir string, p HookPayload) string {
 
 // deniedKBBranchCommand returns a reason when a shell command names a
 // mesh/kb/<session> branch in any simple command that is not a `meshctl kb`
-// invocation (spec decision 24). It reads the command's own arguments through
+// invocation. It reads the command's own arguments through
 // shellparse.go, so a heredoc body, a `cat` of a script that mentions the
 // branch, or `meshctl kb finish --session <id>` is not a hit; `git merge
 // mesh/kb/x`, `git branch -D mesh/kb/x` and a `bash -c "…"` carrying them are.
@@ -750,7 +750,7 @@ func deniedWritePath(agentsDir, path string) string {
 		return "mesh: this writes Claude Code's built-in memory store, which the mesh replaces. " +
 			"Persist through the mesh (`meshctl memory` / `meshctl kb`), not ~/.claude/**/memory/**."
 	}
-	// Hand-written intake (ADR-0043): intake/ is an ephemeral queue owned by
+	// Hand-written intake: intake/ is an ephemeral queue owned by
 	// meshctl, never authored by hand. Scoped to this pool when the pool is
 	// known — some other repo's intake/ directory is not the mesh's.
 	inPool := agentsDir == "" || !filepath.IsAbs(path) || underDir(path, agentsDir)

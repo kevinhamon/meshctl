@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Peer glossaries retire (ADR-0066 and its amendment, spec decision 16): the
+// Peer glossaries retire: the
 // KB template scaffolds none, doctor warns on a leftover peer glossary once
 // the pool glossary exists, and warns softly on an `owns` value no pool term
 // matches, only when the pool glossary has terms and no legacy glossary is

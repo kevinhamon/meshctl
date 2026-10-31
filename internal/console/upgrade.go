@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// upgrade.go — the console's Upgrade button (console layout spec C30–C33,
-// ADR-0079): POST /api/pool/upgrade/check shows what `meshctl pool upgrade
+// upgrade.go — the console's Upgrade button: POST /api/pool/upgrade/check shows
+// what `meshctl pool upgrade
 // --check` would change; POST /api/pool/upgrade runs `meshctl pool upgrade`
 // for that pool, after the person confirmed the preview. Both run the console's
 // own binary, so the button and the command never differ; nothing is forced

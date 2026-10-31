@@ -8,8 +8,7 @@ import (
 	"strings"
 )
 
-// shellparse.go — the gate's one view of a shell command line (spec: shared
-// understanding, Phase 1 decision 4; ticket 14 prototype findings).
+// shellparse.go — the gate's one view of a shell command line.
 //
 // Every gate rule that reads a Bash command goes through these helpers so the
 // same three false positives never come back:
