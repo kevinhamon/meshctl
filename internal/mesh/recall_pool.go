@@ -46,7 +46,11 @@ func poolGlossaryHits(root string, tokens []string) []RecallHit {
 			if score == 0 {
 				continue
 			}
-			score = score*3 + rankBonus(TierCurrent, confirmed)
+			conf := ConfirmNone
+			if confirmed {
+				conf = ConfirmHuman // pool writes are human-approved by construction
+			}
+			score = kbScore(score, TierCurrent, conf, 0)
 		}
 		hits = append(hits, RecallHit{
 			Kind: "kb", Title: slug,

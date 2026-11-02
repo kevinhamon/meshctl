@@ -48,6 +48,9 @@ counterpart, and an entry with no report line.`,
 			for _, k := range res.Ledgered {
 				fmt.Println("  " + k)
 			}
+			if res.Grant != "" {
+				fmt.Printf("confirmed by policy under the `%s` grant (no human at the prompt)\n", res.Grant)
+			}
 			return nil
 		},
 	}

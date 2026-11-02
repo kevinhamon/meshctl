@@ -243,8 +243,15 @@ func gatePromotion(agentsDir string, p HookPayload) GateDecision {
 	}
 
 	expected := SummaryPath(a.Dir(), harness)
+	granted := false
 	if cause := noHumanCause(p); cause != "" {
-		return gateNoHumanPromotion(agentsDir, a, p, session, branch, call.summaryFile, expected, promoted, cause)
+		// A `kb-promote` grant lifts the no-human deny (grants_lift.go): the
+		// summary is still required, and the command records the action.
+		lifted, note := gateGrantLift(agentsDir, p, a.Name, GrantKBPromote)
+		if !lifted {
+			return gateNoHumanPromotion(agentsDir, a, p, session, branch, call.summaryFile, expected, promoted, cause, note)
+		}
+		granted = true
 	}
 	files := "`" + strings.Join(promoted, "`, `") + "`"
 	if call.summaryFile == "" {
@@ -264,6 +271,9 @@ func gatePromotion(agentsDir string, p HookPayload) GateDecision {
 			named + ". Write `## Intent` (one line, first), `## Grounding`, `## Precedent` and `## Changes`, read the " +
 			"confirmation round out in chat, then re-run the finish: the gate asks the human with your summary." +
 			writeFirstHint(sumPath))
+	}
+	if granted {
+		return gateGrantAllow(GateCheckPromotion, GrantKBPromote)
 	}
 	text := RenderPromotionAsk(a.Dir(), PromotionAsk{Agent: a.Name, Branch: branch, Summary: s, Promoted: promoted,
 		Related: PromotionRelated(agentsDir, a, branch, s)})

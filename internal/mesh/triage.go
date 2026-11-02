@@ -92,6 +92,23 @@ func TriageRefusal(m TriageMode) string {
 		"or a hub session doing that peer's work — and is refused under " + cause + "."
 }
 
+// triageRefusalFor is TriageRefusal for peer's triage pass, with the peer's
+// `triage-apply` grant lifting the refusal of a headless run (dispatch
+// depth or a distil run; never a consult) — grants_lift.go. grant names the
+// grant that lifted it, "" when none did. A held grant that does not apply
+// (paused, cap reached) adds why to the refusal.
+func triageRefusalFor(agentsDir string, peer *Agent, m TriageMode, now time.Time) (refusal, grant string) {
+	r := TriageRefusal(m)
+	if r == "" || peer == nil || m.InSession || !HeadlessNow() {
+		return r, ""
+	}
+	lifted, note := grantLift(agentsDir, peer.Name, GrantTriageApply, now)
+	if !lifted {
+		return r + note, ""
+	}
+	return "", GrantTriageApply
+}
+
 // gateTriage denies a consulted in-session peer invoking `meshctl inbox
 // triage` (any subcommand): the worksheet and apply step need the human.
 func gateTriage(p HookPayload) GateDecision {
@@ -105,7 +122,7 @@ func gateTriage(p HookPayload) GateDecision {
 // order (writes nothing), else the peer's worksheet, written and returned as
 // text. Refused with TriageRefusal's reason where no human is at the prompt.
 func InboxTriage(agentsDir string, peer *Agent, mode TriageMode, now time.Time) (string, error) {
-	if r := TriageRefusal(mode); r != "" {
+	if r, _ := triageRefusalFor(agentsDir, peer, mode, now); r != "" {
 		return "", fmt.Errorf("%s", r)
 	}
 	if peer == nil {
@@ -294,7 +311,7 @@ type TriageSkip struct {
 // WriteTriageWorksheet builds the peer's worksheet and writes it at
 // TriageWorksheetPath. Refused (nothing written) where TriageRefusal says so.
 func WriteTriageWorksheet(agentsDir string, peer *Agent, mode TriageMode, now time.Time) (*TriageWorksheet, error) {
-	if r := TriageRefusal(mode); r != "" {
+	if r, _ := triageRefusalFor(agentsDir, peer, mode, now); r != "" {
 		return nil, fmt.Errorf("%s", r)
 	}
 	ws, err := BuildTriageWorksheet(agentsDir, peer, now)

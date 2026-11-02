@@ -219,8 +219,8 @@ func acquireDispatchLock(ctx context.Context, agentsDir, caller, target string, 
 	l.held = true
 	// Write ownership info ($LOCK/info).
 	_ = os.WriteFile(filepath.Join(lockPath, "info"),
-		[]byte(fmt.Sprintf("pid=%d caller=%s target=%s started=%s\n",
-			pid, caller, target, now.UTC().Format("2006-01-02T15:04:05Z"))), 0o644)
+		[]byte(fmt.Sprintf("pid=%d scope=%s caller=%s target=%s started=%s\n",
+			pid, procScope(), caller, target, now.UTC().Format("2006-01-02T15:04:05Z"))), 0o644)
 	return l, nil
 }
 
@@ -244,9 +244,10 @@ func lockAge(lockPath string, now time.Time) int {
 // lockReclaimable decides whether a held lock may be taken over. The holder's
 // pid is recorded in $LOCK/info; a dead pid is reclaimable at once, a live one
 // never is (a hung holder is the operator's call, see the BUSY message), and an
-// unknown one (no info yet, or a platform that cannot probe) falls back to age.
+// unknown one (no info yet, a platform that cannot probe, or a holder in another
+// scope, whose pid means nothing here) falls back to age.
 func lockReclaimable(lockPath string, now time.Time) bool {
-	if pid := lockHolderPID(lockPath); pid > 0 {
+	if pid := lockHolderPID(lockPath); pid > 0 && scopeLocal(lockInfoField(lockPath, "scope")) {
 		if alive, known := pidAlive(pid); known {
 			return !alive
 		}
@@ -269,13 +270,18 @@ func reclaimLocked(reclaim string) bool {
 
 // lockHolderPID parses `pid=N` out of $LOCK/info; 0 if absent.
 func lockHolderPID(lockPath string) int {
+	n, _ := strconv.Atoi(lockInfoField(lockPath, "pid"))
+	return n
+}
+
+// lockInfoField returns the value of `key=` in $LOCK/info; "" if absent.
+func lockInfoField(lockPath, key string) string {
 	for _, f := range strings.Fields(readLockInfo(lockPath)) {
-		if v, ok := strings.CutPrefix(f, "pid="); ok {
-			n, _ := strconv.Atoi(v)
-			return n
+		if v, ok := strings.CutPrefix(f, key+"="); ok {
+			return v
 		}
 	}
-	return 0
+	return ""
 }
 
 func readLockInfo(lockPath string) string {

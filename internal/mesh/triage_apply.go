@@ -31,6 +31,7 @@ type TriageApplyOptions struct {
 // TriageApplyResult lists the closed requests, re-read after the close.
 type TriageApplyResult struct {
 	Closed []*Request
+	Grant  string // the grant that let the apply through with no human ("" when a human confirmed it)
 }
 
 // TriageStatus maps a closing verdict to the intake status it sets.
@@ -47,8 +48,15 @@ func TriageResponseBody(l TriageReportLine) string {
 }
 
 // TriageApply closes the named requests of peer a per the report.
-func TriageApply(agentsDir string, a *Agent, o TriageApplyOptions) (*TriageApplyResult, error) {
-	if r := TriageRefusal(o.Mode); r != "" {
+func TriageApply(agentsDir string, a *Agent, o TriageApplyOptions) (_ *TriageApplyResult, err error) {
+	now := o.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	// A `triage-apply` grant lifts the no-human refusal (grants_lift.go);
+	// the report is still required.
+	r, grant := triageRefusalFor(agentsDir, a, o.Mode, o.Now)
+	if r != "" {
 		return nil, fmt.Errorf("%s", r)
 	}
 	if strings.TrimSpace(o.Report) == "" {
@@ -122,7 +130,22 @@ func TriageApply(agentsDir string, a *Agent, o TriageApplyOptions) (*TriageApply
 		return nil, fmt.Errorf("triage apply refused (nothing closed):\n  %s", strings.Join(problems, "\n  "))
 	}
 
-	res := &TriageApplyResult{}
+	res := &TriageApplyResult{Grant: grant}
+	if grant != "" {
+		defer func() {
+			if len(res.Closed) == 0 {
+				return
+			}
+			var ids []string
+			for _, r := range res.Closed {
+				ids = append(ids, r.ID)
+			}
+			detail := fmt.Sprintf("triage apply: closed %s; report %s", strings.Join(ids, ", "), o.Report)
+			if rerr := recordGrantAction(agentsDir, a.Name, grant, detail, o.Session, now); rerr != nil && err == nil {
+				err = fmt.Errorf("triage apply closed %s by policy, but %w", strings.Join(ids, ", "), rerr)
+			}
+		}()
+	}
 	for _, c := range todo {
 		body := TriageResponseBody(c.line)
 		if c.ref.Kind == TriageRefRequest && c.ref.ID != c.req.ID {
@@ -175,6 +198,9 @@ func TriageApplyMarkdown(res *TriageApplyResult) string {
 		fmt.Fprintf(&b, "- %s → %s (triage: %s)\n", r.ID, r.Status, r.Triage)
 	}
 	b.WriteString("\nEach is on its requester's read-back list (`meshctl sent`); no distillation is owed before archive.\n")
+	if res.Grant != "" {
+		fmt.Fprintf(&b, "Applied by policy under the `%s` grant (no human at the prompt).\n", res.Grant)
+	}
 	return b.String()
 }
 
@@ -215,14 +241,23 @@ func gateTriageApply(agentsDir string, p HookPayload) GateDecision {
 	deny := func(reason string) GateDecision {
 		return GateDecision{Deny: true, Check: GateCheckTriage, Reason: reason}
 	}
-	if r := TriageRefusal(TriageMode{InSession: p.InSession, Work: p.Work}); r != "" {
-		return deny(r)
-	}
 	var a *Agent
 	if call.agent != "" {
 		a, _ = FindAgent(agentsDir, call.agent)
 	} else {
 		a = payloadAgent(agentsDir, p)
+	}
+	granted := false
+	if r := TriageRefusal(TriageMode{InSession: p.InSession, Work: p.Work}); r != "" {
+		// A `triage-apply` grant lifts this deny (grants_lift.go); the
+		// report is still required, and the command records the action.
+		note := ""
+		if a != nil {
+			granted, note = gateGrantLift(agentsDir, p, a.Name, GrantTriageApply)
+		}
+		if !granted {
+			return deny(r + note)
+		}
 	}
 	where := "<peer>/" + MemoryDir + "/" + TriageDir + "/<date>.md"
 	if a != nil {
@@ -236,6 +271,9 @@ func gateTriageApply(agentsDir string, p HookPayload) GateDecision {
 	rep, err := ReadTriageReport(path)
 	if rep == nil {
 		return deny("mesh: `inbox triage apply` cannot read the triage report " + path + " (" + err.Error() + ") — write it at " + where + " first.")
+	}
+	if granted {
+		return gateGrantAllow(GateCheckTriage, GrantTriageApply)
 	}
 	peer := "the peer"
 	agentDir := ""

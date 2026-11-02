@@ -130,12 +130,12 @@ existing pool with `meshctl agent bootstrap`.
 ## Command surface (noun → verb)
 
 ```
-meshctl pool    init [path] | upgrade [--check] [--force] [--doctrine-only] | list | teardown [--purge --yes] [--dry-run]
+meshctl pool    init [path] | upgrade [--check [--json]] [--force] [--doctrine-only] | list | teardown [--purge --yes] [--dry-run]
                 register [path] | forget <name|path> | migrate   # machine registry; legacy layout
                 clone <pool-repo-url> [dir]   # rebuild a pool on this machine from its pool repo
-meshctl agent   new <name> | onboard <name|path> | bootstrap | list | identity | brief --agent <peer> [--request <id>]
+meshctl agent   new <name> | onboard <name|path> | bootstrap | list [--json] | identity | brief --agent <peer> [--request <id>]
 meshctl msg     ask <target> <type> "…" [--in-session [--work] | --detach] | send <target> <type> "…"
-meshctl inbox   list [--all] | next [--claim] | claim <id> | release <id>   # list: open queue, priority then age
+meshctl inbox   list [--all] [--json] | next [--claim] [--json] | claim <id> | release <id>   # list: open queue, priority then age
                 respond <id> --status <s> --response "…" | decline <id> --reason "…" [--redirect <agent>]
                 archive <id> | --answered | --closed [--force]
                 triage [--peer <name>]   # worksheet over open requests; from a hub, the walk order
@@ -147,9 +147,9 @@ meshctl kb      begin | finish [--summary-file <summary>] [--abort] | consolidat
                 reconcile [--peer <name>]   # walk order, or a canonical peer's reconcile worksheet
                 confirm <path>[#<slug>]... --report <file> [--accept-ungrounded <path>]...   # ≤5 reviewed entries → ledger + Confirm: on main
 meshctl memory  recall "<q>" [--budget N] [--scope own|canonical] | sessions
-meshctl session start | end | list
-meshctl handoff show | template | set   (set reads the body from stdin; refuses a body that fails lint)
-meshctl state   show | template | set --summary-file <summary>   (the ≤40-line current-state digest, injected at session start; set is a promotion)
+meshctl session start | end | list [--json]
+meshctl handoff show [--json] | template | set   (set reads the body from stdin; refuses a body that fails lint)
+meshctl state   show [--json] | template | set --summary-file <summary>   (the ≤40-line current-state digest, injected at session start; set is a promotion)
 meshctl intuition recall "<q>"
 meshctl hook    session-start | user-prompt | session-beat | session-end | pre-tool-use | post-tool-use | status-line   (wired per-agent; not run by hand)
 meshctl doctor  [--fix] [--json]     # manifests, wiring, KB consistency, pool hygiene
@@ -157,6 +157,11 @@ meshctl console [--open] [--print-url] [--port N] | install | uninstall   # live
 meshctl update  [--check] [--version vX.Y.Z] [--force] | version
 meshctl ask … | send …               (top-level aliases for msg ask|send)
 ```
+
+`--json` on `inbox list/next`, `session list`, `handoff show`, `state show`, `pool upgrade
+--check`, `pending` and `doctor` prints one object with `schema` and `generated`; a field is
+only ever added within a schema version, lists are `[]` when empty, and the exit status is
+the same as without the flag. `agent list --json` is the older bare array, plus `live`.
 
 **Keeping a pool clean across upgrades.** A pool accumulates drift as meshctl evolves:
 stale claims and presence records, orphan KB worktrees, a dead dispatch lock, retired
@@ -393,6 +398,28 @@ agreement to its intent, its grounding (cited, or marked *assumption*) and its p
 4. **No human, no confirmation.** Headless runs and delegated work cannot confirm: a
    promotion or an outbound write ends in `needs-confirm` (the KB branch is parked, the
    response carries the round and the summary path) for the peer's own session to finish.
+5. **Grants (opt-in).** A human may let one of those actions through for a
+   headless run by granting it in the pool config. Grants apply only when no human is at
+   the prompt; an interactive session asks exactly as above. A peer cannot grant itself
+   anything, since writes to `pool/config.yaml` are always asked:
+
+   ```yaml
+   grants:
+     paused: false            # true overrides every grant
+     pool:
+       pool-upgrade: {}       # `pool upgrade --headless`, only when --check is clean
+     peers:
+       <peer>:
+         kb-promote: { max_per_day: 10 }   # also: state-set, kb-confirm, triage-apply
+         "outbound:<surface>": {}          # a dispatchable peer with `mutates` needs one per surface
+   ```
+
+   A promotion a grant lets through still needs its summary. Its ledger entry is marked
+   `by: policy`, and recall shows it as `confirmed·policy`, below human confirmations;
+   a later `kb confirm` makes it human. Every granted action is logged, a capped grant
+   waits for a human once it reaches its daily cap, and the peer's next interactive
+   session start lists everything grants let through since it last ran. `doctor`
+   validates the block.
 
 Recall marks unconfirmed entries; `memory recall --scope canonical` also reads canonical
 peers' knowledge. Session start shows a `# Pending work` block (parked branches, open

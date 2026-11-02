@@ -44,15 +44,24 @@ func gateKBConfirm(agentsDir string, p HookPayload) GateDecision {
 	deny := func(reason string) GateDecision {
 		return GateDecision{Deny: true, Check: GateCheckPromotion, Reason: "mesh: " + reason}
 	}
-	if cause := noHumanCause(p); cause != "" {
-		return deny("`meshctl kb confirm` confirms knowledge, which the human does in the confirmation round — a human must " +
-			"be at the prompt, and this call runs under " + cause + ". Leave it for an interactive session.")
-	}
 	var a *Agent
 	if call.agent != "" {
 		a, _ = FindAgent(agentsDir, call.agent)
 	} else {
 		a = payloadAgent(agentsDir, p)
+	}
+	granted := false
+	if cause := noHumanCause(p); cause != "" {
+		// A `kb-confirm` grant lifts this deny (grants_lift.go); the report
+		// is still required, and the command records the action.
+		note := ""
+		if a != nil {
+			granted, note = gateGrantLift(agentsDir, p, a.Name, GrantKBConfirm)
+		}
+		if !granted {
+			return deny("`meshctl kb confirm` confirms knowledge, which the human does in the confirmation round — a human must " +
+				"be at the prompt, and this call runs under " + cause + ". Leave it for an interactive session." + note)
+		}
 	}
 	if a == nil {
 		return deny("this `meshctl kb confirm` confirms knowledge, but the gate cannot tell which peer it is for — run it " +
@@ -77,6 +86,9 @@ func gateKBConfirm(agentsDir string, p HookPayload) GateDecision {
 	}
 	if err := r.Err(); err != nil {
 		return deny("`kb confirm`: the report is malformed — fix these lines, then re-run:\n" + err.Error())
+	}
+	if granted {
+		return gateGrantAllow(GateCheckPromotion, GrantKBConfirm)
 	}
 	body := []string{fmt.Sprintf("kb confirm confirms %d path(s) in `%s`'s knowledge from %s:", len(call.paths), a.Name, repPath)}
 	body = append(body, KBConfirmAskLines(a, call.paths, r)...)

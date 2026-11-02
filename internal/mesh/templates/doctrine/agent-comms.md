@@ -159,7 +159,7 @@ reads the request + code and writes its answer back into the request file, nothi
 returns, re-read the request file and continue.
 
 Rules:
-- **Advisory targets only** — the architect (guidance/review/decision) and domain experts, whose output is a file. Do **not** auto-dispatch state-mutating agents (pm → tracker, developer → code); those stay human-triggered. (`--in-session --work` is the one exception, and only with the human approving each such delegation — see above.)
+- **Advisory targets only** — the architect (guidance/review/decision) and domain experts, whose output is a file. Do **not** auto-dispatch state-mutating agents (pm → tracker, developer → code); those stay human-triggered unless the pool config's `grants:` block grants `outbound:<surface>` for every surface they mutate. (`--in-session --work` is the one exception, and only with the human approving each such delegation — see above.)
 - **A dispatched agent never chains.** If answering would need *another* agent's input (or a genuinely new consequential decision not covered by an accepted decision record), the peer sets `status: needs-human`, names the agent/decision + the exact question, gives a recommendation, and **stops**. The human drives the next hop — cascades are never automatic.
 - The caller reads `needs-human` back and surfaces it to the user; it does not proceed on that point.
 

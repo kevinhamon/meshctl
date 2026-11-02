@@ -529,7 +529,7 @@ func poolInitCmd() *cobra.Command {
 }
 
 func poolUpgradeCmd() *cobra.Command {
-	var force, check, doctrineOnly bool
+	var force, check, doctrineOnly, asJSON, headless bool
 	c := &cobra.Command{
 		Use:   "upgrade",
 		Short: "Upgrade the pool to this binary + the installed harnesses: pool directory, doctrine and every agent's wiring",
@@ -545,7 +545,10 @@ func poolUpgradeCmd() *cobra.Command {
 			"     (e.g. swaps an opencode V1 plugin for the V2 one), refreshes mesh-owned skills, adds missing\n" +
 			"     CLAUDE.md stanzas. Never touches agent.yaml or an agent's role doctrine.\n" +
 			"--check previews every step (plus warnings: live sessions, uncommitted changes, global harness config)\n" +
-			"without writing anything; it exits 1 when an upgrade is pending.",
+			"without writing anything; it exits 1 when an upgrade is pending.\n" +
+			"With no human at the prompt (--headless, dispatch depth or a distil run) it applies only when the pool config\n" +
+			"grants `grants.pool.pool-upgrade` (not paused, under its cap) and --check flags nothing; otherwise it refuses\n" +
+			"and changes nothing. Each such run is recorded in the policy log.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := agentsDir()
 			if err != nil {
@@ -556,18 +559,33 @@ func poolUpgradeCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				printUpgradePlan(plan, doctrineOnly)
+				if asJSON {
+					if err := printJSON(mesh.NewUpgradeCheckJSON(plan, doctrineOnly, time.Now())); err != nil {
+						return err
+					}
+				} else {
+					printUpgradePlan(plan, doctrineOnly)
+				}
 				if plan.Pending() {
 					return &mesh.CodedError{Code: 1, Msg: "upgrade pending — run `meshctl pool upgrade` to apply"}
 				}
 				return nil
 			}
+			// No human at the prompt: only the pool-wide
+			// grant and a clean --check let the upgrade through.
+			if cause := mesh.CLINoHumanCause(headless); cause != "" {
+				return mesh.RunHeadlessPoolUpgrade(dir, mesh.HeadlessUpgradeOptions{
+					Cause: cause, DoctrineOnly: doctrineOnly, Version: resolveVersion(), Now: time.Now(),
+				}, func() error { return runPoolUpgrade(dir, force, doctrineOnly) })
+			}
 			return runPoolUpgrade(dir, force, doctrineOnly)
 		},
 	}
+	c.Flags().BoolVar(&headless, "headless", false, "no human at the prompt: apply only with the pool-wide `pool-upgrade` grant and a --check with no warnings")
 	c.Flags().BoolVar(&force, "force", false, "overwrite locally-edited doctrine (each is backed up first)")
 	c.Flags().BoolVar(&check, "check", false, "preview the upgrade without writing anything (exit 1 if one is pending)")
 	c.Flags().BoolVar(&doctrineOnly, "doctrine-only", false, "upgrade the pool doctrine only; leave agent wiring alone")
+	c.Flags().BoolVar(&asJSON, "json", false, "with --check: machine-readable preview (versioned schema); exit status as without it")
 	return c
 }
 
@@ -1296,6 +1314,7 @@ need a human (text you wrote, doctrine you edited) are always reported, never ch
 
 func sessionCmd() *cobra.Command {
 	var agent string
+	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "session start|end|list",
 		Short: "Register/deregister session presence; warn on workspace overlap",
@@ -1331,6 +1350,9 @@ func sessionCmd() *cobra.Command {
 					return err
 				}
 			case "list":
+				if asJSON {
+					return printJSON(mesh.NewSessionListJSON(a, mesh.SessionList(a, now), now))
+				}
 				for _, s := range mesh.SessionList(a, now) {
 					claim := s.CurrentClaim
 					if claim == "" {
@@ -1345,6 +1367,7 @@ func sessionCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&agent, "agent", "", "agent workspace (default: $AGENT_NAME or cwd)")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "with list: machine-readable sessions (versioned schema)")
 	return cmd
 }
 
@@ -1354,7 +1377,7 @@ func inboxCmd() *cobra.Command {
 	var agent string
 	parent := &cobra.Command{Use: "inbox", Short: "Inbox: list the open queue, claim a request by id, or release one"}
 
-	var listAll bool
+	var listAll, listJSON bool
 	inboxList := func(cmd *cobra.Command, args []string) error {
 		dir, err := agentsDir()
 		if err != nil {
@@ -1368,6 +1391,9 @@ func inboxCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if listJSON {
+			return printJSON(mesh.NewInboxListJSON(a, q, time.Now()))
+		}
 		if len(q) == 0 && listAll {
 			fmt.Println("(inbox empty)")
 			return nil
@@ -1378,8 +1404,9 @@ func inboxCmd() *cobra.Command {
 
 	list := &cobra.Command{Use: "list", Short: "List the open queue (pending + in-progress), priority then age; --all for every status", RunE: inboxList}
 	list.Flags().BoolVar(&listAll, "all", false, "show every status, not just pending + in-progress")
+	list.Flags().BoolVar(&listJSON, "json", false, "machine-readable queue (versioned schema)")
 
-	var claim bool
+	var claim, nextJSON bool
 	next := &cobra.Command{
 		Use:   "next",
 		Short: "Return the next pending request (with --claim, atomically claim it)",
@@ -1398,6 +1425,9 @@ func inboxCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if nextJSON {
+				return printJSON(mesh.NewInboxNextJSON(a, r, claim, now))
+			}
 			if r == nil {
 				fmt.Println("(no pending requests)")
 				return nil
@@ -1407,6 +1437,7 @@ func inboxCmd() *cobra.Command {
 		},
 	}
 	next.Flags().BoolVar(&claim, "claim", false, "atomically claim the returned request")
+	next.Flags().BoolVar(&nextJSON, "json", false, "machine-readable result; request is null when nothing is pending (versioned schema)")
 
 	var archiveAnswered, archiveClosed, archiveForce bool
 	archive := &cobra.Command{
@@ -1748,7 +1779,7 @@ func intuitionCmd() *cobra.Command {
 // handoffCmd — the resumable session handoff: where we are + next step.
 func handoffCmd() *cobra.Command {
 	var agent string
-	var force bool
+	var force, showJSON bool
 	cmd := &cobra.Command{
 		Use:   "handoff show|template|set",
 		Short: "Read/write the agent's authoritative session handoff (current focus + next step)",
@@ -1764,6 +1795,9 @@ func handoffCmd() *cobra.Command {
 			a, err := resolveContextAgent(dir, agent)
 			if err != nil {
 				return err
+			}
+			if showJSON {
+				return printJSON(mesh.NewDocJSON(a, mesh.HandoffPath(a), time.Now()))
 			}
 			s, err := mesh.HandoffShow(a)
 			if err != nil {
@@ -1836,6 +1870,7 @@ func handoffCmd() *cobra.Command {
 		},
 	}
 	show.Flags().StringVar(&agent, "agent", "", "agent (default: cwd/$AGENT_NAME)")
+	show.Flags().BoolVar(&showJSON, "json", false, "machine-readable: exists, updated, path, body (versioned schema)")
 	set.Flags().StringVar(&agent, "agent", "", "agent (default: cwd/$AGENT_NAME)")
 	set.Flags().BoolVar(&force, "force", false, "write even when the body fails lint (missing section, placeholder, over budget)")
 	cmd.AddCommand(show, template, set)
@@ -1847,7 +1882,7 @@ func handoffCmd() *cobra.Command {
 // what the world looks like. Same fixed shape, same one-command write.
 func stateCmd() *cobra.Command {
 	var agent, summaryFile string
-	var force bool
+	var force, showJSON bool
 	cmd := &cobra.Command{
 		Use:   "state show|template|set",
 		Short: "Read/write the agent's current-state digest (knowledge/state.md, ≤40 lines; injected at session start)",
@@ -1863,6 +1898,9 @@ func stateCmd() *cobra.Command {
 			a, err := resolveContextAgent(dir, agent)
 			if err != nil {
 				return err
+			}
+			if showJSON {
+				return printJSON(mesh.NewDocJSON(a, mesh.StatePath(a), time.Now()))
 			}
 			s, err := mesh.StateShow(a)
 			if err != nil {
@@ -1933,15 +1971,20 @@ func stateCmd() *cobra.Command {
 				SummaryFile: summaryFile,
 				Session:     mesh.ResolveAgentSessionID(a, os.Getpid(), now),
 				Now:         now,
+				PoolRoot:    dir,
 			})
 			if err != nil {
 				return &mesh.CodedError{Code: 1, Msg: err.Error()}
 			}
 			fmt.Printf("wrote %s; confirmed %d section(s) as %s Confirm: %s\n", res.Path, len(res.Ledgered), res.Confirm, res.Intent)
+			if res.Grant != "" {
+				fmt.Printf("confirmed by policy under the `%s` grant (no human at the prompt)\n", res.Grant)
+			}
 			return nil
 		},
 	}
 	show.Flags().StringVar(&agent, "agent", "", "agent (default: cwd/$AGENT_NAME)")
+	show.Flags().BoolVar(&showJSON, "json", false, "machine-readable: exists, updated, path, body (versioned schema)")
 	set.Flags().StringVar(&agent, "agent", "", "agent (default: cwd/$AGENT_NAME)")
 	set.Flags().BoolVar(&force, "force", false, "write even when the body fails lint")
 	set.Flags().StringVar(&summaryFile, "summary-file", "", "your confirmation summary, <you>/.memory/confirm/<session>.md (required)")
@@ -2205,6 +2248,10 @@ confirm: bulk confirmation of reviewed entries from a reconcile report, five at 
 				} else if res.Confirm != "" {
 					fmt.Printf("KB changes merged to main and confirmed: %s Confirm: %s (%d ledger line(s) written, %d dropped); worktree removed\n",
 						res.Confirm, res.Intent, len(res.Ledgered), len(res.Dropped))
+					if res.Grant != "" {
+						fmt.Printf("confirmed by policy under the `%s` grant (no human at the prompt); recorded in %s\n",
+							res.Grant, mesh.PolicyLogPath(dir))
+					}
 				} else {
 					fmt.Println("KB changes merged to main; worktree removed")
 				}

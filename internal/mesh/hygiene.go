@@ -319,8 +319,11 @@ func agentHygiene(agentsDir string, a *Agent, now time.Time) []HygieneItem {
 			gone := err != nil || json.Unmarshal(b, &js) != nil
 			switch {
 			case gone:
-			case js.HarnessPID > 0:
+			case js.HarnessPID > 0 && scopeLocal(js.ProcScope):
 				gone = !processAlive(js.HarnessPID)
+			case js.HarnessPID > 0:
+				// Another scope's process: its list is refreshed every turn.
+				gone = int(now.Unix()-js.At) > staleSec()
 			default:
 				gone = !fileExists(sessionPath(dir, js.Session))
 			}

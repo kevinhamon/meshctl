@@ -35,8 +35,9 @@ type Agent struct {
 	Owns    []string `yaml:"owns"`
 	Domains []string `yaml:"domains"`
 	Accepts []Accept `yaml:"accepts"`
-	// Dispatchable is a pointer so we can tell "unset" from "false" and apply
-	// the mutates-implies-not-dispatchable invariant deterministically.
+	// Dispatchable is a pointer so we can tell "unset" from "false". With
+	// mutates it takes effect only under outbound grants in the pool config:
+	// read it through IsDispatchable / DispatchRefusal.
 	Dispatchable *bool    `yaml:"dispatchable"`
 	Mutates      []string `yaml:"mutates"`
 	Badge        Badge    `yaml:"badge"`
@@ -73,14 +74,21 @@ func (a *Agent) HarnessName() string {
 // Dir returns the workspace directory the manifest was loaded from.
 func (a *Agent) Dir() string { return a.dir }
 
-// IsDispatchable reports whether the CLI may run this agent headlessly. The
-// invariant (len(mutates)>0 ⇒ not dispatchable) is enforced here so a
-// misconfigured manifest can never be dispatched even if the field says true.
+// DeclaresDispatchable reports the manifest's `dispatchable` flag as written.
+func (a *Agent) DeclaresDispatchable() bool {
+	return a.Dispatchable != nil && *a.Dispatchable
+}
+
+// IsDispatchable reports whether this agent may be run headlessly on the
+// manifest alone, needing no grant: declared dispatchable and mutating
+// nothing. A peer with mutates is dispatched headless only when the pool
+// config grants every surface; that check needs the pool, so
+// the dispatch path uses DispatchRefusal instead.
 func (a *Agent) IsDispatchable() bool {
 	if len(a.Mutates) > 0 {
 		return false
 	}
-	return a.Dispatchable != nil && *a.Dispatchable
+	return a.DeclaresDispatchable()
 }
 
 // IsWorkDelegable reports whether a hub session may delegate write-capable
@@ -272,10 +280,9 @@ func (a *Agent) Validate() []string {
 	if len(a.Accepts) == 0 {
 		problems = append(problems, "accepts is empty (inbox handles no request types)")
 	}
-	// The core safety invariant.
-	if len(a.Mutates) > 0 && a.Dispatchable != nil && *a.Dispatchable {
-		problems = append(problems, fmt.Sprintf("dispatchable:true conflicts with mutates:%v — a state-mutating agent must not be headlessly dispatchable", a.Mutates))
-	}
+	// dispatchable:true with mutates is not a manifest error:
+	// such a peer is dispatched headless only under outbound grants in the
+	// pool config, and doctor warns for each ungranted surface.
 	if a.Badge.Label == "" {
 		problems = append(problems, "badge.label is empty")
 	}

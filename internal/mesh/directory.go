@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // The marker wrapping any --write snapshot so humans + tooling know it is
@@ -31,6 +32,9 @@ func DirectoryMarkdown(agents []*Agent, cfg PoolConfig) string {
 		}
 		if len(a.Mutates) > 0 {
 			dispatch = fmt.Sprintf("send-only (mutates: %s)", strings.Join(a.Mutates, ","))
+			if dispatchableUnder(cfg, a) {
+				dispatch = fmt.Sprintf("ask+send (mutates: %s, granted)", strings.Join(a.Mutates, ","))
+			}
 		}
 		fmt.Fprintf(&b, "| **%s** | %s | `%s/` | %s | %s | %s |\n",
 			a.Name,
@@ -58,11 +62,13 @@ type dirEntry struct {
 	Mutates      []string `json:"mutates"`
 	Model        string   `json:"model,omitempty"`
 	Repo         string   `json:"repo,omitempty"`
+	Live         int      `json:"live"` // sessions `session list` shows (heartbeat in the stale window)
 }
 
 // DirectoryJSON renders the roster as machine-readable JSON for routing.
 func DirectoryJSON(agents []*Agent, cfg PoolConfig) (string, error) {
 	out := make([]dirEntry, 0, len(agents))
+	now := time.Now()
 	for _, a := range agents {
 		out = append(out, dirEntry{
 			Name:         a.Name,
@@ -73,10 +79,11 @@ func DirectoryJSON(agents []*Agent, cfg PoolConfig) (string, error) {
 			Owns:         a.Owns,
 			Domains:      a.Domains,
 			Accepts:      a.Accepts,
-			Dispatchable: a.IsDispatchable(),
+			Dispatchable: dispatchableUnder(cfg, a),
 			Mutates:      a.Mutates,
 			Model:        a.Model,
 			Repo:         a.Repo,
+			Live:         countLiveSessions(a.Dir(), now),
 		})
 	}
 	b, err := json.MarshalIndent(out, "", "  ")

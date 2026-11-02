@@ -49,14 +49,14 @@ Draft a small roster — **start minimal, grow later.** For each proposed agent 
 | title / role | one line each |
 | owns / domains | ownership tags / capability tags |
 | accepts | request types it handles (`guidance`, `review`, `decision`, `fyi`, …) |
-| mutates | external systems it writes (`code`, `tracker`, `prod`…). **Non-empty ⇒ not dispatchable** |
+| mutates | external systems it writes (`code`, `tracker`, `prod`…). **Non-empty ⇒ not dispatchable, unless the pool config grants every surface** |
 | dispatchable | advisory read/analysis agents = true; mutators = false |
 | harness | claude \| opencode |
 
 Guidance: one agent per **distinct responsibility with a real ownership boundary** —
 not one per task. Prefer 2–4 agents to start. Advisory experts (architecture, a domain,
 a datastore) are dispatchable; anything that writes code or a tracker is `send`-only and
-human-triggered (the invariant: `mutates` non-empty ⇒ `dispatchable:false`). Present the
+human-triggered (`mutates` non-empty ⇒ never dispatched unless the pool config's `grants:` block grants `outbound:<surface>` for each one; grants are a human's pool-config edit, never set them for an agent). Present the
 roster, note trade-offs, recommend one shape, and **get explicit approval** before
 scaffolding.
 

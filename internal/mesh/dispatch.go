@@ -65,12 +65,9 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 		o.From = CallerName()
 	}
 
-	// Refuse state-mutating targets as data, not prose.
-	if !target.IsDispatchable() {
-		reason := "not dispatchable"
-		if len(target.Mutates) > 0 {
-			reason = fmt.Sprintf("mutates %v — state-mutating agents stay human-triggered", target.Mutates)
-		}
+	// Refuse state-mutating targets as data, not prose — unless the pool
+	// config grants every surface they mutate.
+	if reason := DispatchRefusal(agentsDir, target); reason != "" {
 		return nil, 1, fmt.Errorf("refusing to dispatch %q: %s. Use `meshctl send %s %s \"…\"` and let the human trigger it",
 			target.Name, reason, target.Name, o.Type)
 	}

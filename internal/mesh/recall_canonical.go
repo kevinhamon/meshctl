@@ -83,9 +83,9 @@ func CanonicalPeers(root string, cfg PoolConfig, self string) ([]*Agent, error) 
 // CanonicalPeerHits searches every canonical peer's current and log tiers
 // (not the caller's own KB) for query. Each hit is a kb hit with Via set to
 // the peer and Where holding `mesh://<peer>/<kb-path>` references, one per
-// source file. Hits are deduplicated per source set, ordered confirmed before
-// unconfirmed (by the owning peer's ledger), then by score and
-// recency, and capped at CanonicalPeerHitCap. Read-only.
+// source file. Hits are deduplicated per source set, ordered human-confirmed,
+// then policy-confirmed, then unconfirmed (by the owning peer's ledger), then
+// by score and recency, and capped at CanonicalPeerHitCap. Read-only.
 func CanonicalPeerHits(agent *Agent, query string) ([]RecallHit, error) {
 	root := filepath.Dir(agent.Dir())
 	peers, err := CanonicalPeers(root, LoadPoolConfig(root), agent.Name)
@@ -118,17 +118,15 @@ func CanonicalPeerHits(agent *Agent, query string) ([]RecallHit, error) {
 				}
 			}
 			tier := bestTier(srcs)
-			confirmed := ledger.topicConfirmed(t.Topic, srcs)
-			if score > 0 {
-				score = score*3 + rankBonus(tier, confirmed) + refsPrior(t.Refs)
-			}
+			conf := ledger.topicConfirmation(t.Topic, srcs)
 			where := make([]string, len(srcs))
 			for i, s := range srcs {
 				where[i] = MeshRef{Owner: p.Name, Path: kbRelPath(s)}.String()
 			}
 			h := RecallHit{
 				Kind: "kb", Title: t.Topic, Where: where, Date: t.Freshness,
-				Score: score, Tier: tier, Via: p.Name, Confirmed: confirmed,
+				Score: kbScore(score, tier, conf, t.Refs), Tier: tier, Via: p.Name,
+				Confirmed: conf != ConfirmNone, ConfirmedBy: conf.By(),
 			}
 			key := strings.Join(where, " ")
 			if prev, ok := best[key]; !ok || peerHitBefore(h, prev) {
@@ -147,11 +145,12 @@ func CanonicalPeerHits(agent *Agent, query string) ([]RecallHit, error) {
 	return hits, nil
 }
 
-// peerHitBefore orders cross-peer hits: confirmed first, then score, then
-// recency, then a stable textual tiebreak.
+// peerHitBefore orders cross-peer hits: human-confirmed, then
+// policy-confirmed, then unconfirmed; then score, then recency, then a stable
+// textual tiebreak.
 func peerHitBefore(a, b RecallHit) bool {
-	if a.Confirmed != b.Confirmed {
-		return a.Confirmed
+	if ca, cb := a.confirmation(), b.confirmation(); ca != cb {
+		return ca > cb
 	}
 	if a.Score != b.Score {
 		return a.Score > b.Score

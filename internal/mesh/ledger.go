@@ -41,12 +41,59 @@ func LedgerPath(agentDir string) string {
 
 // LedgerEntry is one ledger line: a whole-file Hash, or per-anchor Sections
 // for a sectioned file. Confirmed (YYYY-MM-DD) and Session record when and in
-// which session the human confirmed it.
+// which session the human confirmed it. By is LedgerByPolicy when a grant,
+// not a human, let the confirmation through, with Grant naming
+// it; empty By is a human confirmation.
 type LedgerEntry struct {
 	Hash      string            `yaml:"hash,omitempty"`
 	Confirmed string            `yaml:"confirmed,omitempty"`
 	Session   string            `yaml:"session,omitempty"`
 	Sections  map[string]string `yaml:"sections,omitempty"`
+	By        string            `yaml:"by,omitempty"`
+	Grant     string            `yaml:"grant,omitempty"`
+}
+
+// LedgerByPolicy is LedgerEntry.By for a confirmation a grant let through.
+const LedgerByPolicy = "policy"
+
+// Confirmation is how an entry stands against the ledger now: unconfirmed,
+// confirmed by policy (a grant let it through) or confirmed by a
+// human. The order is the rank: human above policy above unconfirmed.
+type Confirmation int
+
+const (
+	ConfirmNone   Confirmation = iota // no matching ledger line
+	ConfirmPolicy                     // matches a line a grant wrote
+	ConfirmHuman                      // matches a line a human confirmed
+)
+
+// String renders c as recall and the worksheet show it.
+func (c Confirmation) String() string {
+	switch c {
+	case ConfirmHuman:
+		return "confirmed"
+	case ConfirmPolicy:
+		return "confirmed·" + LedgerByPolicy
+	}
+	return "unconfirmed"
+}
+
+// By is the confirmer as a RecallHit carries it: LedgerByPolicy for a policy
+// confirmation, else "".
+func (c Confirmation) By() string {
+	if c == ConfirmPolicy {
+		return LedgerByPolicy
+	}
+	return ""
+}
+
+// confirmation is what a matching line of e confirms: human only when By is
+// empty. Any other By reads as policy, never as a human.
+func (e LedgerEntry) confirmation() Confirmation {
+	if e.By == "" {
+		return ConfirmHuman
+	}
+	return ConfirmPolicy
 }
 
 // Ledger is the parsed ledger keyed by knowledge-relative path
@@ -200,6 +247,12 @@ func RenderLedger(l Ledger) []byte {
 		if e.Session != "" {
 			fmt.Fprintf(&b, "  session: %s\n", ledgerScalar(e.Session))
 		}
+		if e.By != "" {
+			fmt.Fprintf(&b, "  by: %s\n", ledgerScalar(e.By))
+		}
+		if e.Grant != "" {
+			fmt.Fprintf(&b, "  grant: %s\n", ledgerScalar(e.Grant))
+		}
 		if len(e.Sections) > 0 {
 			b.WriteString("  sections:\n")
 			for _, a := range ledgerKeys(e.Sections) {
@@ -239,6 +292,17 @@ func (l Ledger) Confirmed(agentDir, rel string) bool {
 // ledger hash now.
 func (l Ledger) SectionConfirmed(agentDir, rel, anchor string) bool {
 	return l.check(agentDir).sectionConfirmed(kbRelPath(rel), anchor)
+}
+
+// Confirmation is Confirmed with who confirmed: ConfirmNone, ConfirmPolicy or
+// ConfirmHuman.
+func (l Ledger) Confirmation(agentDir, rel string) Confirmation {
+	return l.check(agentDir).confirmation(kbRelPath(rel))
+}
+
+// SectionConfirmation is SectionConfirmed with who confirmed.
+func (l Ledger) SectionConfirmation(agentDir, rel, anchor string) Confirmation {
+	return l.check(agentDir).sectionConfirmation(kbRelPath(rel), anchor)
 }
 
 func (l Ledger) check(agentDir string) *ledgerCheck {
@@ -321,65 +385,90 @@ func (c *ledgerCheck) file(rel string) *ledgerFileState {
 	return st
 }
 
-// confirmed: the whole entry matches (every section of a sectioned file).
+// confirmed: the whole entry matches (every section of a sectioned file),
+// by a human or by policy.
 func (c *ledgerCheck) confirmed(rel string) bool {
+	return c.confirmation(rel) != ConfirmNone
+}
+
+// confirmation: the whole entry matches, and who confirmed it.
+func (c *ledgerCheck) confirmation(rel string) Confirmation {
 	e, ok := c.ledger.Entries[rel]
 	st := c.file(rel)
 	if !ok || !st.ok {
-		return false
+		return ConfirmNone
 	}
 	if LedgerSectioned(rel) {
 		if len(st.entry.Sections) == 0 {
-			return false
+			return ConfirmNone
 		}
 		for a, h := range st.entry.Sections {
 			if e.Sections[a] != h {
-				return false
+				return ConfirmNone
 			}
 		}
-		return true
+		return e.confirmation()
 	}
-	return e.Hash != "" && e.Hash == st.entry.Hash
+	if e.Hash != "" && e.Hash == st.entry.Hash {
+		return e.confirmation()
+	}
+	return ConfirmNone
 }
 
 // sectionConfirmed: one anchor of a sectioned file matches.
 func (c *ledgerCheck) sectionConfirmed(rel, anchor string) bool {
+	return c.sectionConfirmation(rel, anchor) != ConfirmNone
+}
+
+// sectionConfirmation: one anchor of a sectioned file matches, and who
+// confirmed it (the entry's By covers all its sections).
+func (c *ledgerCheck) sectionConfirmation(rel, anchor string) Confirmation {
 	e, ok := c.ledger.Entries[rel]
 	st := c.file(rel)
 	h, has := st.entry.Sections[anchor]
-	return ok && st.ok && has && e.Sections[anchor] == h
+	if ok && st.ok && has && e.Sections[anchor] == h {
+		return e.confirmation()
+	}
+	return ConfirmNone
 }
 
-// topicConfirmed decides a recall topic: every current- or log-tier source
-// must be confirmed. A topic drawn from a section heading of a sectioned file
-// answers for that section only; any other topic of the file (its stem, a
-// tag) needs the whole file. Inbox sources are proposals and never confirm.
-func (c *ledgerCheck) topicConfirmed(topic string, sources []string) bool {
+// topicConfirmation decides a recall topic: every current- or log-tier source
+// must be confirmed, and the topic stands as its weakest source (one policy
+// source makes the topic policy-confirmed). A topic drawn from a section
+// heading of a sectioned file answers for that section only; any other topic
+// of the file (its stem, a tag) needs the whole file. Inbox sources are
+// proposals and never confirm.
+func (c *ledgerCheck) topicConfirmation(topic string, sources []string) Confirmation {
 	n := 0
+	level := ConfirmHuman
 	for _, src := range sources {
 		if kbTier(src) == TierInbox {
 			continue
 		}
 		n++
 		rel := kbRelPath(src)
+		var got Confirmation
+		anchor := ""
 		if LedgerSectioned(rel) {
-			anchor := ""
 			for _, s := range c.file(rel).sections {
 				if s.Anchor != LedgerPreamble && normTopic(s.Heading) == topic {
 					anchor = s.Anchor
 					break
 				}
 			}
-			if anchor != "" {
-				if !c.sectionConfirmed(rel, anchor) {
-					return false
-				}
-				continue
-			}
 		}
-		if !c.confirmed(rel) {
-			return false
+		if anchor != "" {
+			got = c.sectionConfirmation(rel, anchor)
+		} else {
+			got = c.confirmation(rel)
 		}
+		if got == ConfirmNone {
+			return ConfirmNone
+		}
+		level = min(level, got)
 	}
-	return n > 0
+	if n == 0 {
+		return ConfirmNone
+	}
+	return level
 }

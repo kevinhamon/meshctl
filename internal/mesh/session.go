@@ -29,8 +29,11 @@ type Session struct {
 	// Background is set when the harness runs without a terminal window
 	// (harnessInBackground): its TTY is a pseudo-terminal no window shows, so
 	// there is nothing to bring to the front.
-	Background bool   `json:"background,omitempty"`
-	path       string `json:"-"`
+	Background bool `json:"background,omitempty"`
+	// ProcScope is where HarnessPID is valid (procScope); empty on records
+	// written before scopes existed.
+	ProcScope string `json:"proc_scope,omitempty"`
+	path      string `json:"-"`
 }
 
 // Scheduled jobs belong to the harness process, not the conversation:
@@ -42,7 +45,8 @@ type Session struct {
 // JobSet is the scheduled jobs one harness process runs, as of At.
 type JobSet struct {
 	HarnessPID int          `json:"harness_pid,omitempty"`
-	Session    string       `json:"session,omitempty"` // when the harness process is unknown
+	ProcScope  string       `json:"proc_scope,omitempty"` // where HarnessPID is valid
+	Session    string       `json:"session,omitempty"`    // when the harness process is unknown
 	Jobs       []SessionJob `json:"jobs"`
 	At         int64        `json:"at"`
 }
@@ -50,10 +54,15 @@ type JobSet struct {
 func jobsDir(agentDir string) string { return filepath.Join(sessionsDir(agentDir), "jobs") }
 
 // jobsPath is where the jobs of session s are kept: by its harness process,
-// else by its id.
+// else by its id. A scoped pid carries its scope's tag, since the same pid in
+// two namespaces is two processes.
 func jobsPath(agentDir string, s *Session) string {
 	if s.HarnessPID > 0 {
-		return filepath.Join(jobsDir(agentDir), "pid-"+strconv.Itoa(s.HarnessPID)+".json")
+		name := "pid-" + strconv.Itoa(s.HarnessPID)
+		if s.ProcScope != "" {
+			name += "-" + scopeTag(s.ProcScope)
+		}
+		return filepath.Join(jobsDir(agentDir), name+".json")
 	}
 	return filepath.Join(jobsDir(agentDir), "session-"+s.ID+".json")
 }
@@ -71,9 +80,21 @@ func SessionJobs(agent *Agent, s *Session) (JobSet, bool) {
 	return js, true
 }
 
-// harnessAlive reports whether the session's harness process is still
-// running (false when it was never recorded).
-func (s *Session) harnessAlive() bool { return s.HarnessPID > 0 && processAlive(s.HarnessPID) }
+// harnessState reports whether the session's harness process is still
+// running. known is false when the pid was never recorded or was recorded in
+// another scope, where probing it would ask about some other process.
+func (s *Session) harnessState() (alive, known bool) {
+	if s.HarnessPID <= 0 || !scopeLocal(s.ProcScope) {
+		return false, false
+	}
+	return processAlive(s.HarnessPID), true
+}
+
+// harnessAlive reports whether the harness is known to be running here.
+func (s *Session) harnessAlive() bool {
+	alive, known := s.harnessState()
+	return known && alive
+}
 
 // SessionJob is one scheduled job a session runs, as the harness reports it.
 type SessionJob struct {
@@ -144,6 +165,7 @@ func SessionStart(agent *Agent, id string, pid int, now time.Time) (warning stri
 	s := &Session{ID: id, PID: pid, Started: now.Unix(), LastBeat: now.Unix(), path: sessionPath(agent.Dir(), id)}
 	s.HarnessPID, s.TTY = harnessTerminal(os.Getpid())
 	s.Background = harnessInBackground(s.HarnessPID)
+	s.ProcScope = procScope()
 	if err := writeSession(s); err != nil {
 		return "", err
 	}
@@ -199,6 +221,7 @@ func TouchSession(agent *Agent, id string, pid int, now time.Time) error {
 		s = &Session{ID: id, PID: pid, Started: now.Unix(), path: p}
 		s.HarnessPID, s.TTY = harnessTerminal(os.Getpid())
 		s.Background = harnessInBackground(s.HarnessPID)
+		s.ProcScope = procScope()
 	}
 	s.LastBeat = now.Unix()
 	return writeSession(s)
@@ -217,7 +240,7 @@ func SetSessionJobs(agent *Agent, id string, pid int, jobs []SessionJob, now tim
 	if err := os.MkdirAll(jobsDir(agent.Dir()), 0o755); err != nil {
 		return err
 	}
-	js := JobSet{HarnessPID: s.HarnessPID, Jobs: jobs, At: now.Unix()}
+	js := JobSet{HarnessPID: s.HarnessPID, ProcScope: s.ProcScope, Jobs: jobs, At: now.Unix()}
 	if s.HarnessPID == 0 {
 		js.Session = s.ID
 	}
@@ -227,7 +250,8 @@ func SetSessionJobs(agent *Agent, id string, pid int, jobs []SessionJob, now tim
 
 // OpenSessions lists a peer's sessions that are still open, without reaping
 // anything (the console only reads): those whose harness process is alive,
-// or, when it is unknown, whose heartbeat is fresh. Oldest first.
+// or, when that is unknown (not recorded, or recorded in another scope), whose
+// heartbeat is fresh. Oldest first.
 func OpenSessions(agent *Agent, now time.Time) []*Session {
 	entries, err := os.ReadDir(sessionsDir(agent.Dir()))
 	if err != nil {
@@ -243,7 +267,7 @@ func OpenSessions(agent *Agent, now time.Time) []*Session {
 			continue
 		}
 		fresh := int(now.Unix()-s.LastBeat) <= staleSec()
-		if s.harnessAlive() || (s.HarnessPID == 0 && fresh) {
+		if alive, known := s.harnessState(); (known && alive) || (!known && fresh) {
 			out = append(out, s)
 		}
 	}
@@ -266,6 +290,24 @@ func sessionAlive(agentDir, id string, now time.Time) bool {
 		return false
 	}
 	return int(now.Unix()-s.LastBeat) <= staleSec()
+}
+
+// countLiveSessions counts what liveSessions returns, without reaping.
+func countLiveSessions(agentDir string, now time.Time) int {
+	entries, err := os.ReadDir(sessionsDir(agentDir))
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if s, err := readSession(sessionPath(agentDir, e.Name())); err == nil && int(now.Unix()-s.LastBeat) <= staleSec() {
+			n++
+		}
+	}
+	return n
 }
 
 func liveSessions(agentDir string, now time.Time) []*Session {

@@ -62,19 +62,17 @@ func TestInvariant_MutatesForcesNotDispatchable(t *testing.T) {
 	if probs := a.Validate(); len(probs) != 0 {
 		t.Fatalf("expected clean manifest, got %v", probs)
 	}
-	// A hand-authored conflicting manifest must fail Validate.
-	bad := filepath.Join(dir, "pm", ManifestName)
-	os.WriteFile(bad, []byte("name: pm\ntitle: PM\naccepts:\n  - {type: x}\ndispatchable: true\nmutates: [tracker]\nbadge: {label: PM}\n"), 0o644)
-	a2, _ := LoadAgent(bad)
-	probs := a2.Validate()
-	found := false
-	for _, p := range probs {
-		if contains(p, "conflicts with mutates") {
-			found = true
-		}
+	// A hand-authored dispatchable+mutates manifest is valid
+	// (grants in the pool config decide), but still not dispatchable on the
+	// manifest alone.
+	hand := filepath.Join(dir, "pm", ManifestName)
+	os.WriteFile(hand, []byte("name: pm\ntitle: PM\naccepts:\n  - {type: x}\ndispatchable: true\nmutates: [tracker]\nbadge: {label: PM}\n"), 0o644)
+	a2, _ := LoadAgent(hand)
+	if probs := a2.Validate(); len(probs) != 0 {
+		t.Fatalf("dispatchable+mutates must validate, got %v", probs)
 	}
-	if !found {
-		t.Fatalf("expected invariant violation, got %v", probs)
+	if a2.IsDispatchable() || !a2.DeclaresDispatchable() {
+		t.Fatal("IsDispatchable is the grant-free check; the declared flag stays readable")
 	}
 }
 

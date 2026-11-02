@@ -303,14 +303,22 @@ type ReconcilePassage struct {
 // ReconcileEntry is one worksheet entry: a whole file, or one section of a
 // sectioned file (state.md, glossary.md).
 type ReconcileEntry struct {
-	Rel       string             `json:"rel"`              // knowledge-relative
-	Anchor    string             `json:"anchor,omitempty"` // section anchor of a sectioned file
-	Tier      string             `json:"tier"`
-	Confirmed bool               `json:"confirmed"`
-	Body      string             `json:"body"`
-	Hits      []RecallHit        `json:"hits"` // canonical-scope hits (other canonical peers)
-	Citations []Citation         `json:"citations"`
-	Passages  []ReconcilePassage `json:"passages"`
+	Rel       string `json:"rel"`              // knowledge-relative
+	Anchor    string `json:"anchor,omitempty"` // section anchor of a sectioned file
+	Tier      string `json:"tier"`
+	Confirmed bool   `json:"confirmed"`
+	// ConfirmedBy is LedgerByPolicy when a grant, not a human, confirmed
+	// the entry.
+	ConfirmedBy string             `json:"confirmed_by,omitempty"`
+	Body        string             `json:"body"`
+	Hits        []RecallHit        `json:"hits"` // canonical-scope hits (other canonical peers)
+	Citations   []Citation         `json:"citations"`
+	Passages    []ReconcilePassage `json:"passages"`
+}
+
+// confirmation is the entry's standing: human, policy or none.
+func (e ReconcileEntry) confirmation() Confirmation {
+	return RecallHit{Confirmed: e.Confirmed, ConfirmedBy: e.ConfirmedBy}.confirmation()
 }
 
 // ID is the entry's report address: path or path#anchor.
@@ -383,12 +391,15 @@ func BuildReconcileWorksheet(root, peer string, now time.Time) (*ReconcileWorksh
 		var units []ReconcileEntry
 		if LedgerSectioned(rel) {
 			for _, s := range splitSections(string(b)) {
+				c := ledger.sectionConfirmation(rel, s.Anchor)
 				units = append(units, ReconcileEntry{Rel: rel, Anchor: s.Anchor, Body: s.Text,
-					Confirmed: ledger.sectionConfirmed(rel, s.Anchor)})
+					Confirmed: c != ConfirmNone, ConfirmedBy: c.By()})
 			}
 		} else {
 			_, body := splitFrontmatter(string(b))
-			units = append(units, ReconcileEntry{Rel: rel, Body: strings.TrimSpace(body), Confirmed: ledger.confirmed(rel)})
+			c := ledger.confirmation(rel)
+			units = append(units, ReconcileEntry{Rel: rel, Body: strings.TrimSpace(body),
+				Confirmed: c != ConfirmNone, ConfirmedBy: c.By()})
 		}
 		for _, e := range units {
 			e.Tier = kbTier(rel)
@@ -399,11 +410,13 @@ func BuildReconcileWorksheet(root, peer string, now time.Time) (*ReconcileWorksh
 			// Incremental: a confirmed entry's pairs with
 			// entries confirmed in their owners' ledgers were reconciled and
 			// have not changed since; skip them, and skip the entry when no
-			// open pair is left. An edit on either side unconfirms it.
-			if e.Confirmed {
+			// open pair is left. An edit on either side unconfirms it. Only a
+			// human confirmation closes a pair: a policy-confirmed entry stays
+			// in the walk so a human can review it and confirm it as theirs.
+			if e.confirmation() == ConfirmHuman {
 				open := e.Hits[:0:0]
 				for _, h := range e.Hits {
-					if !h.Confirmed {
+					if h.confirmation() != ConfirmHuman {
 						open = append(open, h)
 					}
 				}
@@ -695,11 +708,7 @@ func (ws *ReconcileWorksheet) Markdown() string {
 		fmt.Fprintf(&b, "%d confirmed entries skipped (every pair confirmed in both ledgers and unchanged): %s\n", len(ws.Skipped), groupList(ws.Skipped, 6))
 	}
 	for _, e := range ws.Entries {
-		status := "unconfirmed"
-		if e.Confirmed {
-			status = "confirmed"
-		}
-		fmt.Fprintf(&b, "\n## %s · %s · %s\n\n", e.ID(), e.Tier, status)
+		fmt.Fprintf(&b, "\n## %s · %s · %s\n\n", e.ID(), e.Tier, e.confirmation())
 		if strings.TrimSpace(e.Body) == "" {
 			b.WriteString("> (empty)\n")
 		}
@@ -714,11 +723,7 @@ func (ws *ReconcileWorksheet) Markdown() string {
 			b.WriteString("- none\n")
 		}
 		for _, h := range e.Hits {
-			c := "unconfirmed"
-			if h.Confirmed {
-				c = "confirmed"
-			}
-			fmt.Fprintf(&b, "- %s — %s (via %s, %s, %s)\n", strings.Join(h.Where, "  "), h.Title, h.Via, h.Tier, c)
+			fmt.Fprintf(&b, "- %s — %s (via %s, %s, %s)\n", strings.Join(h.Where, "  "), h.Title, h.Via, h.Tier, h.confirmation())
 		}
 		b.WriteString("\n### Citations\n\n")
 		if len(e.Citations) == 0 {

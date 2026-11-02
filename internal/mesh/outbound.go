@@ -279,7 +279,7 @@ func resolveOutbound(agentsDir string, p HookPayload) (*Agent, OutboundMatch, Ga
 			"with your summary of what and why.")
 	}
 	if cause := noHumanCause(p); cause != "" {
-		return nil, OutboundMatch{}, outboundDeny(outboundNoHumanReason(a, p, *mt, cause))
+		return nil, OutboundMatch{}, outboundGrantDecision(agentsDir, a, p, *mt, cause)
 	}
 	harness := p.Harness
 	if harness == "" {
@@ -300,6 +300,36 @@ func outboundSessionSummary(a *Agent, p HookPayload) string {
 		session = ResolveAgentSessionID(a, os.Getpid(), time.Now())
 	}
 	return SummaryPath(a.Dir(), session)
+}
+
+// outboundGrantDecision is the no-human outbound rule: the peer's
+// `outbound:<surface>` grant lets the write through (grants_lift.go), else
+// today's deny. Only the gate sees an outbound write, so the gate records it:
+// one policy-log line per call, and a write it cannot record is refused.
+func outboundGrantDecision(agentsDir string, a *Agent, p HookPayload, mt OutboundMatch, cause string) GateDecision {
+	grant := OutboundGrant(mt.Surface)
+	lifted, note := gateGrantLift(agentsDir, p, a.Name, grant)
+	if !lifted {
+		return outboundDeny(outboundNoHumanReason(a, p, mt, cause) + note)
+	}
+	if err := recordGrantAction(agentsDir, a.Name, grant, outboundGrantDetail(p, mt), p.SessionID, time.Now()); err != nil {
+		return outboundDeny("mesh: `" + p.ToolName + "` writes the outbound surface `" + mt.Surface + "`, which the `" + grant +
+			"` grant would let through, but " + err.Error() + " — refused, so no write leaves unrecorded.")
+	}
+	return gateGrantAllow(GateCheckOutbound, grant)
+}
+
+// outboundGrantDetail is the policy-log detail of an outbound write: the
+// surface, the tool and the matched command, cut to a readable length.
+func outboundGrantDetail(p HookPayload, mt OutboundMatch) string {
+	d := "outbound " + mt.Surface + " via " + p.ToolName
+	if c := strings.TrimSpace(mt.Command); c != "" {
+		if r := []rune(c); len(r) > 200 {
+			c = string(r[:199]) + "…"
+		}
+		d += ": " + c
+	}
+	return d
 }
 
 func outboundNoHumanReason(a *Agent, p HookPayload, mt OutboundMatch, cause string) string {

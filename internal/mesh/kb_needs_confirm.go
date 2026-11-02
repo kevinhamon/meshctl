@@ -100,11 +100,14 @@ func (n NeedsConfirm) ResponseBody() string {
 // KBNeedsConfirmError is the error KBFinish returns for a parked promotion.
 type KBNeedsConfirmError struct {
 	NeedsConfirm
+	// GrantNote says why the peer's `kb-promote` grant did not let the
+	// promotion through (paused, cap reached); "" when it holds none.
+	GrantNote string
 }
 
 func (e *KBNeedsConfirmError) Error() string {
 	return NeedsConfirmPrefix + " " + e.Headline() + " — main is untouched; the branch and worktree " + e.Worktree +
-		" are left intact. Run `" + e.FinishCommand() + "` from " + e.Agent + "'s own interactive session."
+		" are left intact. Run `" + e.FinishCommand() + "` from " + e.Agent + "'s own interactive session." + e.GrantNote
 }
 
 // Is matches ErrKBNeedsConfirm.
@@ -145,7 +148,7 @@ func parkNeedsConfirm(agentsDir string, agent *Agent, session, branch, wt, summa
 	if sum, err := ReadSummary(path); err == nil {
 		s, round = sum, strings.TrimSpace(sum.Text)
 	}
-	nc := &KBNeedsConfirmError{NeedsConfirm{
+	nc := &KBNeedsConfirmError{NeedsConfirm: NeedsConfirm{
 		Agent: agent.Name, Session: session, Branch: branch, Worktree: wt, SummaryPath: path,
 		Promoted: append([]string(nil), promoted...), Round: round, Cause: cause,
 		Related: PromotionRelated(agentsDir, agent, branch, s),
@@ -233,7 +236,9 @@ func quoteList(xs []string) string {
 // prompt (headless, distil, in-session work or consult): the promotion cannot
 // be asked, so it is denied with the parked needs-confirm record and the
 // instruction to respond needs-human — never relayed for confirmation.
-func gateNoHumanPromotion(agentsDir string, a *Agent, p HookPayload, session, branch, summaryFile, expected string, promoted []string, cause string) GateDecision {
+// grantNote (grants_lift.go) is appended when a grant is held but does not
+// apply.
+func gateNoHumanPromotion(agentsDir string, a *Agent, p HookPayload, session, branch, summaryFile, expected string, promoted []string, cause, grantNote string) GateDecision {
 	path := expected
 	if summaryFile != "" {
 		path = resolveShellPath(summaryFile, p.Cwd)
@@ -247,5 +252,5 @@ func gateNoHumanPromotion(agentsDir string, a *Agent, p HookPayload, session, br
 		" This promotion has no human at the prompt (" + cause + "), so it is not asked and never relayed: stop, write the " +
 		"summary at " + path + " if it is not there, and respond `needs-human` with a body opening `" + NeedsConfirmPrefix +
 		"` that carries the confirmation round and the summary path (`meshctl inbox respond <id> --agent " + a.Name +
-		" --status needs-human --response-file -`); list it as `needs-confirm` in your receipt."}
+		" --status needs-human --response-file -`); list it as `needs-confirm` in your receipt." + grantNote}
 }

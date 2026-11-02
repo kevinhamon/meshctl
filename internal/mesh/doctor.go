@@ -283,6 +283,8 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 	findings = append(findings, poolConfigFindings(agentsDir, poolCfg)...)
 	// Pool-level: outbound gate config vs the peers' `mutates` tags.
 	findings = append(findings, outboundFindings(agentsDir, poolCfg, agents)...)
+	// Pool-level: grants.
+	findings = append(findings, grantFindings(agentsDir, poolCfg, agents)...)
 
 	// Pool-level: doctrine that instructs agents to run invalid commands.
 	findings = append(findings, doctrineFlagFindings(agentsDir)...)

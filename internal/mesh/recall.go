@@ -43,10 +43,26 @@ type RecallHit struct {
 	// scope. "" is the peer's own knowledge. Where[0] of a via hit
 	// is the `mesh://` reference, not a workspace-relative path.
 	Via string `json:"via,omitempty"`
-	// Confirmed is false for a hit the human has not agreed to: an
+	// Confirmed is false for a hit nobody has agreed to: an
 	// own entry whose hash does not match the peer's ledger (no ledger ⇒
 	// unconfirmed), any inbox hit, or a pool file with uncommitted changes.
 	Confirmed bool `json:"confirmed"`
+	// ConfirmedBy is LedgerByPolicy for a confirmed hit a grant, not a human,
+	// confirmed; "" for a human confirmation or an unconfirmed
+	// hit. Recall renders it `confirmed·policy` and ranks it below human
+	// confirmations, above unconfirmed ones.
+	ConfirmedBy string `json:"confirmed_by,omitempty"`
+}
+
+// confirmation is the hit's standing: human, policy or none.
+func (h RecallHit) confirmation() Confirmation {
+	switch {
+	case !h.Confirmed:
+		return ConfirmNone
+	case h.ConfirmedBy != "":
+		return ConfirmPolicy
+	}
+	return ConfirmHuman
 }
 
 // KB tiers.
@@ -86,27 +102,56 @@ func bestTier(sources []string) string {
 	return best
 }
 
-// tierBonus is the ranking prior per tier for confirmed knowledge: a
+// rankScale spreads the recall priors so a policy confirmation fits between
+// human-confirmed and unconfirmed knowledge. Every recall score is a multiple
+// of it except the policy offsets, so the order among human-confirmed,
+// unconfirmed and non-KB hits is what it was before policy confirmations.
+const rankScale = 3
+
+// matchWeight is the score of one matched query token.
+const matchWeight = 3 * rankScale
+
+// tierBonus is the ranking prior per tier for human-confirmed knowledge: a
 // current-tier match outranks the same match in the log, which outranks it in
-// the inbox. Unconfirmed knowledge takes the slot between log and inbox
-// (rankBonus).
+// the inbox. Policy-confirmed and unconfirmed knowledge take the slots between
+// log and inbox (rankBonus).
 func tierBonus(tier string) int {
 	switch tier {
 	case TierCurrent:
-		return 3
+		return 3 * rankScale
 	case TierLog:
-		return 2
+		return 2 * rankScale
 	}
 	return 0
 }
 
-// rankBonus is tierBonus for a hit that may be unconfirmed: an
-// unconfirmed current or log hit ranks below confirmed log and above inbox.
-func rankBonus(tier string, confirmed bool) int {
-	if !confirmed && (tier == TierCurrent || tier == TierLog) {
-		return 1
+// rankBonus is tierBonus for a hit by its confirmation: below human-confirmed
+// log come a policy-confirmed current hit, then a policy-confirmed log hit,
+// then an unconfirmed current or log hit (one rank), then the inbox.
+func rankBonus(tier string, c Confirmation) int {
+	if tier != TierCurrent && tier != TierLog {
+		return tierBonus(tier)
+	}
+	switch c {
+	case ConfirmNone:
+		return 1 * rankScale
+	case ConfirmPolicy:
+		if tier == TierCurrent {
+			return 1*rankScale + 2
+		}
+		return 1*rankScale + 1
 	}
 	return tierBonus(tier)
+}
+
+// kbScore is a kb hit's score: matched tokens, the tier and confirmation
+// prior, and the capped cross-reference boost. Zero matches score 0 (the
+// empty-query listing).
+func kbScore(matches int, tier string, c Confirmation, refs int) int {
+	if matches == 0 {
+		return 0
+	}
+	return matches*matchWeight + rankBonus(tier, c) + refsPrior(refs)*rankScale
 }
 
 // refsPrior caps the cross-reference boost: a heavily cited decision is
@@ -177,13 +222,11 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 			}
 			if s || score > 0 {
 				tier := bestTier(t.Sources)
-				confirmed := ledger.topicConfirmed(t.Topic, t.Sources)
-				if score > 0 {
-					score = score*3 + rankBonus(tier, confirmed) + refsPrior(t.Refs)
-				}
+				conf := ledger.topicConfirmation(t.Topic, t.Sources)
 				hits = append(hits, RecallHit{
 					Kind: "kb", Title: t.Topic, Where: t.Sources,
-					Date: t.Freshness, Score: score, Tier: tier, Confirmed: confirmed,
+					Date: t.Freshness, Score: kbScore(score, tier, conf, t.Refs), Tier: tier,
+					Confirmed: conf != ConfirmNone, ConfirmedBy: conf.By(),
 				})
 			}
 		}
@@ -203,7 +246,7 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 		}, " ")
 		score := 0
 		if len(tokens) > 0 {
-			score = tokenScore(hay, tokens) * 3
+			score = tokenScore(hay, tokens) * matchWeight
 			if score == 0 {
 				continue
 			}
@@ -323,8 +366,12 @@ func RecallMarkdown(hits []RecallHit) string {
 		if h.Via != "" {
 			fmt.Fprintf(&b, "·via %s", h.Via)
 		}
-		if h.Kind == "kb" && !h.Confirmed && h.Tier != TierInbox {
-			b.WriteString("·unconfirmed") // the inbox is unconfirmed by tier
+		if h.Kind == "kb" && h.Tier != TierInbox {
+			// The inbox is unconfirmed by tier; a human confirmation is the
+			// unmarked default.
+			if c := h.confirmation(); c != ConfirmHuman {
+				b.WriteString("·" + c.String())
+			}
 		}
 		fmt.Fprintf(&b, "] %s", h.Title)
 		if len(h.Where) > 0 {
@@ -370,7 +417,7 @@ func gitSpineHits(agent *Agent, tokens []string) []RecallHit {
 		sha, date, subj := parts[0], parts[1], parts[2]
 		score := 0
 		if len(tokens) > 0 {
-			score = tokenScore(subj, tokens) * 3
+			score = tokenScore(subj, tokens) * matchWeight
 			if score == 0 {
 				continue
 			}

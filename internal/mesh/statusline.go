@@ -17,7 +17,8 @@ import (
 // pass, cheap enough to run on every refresh. Claude Code re-runs the command
 // on its own events and every StatusLineRefreshSeconds, so counts move while
 // the session is idle. Fail-open like the advisory hooks: anything it cannot
-// resolve renders as the plain directory name.
+// resolve renders as the plain directory name. When the pool's grants are
+// paused, a red [grants: paused] group ends the line.
 
 // StatusLineRefreshSeconds is the refreshInterval wired with the status line.
 const StatusLineRefreshSeconds = 10
@@ -67,7 +68,13 @@ func StatusLine(agentsDir string, p StatusLinePayload, now time.Time) string {
 		}
 		return ansiDim + filepath.Base(cwd) + ansiReset
 	}
-	return renderStatusLine(Pending(agentsDir, a, now))
+	line := renderStatusLine(Pending(agentsDir, a, now))
+	// The grants kill switch: one pool-config read, the same
+	// file read every gate call makes.
+	if LoadPoolConfig(agentsDir).Settings.Grants.Paused {
+		line += " * " + statusGroup(ansiRed, "grants", "paused")
+	}
+	return line
 }
 
 // statusLineAgent resolves the agent whose workspace holds one of dirs, the

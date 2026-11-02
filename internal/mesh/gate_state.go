@@ -45,16 +45,24 @@ func gateStateSet(agentsDir string, p HookPayload) GateDecision {
 	deny := func(reason string) GateDecision {
 		return GateDecision{Deny: true, Check: GateCheckPromotion, Reason: "mesh: " + reason}
 	}
-	if cause := noHumanCause(p); cause != "" {
-		return deny("`meshctl state set` rewrites your current-state digest, a promotion the human confirms — a human must " +
-			"be at the prompt, and this call runs under " + cause + ". Leave the digest for an interactive session.")
-	}
-
 	var a *Agent
 	if call.agent != "" {
 		a, _ = FindAgent(agentsDir, call.agent)
 	} else {
 		a = payloadAgent(agentsDir, p)
+	}
+	granted := false
+	if cause := noHumanCause(p); cause != "" {
+		// A `state-set` grant lifts this deny (grants_lift.go); the summary
+		// is still required, and the command records the action.
+		note := ""
+		if a != nil {
+			granted, note = gateGrantLift(agentsDir, p, a.Name, GrantStateSet)
+		}
+		if !granted {
+			return deny("`meshctl state set` rewrites your current-state digest, a promotion the human confirms — a human must " +
+				"be at the prompt, and this call runs under " + cause + ". Leave the digest for an interactive session." + note)
+		}
 	}
 	if a == nil {
 		return deny("this `meshctl state set` promotes a current-state digest, but the gate cannot tell which peer it is for — " +
@@ -81,6 +89,9 @@ func gateStateSet(agentsDir string, p HookPayload) GateDecision {
 		return deny("`state set` needs your confirmation summary first — " + why + named + ". Write `## Intent` (one line, " +
 			"first), `## Grounding`, `## Precedent` and `## Changes`, read the confirmation round out in chat, then re-run: " +
 			"the gate asks the human with your summary." + writeFirstHint(sumPath))
+	}
+	if granted {
+		return gateGrantAllow(GateCheckPromotion, GrantStateSet)
 	}
 	body := []string{"state set rewrites `" + a.Name + "`'s current-state digest (" + KnowledgeDir + "/" + StateFile + "):"}
 	body = append(body, PromotionAskBody(s, []string{StateFile})...)

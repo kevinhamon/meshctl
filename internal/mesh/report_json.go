@@ -9,7 +9,8 @@ import (
 // mesh-console/01), so the schema is versioned: ReportSchema changes on any
 // incompatible change, and a field is only ever added within one version.
 
-// ReportSchema versions PendingReport and DoctorReportJSON.
+// ReportSchema versions PendingReport, DoctorReportJSON and the command
+// outputs in cli_json.go.
 const ReportSchema = 1
 
 // PendingReport is the pending work of one peer, or of every peer (--all).

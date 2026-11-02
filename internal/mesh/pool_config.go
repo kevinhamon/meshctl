@@ -40,6 +40,7 @@ type PoolSettings struct {
 	Reconcile ReconcileSettings          `yaml:"reconcile"`
 	Tools     []ToolRef                  `yaml:"tools"`
 	Extras    []PoolExtra                `yaml:"extras"` // non-agent folders `pool clone` also clones (pool-clone C4)
+	Grants    GrantSettings              `yaml:"grants"` // per-action grants; empty ⇒ none
 }
 
 // poolIdentity is the parsed identity file (PoolMarkerPath). `tools` is read

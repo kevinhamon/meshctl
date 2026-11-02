@@ -74,6 +74,7 @@ type KBFinishResult struct {
 	Dropped  []string // ledger keys removed (deleted file or section)
 	Confirm  string   // short sha of the Confirm: commit ("" when none)
 	Intent   string   // the summary's Intent line ("" when none)
+	Grant    string   // the grant that confirmed it by policy ("" when a human did)
 }
 
 // kbFinishFailpoint, when set (tests), is called at each stage of the
@@ -195,9 +196,23 @@ func KBFinish(agentsDir string, agent *Agent, session string, o KBFinishOptions)
 
 	// No human at the prompt: a promotion parks as needs-confirm, before
 	// main moves and before any rebase (kb_needs_confirm.go); candidates-only
-	// still merges.
+	// still merges. A `kb-promote` grant lets it through instead
+	// (grants_lift.go), confirmed by policy; the summary is still required.
+	grant, grantNote := "", ""
 	if len(res.Promoted) > 0 && noHuman != "" {
-		return res, parkNeedsConfirm(agentsDir, agent, session, branch, wt, o.SummaryFile, res.Promoted, noHuman)
+		if lifted, note := grantLift(agentsDir, agent.Name, GrantKBPromote, now); lifted {
+			grant = GrantKBPromote
+		} else {
+			grantNote = note
+		}
+	}
+	park := func() error {
+		nc := parkNeedsConfirm(agentsDir, agent, session, branch, wt, o.SummaryFile, res.Promoted, noHuman)
+		nc.GrantNote = grantNote
+		return nc
+	}
+	if len(res.Promoted) > 0 && noHuman != "" && grant == "" {
+		return res, park()
 	}
 	if len(res.Promoted) > 0 {
 		if _, err := checkKBConfirm(agent, session, branch, changed, o.SummaryFile); err != nil {
@@ -219,13 +234,18 @@ func KBFinish(agentsDir string, agent *Agent, session string, o KBFinishOptions)
 		return res, fmt.Errorf("cannot diff %s against %s, so a promotion cannot be told from a candidates-only finish: %w", branch, base, err)
 	}
 	res.Promoted = promotedOf(changed)
-	if len(res.Promoted) > 0 && noHuman != "" {
-		return res, parkNeedsConfirm(agentsDir, agent, session, branch, wt, o.SummaryFile, res.Promoted, noHuman)
+	if len(res.Promoted) > 0 && noHuman != "" && grant == "" {
+		if lifted, note := grantLift(agentsDir, agent.Name, GrantKBPromote, now); lifted {
+			grant = GrantKBPromote
+		} else {
+			grantNote = note
+			return res, park()
+		}
 	}
 
 	var confirm *kbConfirm
 	if len(res.Promoted) > 0 {
-		if confirm, err = prepareKBConfirm(agent, session, branch, base, wt, changed, o.SummaryFile, now); err != nil {
+		if confirm, err = prepareKBConfirm(agent, session, branch, base, wt, changed, o.SummaryFile, grant, now); err != nil {
 			return res, err
 		}
 		res.Intent, res.Ledgered, res.Dropped = confirm.intent, confirm.ledgered, confirm.dropped
@@ -247,6 +267,7 @@ func KBFinish(agentsDir string, agent *Agent, session string, o KBFinishOptions)
 			return res, rollbackKBFinish(agent.Dir(), base, branch, wt, pre, err)
 		}
 		res.Confirm = sha
+		res.Grant = grant
 	}
 
 	// Clean up.
@@ -256,6 +277,13 @@ func KBFinish(agentsDir string, agent *Agent, session string, o KBFinishOptions)
 	_, _ = git(agent.Dir(), "branch", "-D", branch)
 	clearSessionBranch()
 	clearParkMarker(agent.Dir(), session)
+	if res.Grant != "" {
+		detail := fmt.Sprintf("kb finish %s: promoted %s (Confirm %s); summary %s", branch, strings.Join(res.Promoted, ", "),
+			res.Confirm, o.SummaryFile)
+		if err := recordGrantAction(agentsDir, agent.Name, res.Grant, detail, session, now); err != nil {
+			return res, fmt.Errorf("kb finish landed %s by policy, but %w", res.Confirm, err)
+		}
+	}
 	return res, nil
 }
 
@@ -306,7 +334,8 @@ func checkKBConfirm(agent *Agent, session, branch string, changed []string, summ
 // prepareKBConfirm runs every check a promotion needs before main is
 // touched — the checkKBConfirm refusals and a readable ledger — and renders
 // the ledger and commit message from the rebased branch.
-func prepareKBConfirm(agent *Agent, session, branch, base, wt string, changed []string, summaryFile string, now time.Time) (*kbConfirm, error) {
+// grant names the grant confirming it by policy ("" when a human does).
+func prepareKBConfirm(agent *Agent, session, branch, base, wt string, changed []string, summaryFile, grant string, now time.Time) (*kbConfirm, error) {
 	s, err := checkKBConfirm(agent, session, branch, changed, summaryFile)
 	if err != nil {
 		return nil, err
@@ -317,13 +346,14 @@ func prepareKBConfirm(agent *Agent, session, branch, base, wt string, changed []
 	if err != nil {
 		return nil, fmt.Errorf("kb finish: the ledger %s cannot be read (%v) — fix it before promoting; main is untouched", ledgerRepoPath, err)
 	}
-	ledgered, dropped, err := applyFinishLedger(&l, agent.Dir(), wt, base, changed, session, now)
+	ledgered, dropped, err := applyFinishLedger(&l, agent.Dir(), wt, base, changed, session, grant, now)
 	if err != nil {
 		return nil, err
 	}
 
 	var body strings.Builder
 	fmt.Fprintf(&body, "Agent: %s\nBranch: %s\n%s%s\n", agent.Name, branch, ConfirmSessionTrailer, session)
+	body.WriteString(policyCommitLine(grant))
 	if len(ledgered) > 0 {
 		body.WriteString("\nConfirmed:\n")
 		for _, k := range ledgered {
@@ -349,7 +379,8 @@ func prepareKBConfirm(agent *Agent, session, branch, base, wt string, changed []
 // current- or log-tier file gets its new hash; a sectioned file re-hashes only
 // the sections the branch changed (against base) and drops removed sections;
 // a deleted file drops its line. It returns the keys written and dropped.
-func applyFinishLedger(l *Ledger, agentDir, wt, base string, changed []string, session string, now time.Time) (ledgered, dropped []string, err error) {
+// grant != "" marks each written entry confirmed by policy.
+func applyFinishLedger(l *Ledger, agentDir, wt, base string, changed []string, session, grant string, now time.Time) (ledgered, dropped []string, err error) {
 	if l.Entries == nil {
 		l.Entries = map[string]LedgerEntry{}
 	}
@@ -376,7 +407,7 @@ func applyFinishLedger(l *Ledger, agentDir, wt, base string, changed []string, s
 		}
 		if !LedgerSectioned(rel) {
 			cur.Confirmed, cur.Session = date, session
-			l.Entries[rel] = cur
+			l.Entries[rel] = policyEntry(cur, grant)
 			ledgered = append(ledgered, rel)
 			continue
 		}
@@ -395,10 +426,23 @@ func applyFinishLedger(l *Ledger, agentDir, wt, base string, changed []string, s
 				dropped = append(dropped, rel+"#"+a)
 			}
 		}
+		rehashed := map[string]bool{}
 		for _, a := range ledgerKeys(cur.Sections) {
 			if h := cur.Sections[a]; old[a] != h {
 				secs[a] = h
+				rehashed[a] = true
 				ledgered = append(ledgered, rel+"#"+a)
+			}
+		}
+		// A human confirming some sections of an entry a grant confirmed
+		// does not relabel the rest as human-confirmed: the carried-over
+		// sections are dropped (unconfirmed) instead.
+		if grant == "" && e.By == LedgerByPolicy {
+			for _, a := range ledgerKeys(secs) {
+				if !rehashed[a] {
+					delete(secs, a)
+					dropped = append(dropped, rel+"#"+a)
+				}
 			}
 		}
 		if len(secs) == 0 {
@@ -408,7 +452,7 @@ func applyFinishLedger(l *Ledger, agentDir, wt, base string, changed []string, s
 			}
 			continue
 		}
-		l.Entries[rel] = LedgerEntry{Sections: secs, Confirmed: date, Session: session}
+		l.Entries[rel] = policyEntry(LedgerEntry{Sections: secs, Confirmed: date, Session: session}, grant)
 	}
 	return ledgered, dropped, nil
 }

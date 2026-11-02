@@ -43,6 +43,7 @@ type KBConfirmResult struct {
 	Ledgered []string // ledger keys written (path, or path#anchor)
 	Confirm  string   // short sha of the Confirm: commit
 	Intent   string   // the report's Intent (or first) line
+	Grant    string   // the grant that confirmed it by policy ("" when a human did)
 }
 
 // kbConfirmUnit is one resolved unit: a file and the anchors it confirms
@@ -184,7 +185,20 @@ func KBConfirm(agentsDir string, a *Agent, paths []string, o KBConfirmOptions) (
 	case len(paths) > KBConfirmMax:
 		return refuse("%d paths named; at most %d per call (a bare sectioned path counts as one)", len(paths), KBConfirmMax)
 	case HeadlessNow():
-		return refuse("a human must be at the prompt to confirm knowledge (dispatch depth or a distil run)")
+		// A `kb-confirm` grant lets it through, confirmed by policy
+		// (grants_lift.go). Overriding an ungrounded verdict stays the
+		// human's call in the round, so a policy confirmation takes none.
+		lifted, note := grantLift(agentsDir, a.Name, GrantKBConfirm, now)
+		if !lifted {
+			return refuse("a human must be at the prompt to confirm knowledge (dispatch depth or a distil run)%s", note)
+		}
+		if len(o.AcceptUngrounded) > 0 {
+			return refuse("--accept-ungrounded is the human's override in the confirmation round; a confirmation by the `%s` "+
+				"grant takes none — leave those entries for an interactive session", GrantKBConfirm)
+		}
+		res.Grant = GrantKBConfirm
+	}
+	switch {
 	case o.Report == "":
 		return refuse("no --report: name the reconcile report that holds these entries' verdicts (%s)", ReconcileReportPath(a.Dir(), now))
 	}
@@ -236,14 +250,17 @@ func KBConfirm(agentsDir string, a *Agent, paths []string, o KBConfirmOptions) (
 		}
 		if u.anchors == nil {
 			cur.Confirmed, cur.Session = date, o.Session
-			l.Entries[u.rel] = cur
+			l.Entries[u.rel] = policyEntry(cur, res.Grant)
 			res.Ledgered = append(res.Ledgered, u.rel)
 			continue
 		}
 		e := l.Entries[u.rel]
 		secs := map[string]string{}
 		for k, h := range e.Sections {
-			if _, live := cur.Sections[k]; live {
+			// The entry written here is a human one (By empty): sections a
+			// grant confirmed are not carried into it unless named, so a
+			// policy confirmation is never relabelled as a human's.
+			if _, live := cur.Sections[k]; live && e.By == "" {
 				secs[k] = h
 			}
 		}
@@ -251,7 +268,7 @@ func KBConfirm(agentsDir string, a *Agent, paths []string, o KBConfirmOptions) (
 			secs[an] = cur.Sections[an]
 			res.Ledgered = append(res.Ledgered, u.rel+"#"+an)
 		}
-		l.Entries[u.rel] = LedgerEntry{Sections: secs, Confirmed: date, Session: o.Session}
+		l.Entries[u.rel] = policyEntry(LedgerEntry{Sections: secs, Confirmed: date, Session: o.Session}, res.Grant)
 	}
 	res.Intent = r.Intent
 
@@ -265,7 +282,7 @@ func KBConfirm(agentsDir string, a *Agent, paths []string, o KBConfirmOptions) (
 		return fail(err)
 	}
 	var msg strings.Builder
-	fmt.Fprintf(&msg, "Agent: %s\nReport: %s\n%s%s\n\nConfirmed:\n", a.Name, o.Report, ConfirmSessionTrailer, o.Session)
+	fmt.Fprintf(&msg, "Agent: %s\nReport: %s\n%s%s\n%s\nConfirmed:\n", a.Name, o.Report, ConfirmSessionTrailer, o.Session, policyCommitLine(res.Grant))
 	for _, k := range res.Ledgered {
 		msg.WriteString("- " + k + "\n")
 	}
@@ -277,6 +294,12 @@ func KBConfirm(agentsDir string, a *Agent, paths []string, o KBConfirmOptions) (
 	}
 	sha, err := git(a.Dir(), "rev-parse", "--short", "HEAD")
 	res.Confirm = strings.TrimSpace(sha)
+	if err == nil && res.Grant != "" {
+		detail := fmt.Sprintf("kb confirm %s (Confirm %s); report %s", strings.Join(res.Ledgered, ", "), res.Confirm, o.Report)
+		if rerr := recordGrantAction(agentsDir, a.Name, res.Grant, detail, o.Session, now); rerr != nil {
+			return res, fmt.Errorf("kb confirm landed %s by policy, but %w", res.Confirm, rerr)
+		}
+	}
 	return res, err
 }
 

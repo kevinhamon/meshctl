@@ -119,3 +119,11 @@ _Avoid_: roster file, registry (the machine's list of pools)
 **Skill pack**:
 An optional, externally maintained set of skills that a pool may adopt and assign to peers; meshctl works with any pack or none.
 _Avoid_: plugin (the distribution mechanism, not the concept), toolkit
+
+**Grant**:
+Pool-config permission for one peer (or the whole pool) to take one specific human-confirmed action when no human is at the prompt; a peer with no grants behaves exactly as before grants existed.
+_Avoid_: permission tier, trust level
+
+**Policy confirmation**:
+A promotion a grant let through rather than a human; recorded and shown apart from human-confirmed knowledge until a human confirms it.
+_Avoid_: auto-confirm, self-confirmation

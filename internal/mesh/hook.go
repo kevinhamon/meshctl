@@ -179,6 +179,8 @@ func hookAgent(agentsDir, cwd string) *Agent {
 // are not injected again: every resume would otherwise add them once more.
 // What can have changed since (overlap warning, repo nags, pending work) is
 // still injected, plus the new confirmation summary path. A compacted session gets everything: compaction drops it.
+// Grants are injected on every start: a paused notice, and in an interactive
+// session the actions grants let through since the peer's last one.
 func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) string {
 	a := hookAgent(agentsDir, p.Cwd)
 	// A headless distill run (SpawnPeerDistill) fires the same hooks; it must
@@ -225,6 +227,13 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 	// pending-work block.
 	if nag := PoolRepoNag(agentsDir); nag != "" {
 		b.WriteString("⚠ " + nag)
+		b.WriteString("\n\n")
+	}
+	// Grants: the paused notice, and, in the peer's own
+	// interactive session only, what grants let through since its last one.
+	// Can change between resumes, so it is not a transcript block.
+	if md := sessionStartGrants(agentsDir, LoadPoolConfig(agentsDir), a, noHumanCause(p) == "", now); md != "" {
+		b.WriteString(md)
 		b.WriteString("\n\n")
 	}
 	// Pending work: what waits on the human — parked KB branches,

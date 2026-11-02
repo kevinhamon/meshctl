@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -33,6 +34,9 @@ type StateSetOptions struct {
 	Session string
 	// Now stamps the digest header and dates the ledger line; zero = now.
 	Now time.Time
+	// PoolRoot is the pool whose `state-set` grant may let the write through
+	// with no human at the prompt; "" ⇒ the agent directory's parent.
+	PoolRoot string
 }
 
 // StateSetResult reports what a confirmed `state set` landed.
@@ -42,6 +46,7 @@ type StateSetResult struct {
 	Dropped  []string // ledger keys removed (sections no longer in the digest)
 	Confirm  string   // short sha of the Confirm: commit
 	Intent   string   // the summary's Intent line
+	Grant    string   // the grant that confirmed it by policy ("" when a human did)
 }
 
 // StateSetConfirmed writes the digest as a promotion: refused headless, with
@@ -56,9 +61,19 @@ func StateSetConfirmed(a *Agent, body string, o StateSetOptions) (StateSetResult
 	if now.IsZero() {
 		now = time.Now()
 	}
+	poolRoot := o.PoolRoot
+	if poolRoot == "" {
+		poolRoot = filepath.Dir(a.Dir())
+	}
 	if HeadlessNow() {
-		return res, fmt.Errorf("%w to confirm the current-state digest — `state set` is a promotion and is refused "+
-			"at dispatch depth or in a distil run; leave the digest for an interactive session of %s", ErrStateHeadless, a.Name)
+		// A `state-set` grant lets it through, confirmed by policy
+		// (grants_lift.go); the summary is still required.
+		lifted, note := grantLift(poolRoot, a.Name, GrantStateSet, now)
+		if !lifted {
+			return res, fmt.Errorf("%w to confirm the current-state digest — `state set` is a promotion and is refused "+
+				"at dispatch depth or in a distil run; leave the digest for an interactive session of %s%s", ErrStateHeadless, a.Name, note)
+		}
+		res.Grant = GrantStateSet
 	}
 	expected := SummaryPath(a.Dir(), o.Session)
 	s, why := usableSummary(o.SummaryFile)
@@ -107,13 +122,13 @@ func StateSetConfirmed(a *Agent, body string, o StateSetOptions) (StateSetResult
 	for _, k := range ledgerKeys(cur.Sections) {
 		res.Ledgered = append(res.Ledgered, StateFile+"#"+k)
 	}
-	l.Entries[StateFile] = LedgerEntry{Sections: cur.Sections, Confirmed: now.Format("2006-01-02"), Session: o.Session}
+	l.Entries[StateFile] = policyEntry(LedgerEntry{Sections: cur.Sections, Confirmed: now.Format("2006-01-02"), Session: o.Session}, res.Grant)
 	if err := WriteLedger(a.Dir(), l); err != nil {
 		return fail(err)
 	}
 
 	var msg strings.Builder
-	fmt.Fprintf(&msg, "Agent: %s\n%s%s\n\nConfirmed:\n", a.Name, ConfirmSessionTrailer, o.Session)
+	fmt.Fprintf(&msg, "Agent: %s\n%s%s\n%s\nConfirmed:\n", a.Name, ConfirmSessionTrailer, o.Session, policyCommitLine(res.Grant))
 	for _, k := range res.Ledgered {
 		msg.WriteString("- " + k + "\n")
 	}
@@ -132,6 +147,12 @@ func StateSetConfirmed(a *Agent, body string, o StateSetOptions) (StateSetResult
 	}
 	sha, err := git(a.Dir(), "rev-parse", "--short", "HEAD")
 	res.Confirm = strings.TrimSpace(sha)
+	if err == nil && res.Grant != "" {
+		detail := fmt.Sprintf("state set: %s (Confirm %s); summary %s", stateRepo, res.Confirm, o.SummaryFile)
+		if rerr := recordGrantAction(poolRoot, a.Name, res.Grant, detail, o.Session, now); rerr != nil {
+			return res, fmt.Errorf("state set landed %s by policy, but %w", res.Confirm, rerr)
+		}
+	}
 	return res, err
 }
 
