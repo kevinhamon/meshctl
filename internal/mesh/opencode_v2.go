@@ -182,7 +182,10 @@ export default {
   async setup(ctx) {
     const cwd = (ctx.location && ctx.location.directory) || process.cwd()
     const headless = process.env.AGENT_MESH_DISTILLING === "1" || (Number(process.env.AGENT_DISPATCH_DEPTH) || 0) > 0
-    const started = new Set()
+    // Open sessions, each with its session-start block. opencode rebuilds the
+    // system prompt on every model call, so the block is pushed on every call,
+    // not only the first; the session-start hook itself still runs once.
+    const started = new Map()
     const prompts = new Map()
     const idle = new Map()
 
@@ -266,10 +269,12 @@ export default {
       const role = doctrine(cwd)
       if (role) parts.push(role)
       if (sid && !started.has(sid)) {
-        started.add(sid)
-        const handoff = await run(cwd, "session-start", { cwd, session_id: sid, prompt: "" })
-        if (handoff) parts.push(handoff)
+        started.set(sid, "")
+        const out = await run(cwd, "session-start", { cwd, session_id: sid, prompt: "" })
+        if (started.has(sid)) started.set(sid, out)
       }
+      const handoff = sid ? started.get(sid) : ""
+      if (handoff) parts.push(handoff)
       const intu = await run(cwd, "user-prompt", { cwd, session_id: sid, prompt: prompts.get(sid) || "" })
       if (intu) parts.push(intu)
       for (const text of parts) e.system.push({ type: "text", text })
@@ -299,7 +304,7 @@ export default {
     return () => {
       controller.abort()
       // Teardown: close out every open session so its record is captured.
-      for (const sid of Array.from(started)) {
+      for (const sid of Array.from(started.keys())) {
         started.delete(sid)
         const t = idle.get(sid); if (t) clearTimeout(t)
         try { spawnSync("meshctl", ["--harness", "opencode", "hook", "session-end"], { cwd, input: JSON.stringify({ cwd, session_id: sid, prompt: "" }), stdio: ["pipe", "ignore", "ignore"], timeout: 30000 }) } catch {}

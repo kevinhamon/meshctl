@@ -359,6 +359,10 @@ Every agent maintains a git-tracked `knowledge/` KB in two tiers — a **current
   session-record (files touched, commands, tools, refs, commits, handoff) — no LLM.
 - **Intuition:** `meshctl intuition recall` / the per-prompt hook surface compact
   past-work pointers from the **owned engine** (session-records + git spine).
+- **Knowledge on each prompt:** the per-prompt hook also lists up to three of the peer's
+  own knowledge entries that match the prompt (one per file, path and confirmation mark,
+  never the `candidates/` inbox), so a matching entry reaches the agent even when it
+  skips `meshctl memory recall`. Pointers only: a few lines per prompt.
 - **Distill:** turn recurring intuition into durable KB via `meshctl kb begin` → write a
   candidate → consolidate → summary + confirmation round → `meshctl kb finish
   --summary-file <summary>`. See the `mesh-cognition` skill. The
@@ -419,7 +423,8 @@ agreement to its intent, its grounding (cited, or marked *assumption*) and its p
    a later `kb confirm` makes it human. Every granted action is logged, a capped grant
    waits for a human once it reaches its daily cap, and the peer's next interactive
    session start lists everything grants let through since it last ran. `doctor`
-   validates the block.
+   validates the block. [`docs/grants.md`](docs/grants.md) covers each grant, the policy
+   log, caps, pausing and revoking.
 
 Recall marks unconfirmed entries; `memory recall --scope canonical` also reads canonical
 peers' knowledge. Session start shows a `# Pending work` block (parked branches, open
@@ -465,7 +470,7 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
 | `internal/console/` | `meshctl console`: the localhost server and its single-page UI (`ui/index.html`, design notes in `ui/DESIGN.md`). |
 | `internal/selfupdate/` | `meshctl update` and the once-a-day release check. |
 | `internal/mesh/templates/` | Embedded (`go:embed`) source, edited in place: agent scaffold, skills (`mesh-cognition`, `mesh-steward`), steward CLAUDE.md, and the doctrine (`templates/doctrine/{agent-comms,distiller}.md`) the binary emits into each pool. |
-| `docs/` | Human docs: `DESIGN.md` (why it's built this way), `build-spec.md` (what to build), `knowledge-and-memory.md` (the cognition design brief). |
+| `docs/` | Human docs: `DESIGN.md` (why it's built this way), `build-spec.md` (what to build), `knowledge-and-memory.md` (the cognition design brief), `grants.md` (letting headless runs act). |
 | `Taskfile.yaml` | `task install` / `build`. |
 
 ## Conventions

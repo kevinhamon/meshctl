@@ -135,6 +135,10 @@ Precedent: …
 - With no human at your prompt (headless, or delegated work), a promotion or outbound
   write ends in `needs-confirm`: respond `needs-human` with a body opening
   `needs-confirm:` carrying the round and the summary path. Never relay a confirmation.
+  The exception is a headless run whose peer holds a grant for that action in the pool
+  config's `grants:` block: meshctl lets it through and logs it, and you still write the
+  summary. Never assume a grant. If the command or the gate refuses, the no-grant rule
+  above applies.
 
 ## Distillation ritual — System 1 → System 2 (reviewed, never automatic)
 

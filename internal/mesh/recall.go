@@ -2,6 +2,7 @@ package mesh
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -191,7 +192,7 @@ func tokenScore(haystack string, tokens []string) int {
 // (sessions + commits) plus freshest KB topics — the "what have we been doing"
 // view. Never reads source bodies.
 func Recall(agent *Agent, query string, limit int) ([]RecallHit, error) {
-	return recall(agent, query, limit, true)
+	return recall(agent, query, limit, true, true)
 }
 
 // RecallActivity is Recall without the KB tier: session-records and the git
@@ -199,10 +200,38 @@ func Recall(agent *Agent, query string, limit int) ([]RecallHit, error) {
 // let a dense KB (whose hits carry a refs boost) crowd every activity hit out
 // of the window, so intuition returned nothing exactly where it mattered.
 func RecallActivity(agent *Agent, query string, limit int) ([]RecallHit, error) {
-	return recall(agent, query, limit, false)
+	return recall(agent, query, limit, false, true)
 }
 
-func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit, error) {
+// RecallKnowledge is Recall without the activity tier and without the KB
+// inbox: the peer's own knowledge entries plus the pool glossary. The
+// per-prompt hook uses it so a matching entry reaches the agent even when it
+// never runs `memory recall` itself.
+func RecallKnowledge(agent *Agent, query string, limit int) ([]RecallHit, error) {
+	hits, err := recall(agent, query, math.MaxInt, true, false)
+	if err != nil {
+		return nil, err
+	}
+	var out []RecallHit
+	seen := map[string]bool{} // one pointer per file: a file's sections are separate topics
+	for _, h := range hits {
+		if h.Tier == TierInbox {
+			continue
+		}
+		if len(h.Where) > 0 {
+			if seen[h.Where[0]] {
+				continue
+			}
+			seen[h.Where[0]] = true
+		}
+		if out = append(out, h); len(out) == limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func recall(agent *Agent, query string, limit int, includeKB, includeActivity bool) ([]RecallHit, error) {
 	if limit < 1 {
 		limit = 10
 	}
@@ -238,7 +267,7 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 	}
 
 	// Session-records (episodic capture).
-	for _, r := range ListSessionRecords(agent) {
+	for _, r := range activityRecords(agent, includeActivity) {
 		hay := strings.Join([]string{
 			r.FirstPrompt, r.Summary, strings.Join(r.Tools, " "),
 			strings.Join(r.FilesTouched, " "), strings.Join(r.Commits, " "),
@@ -271,7 +300,9 @@ func recall(agent *Agent, query string, limit int, includeKB bool) ([]RecallHit,
 
 	// Git time-spine floor: recent commits whose subject matches (always on, even
 	// with zero captured sessions). Deduped against session-captured commits.
-	hits = append(hits, gitSpineHits(agent, tokens)...)
+	if includeActivity {
+		hits = append(hits, gitSpineHits(agent, tokens)...)
+	}
 
 	// Rank: score desc, then date desc (recency).
 	sort.SliceStable(hits, func(i, j int) bool {
@@ -428,4 +459,35 @@ func gitSpineHits(agent *Agent, tokens []string) []RecallHit {
 		})
 	}
 	return hits
+}
+
+// activityRecords is the agent's session records, or none when the activity
+// tier is not wanted.
+func activityRecords(agent *Agent, include bool) []*SessionRecord {
+	if !include {
+		return nil
+	}
+	return ListSessionRecords(agent)
+}
+
+// promptKnowledgeLimit is how many knowledge entries the per-prompt hook lists.
+const promptKnowledgeLimit = 3
+
+// PromptKnowledgeMarkdown renders knowledge hits for the per-prompt hook:
+// pointers (title, path, standing), never bodies, so the cost per prompt
+// stays a few lines. "" when there is nothing to list.
+func PromptKnowledgeMarkdown(hits []RecallHit) string {
+	if len(hits) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Your knowledge that matches this prompt (read the ones that apply before acting)\n")
+	for _, h := range hits {
+		where := ""
+		if len(h.Where) > 0 {
+			where = " — `" + h.Where[0] + "`"
+		}
+		fmt.Fprintf(&b, "- %s%s (%s)\n", h.Title, where, h.confirmation())
+	}
+	return strings.TrimRight(b.String(), "\n")
 }

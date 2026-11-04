@@ -172,7 +172,8 @@ break a turn):
 
 - `meshctl hook session-start` — registers session presence and
   injects the agent's handoff.
-- `meshctl hook user-prompt` — injects compact intuition pointers
+- `meshctl hook user-prompt` — injects compact intuition pointers,
+  pointers to up to three matching entries of the peer's own knowledge,
   and a one-shot distillation boundary nudge.
 - `meshctl hook session-end` — deregisters session presence.
 

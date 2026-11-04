@@ -170,3 +170,68 @@ process.exit(0)
 		}
 	}
 }
+
+// opencode rebuilds the system prompt on every model call, so the V2 plugin
+// pushes the session-start block on every context call of a session, while
+// the session-start hook itself runs once.
+func TestOpencodeV2Plugin_SessionStartBlockOnEveryCall(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not on PATH")
+	}
+	dir := t.TempDir()
+	plugin := filepath.Join(dir, "meshctl.mjs")
+	if err := os.WriteFile(plugin, []byte(opencodePluginV2JS), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "bin")
+	_ = os.MkdirAll(bin, 0o755)
+	logPath := filepath.Join(dir, "hooks.log")
+	stub := "#!/bin/sh\n" +
+		"sub=\"$4\"\n" +
+		"cat >/dev/null\n" +
+		"echo \"$sub\" >> " + logPath + "\n" +
+		"if [ \"$sub\" = session-start ]; then echo START-BLOCK; fi\n" +
+		"exit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "meshctl"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := filepath.Join(dir, "run.mjs")
+	script := `
+import plugin from "` + plugin + `"
+const hooks = {}
+const ctx = {
+  location: { directory: "` + dir + `" },
+  tool: { hook: async (name, fn) => { hooks["tool." + name] = fn } },
+  session: {
+    hook: async (name, fn) => { hooks["session." + name] = fn },
+    get: async ({ sessionID }) => ({ id: sessionID, agent: "build" }),
+  },
+  event: { subscribe: async function* ({ signal }) { while (!signal.aborted) await new Promise(r => setTimeout(r, 50)) } },
+}
+const cleanup = await plugin.setup(ctx)
+await hooks["session.prompt"]({ sessionID: "S1", prompt: { text: "hello there" } })
+for (let i = 1; i <= 3; i++) {
+  const e = { sessionID: "S1", system: [] }
+  await hooks["session.context"](e)
+  if (!e.system.some(p => p.text === "START-BLOCK")) { console.log("FAIL call " + i + " lacks the session-start block"); process.exit(1) }
+}
+cleanup()
+console.log("OK")
+process.exit(0)
+`
+	if err := os.WriteFile(runner, []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(node, runner)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "AGENT_DISPATCH_DEPTH=", "AGENT_MESH_DISTILLING=")
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "OK") {
+		t.Fatalf("plugin run failed: %v\n%s", err, out)
+	}
+	b, _ := os.ReadFile(logPath)
+	if n := strings.Count(string(b), "session-start"); n != 1 {
+		t.Errorf("want 1 session-start, got %d:\n%s", n, b)
+	}
+}

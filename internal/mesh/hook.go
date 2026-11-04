@@ -375,6 +375,13 @@ func HookUserPrompt(agentsDir string, p HookPayload, now time.Time) string {
 			parts = append(parts, strings.TrimRight(md, "\n"))
 		}
 	}
+	if a != nil && len(strings.TrimSpace(p.Prompt)) >= intuitionMinQuery {
+		if hits, err := RecallKnowledge(a, p.Prompt, promptKnowledgeLimit); err == nil {
+			if md := PromptKnowledgeMarkdown(hits); md != "" {
+				parts = append(parts, md)
+			}
+		}
+	}
 	if nudge := distillNudge(p, project, a); nudge != "" {
 		parts = append(parts, nudge)
 	}
