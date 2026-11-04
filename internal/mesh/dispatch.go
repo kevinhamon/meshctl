@@ -157,7 +157,9 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 
 	// Build the child invocation.
 	msg := fmt.Sprintf("process intake request %s", req.ID)
-	sys := fmt.Sprintf(headlessSystemPrompt, caller)
+	// Grants that apply now widen the child's tools and name its actions.
+	granted := dispatchGrants(agentsDir, target, dispatchSession, now)
+	sys := grantedSystemPrompt(fmt.Sprintf(headlessSystemPrompt, caller), granted)
 	model := dispatchModel()
 	if model == "" && target.Model != "" && target.Model != "default" {
 		model = target.Model
@@ -171,8 +173,14 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 		// opencode reads an inline config from this env (V1 and V2): scope the
 		// headless run to reads + the meshctl write-back verbs, the same
 		// policy the Claude allowlist expresses (see dispatchArgv).
-		"OPENCODE_CONFIG_CONTENT="+opencodeDispatchConfig,
+		"OPENCODE_CONFIG_CONTENT="+opencodeDispatchConfigFor(granted),
 	)
+	if len(granted.Claude) > 0 {
+		childEnv = append(childEnv, dispatchToolsEnv+"="+strings.Join(granted.Claude, "\n"))
+	}
+	if !granted.empty() {
+		dispatchLog(agentsDir, caller, target.Name, depth, now, "GRANTS %s", strings.Join(granted.Grants, ","))
+	}
 
 	runner := o.Runner
 	if runner == nil {
@@ -209,7 +217,7 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 // plugin drops to doctrine + gate only. Either way the system prompt is prepended
 // to the message (opencode run has no --append-system-prompt). ocMajor is the
 // installed opencode major (ignored for claude).
-func dispatchArgv(harness string, ocMajor int, msg, sys, model string) (name string, args []string) {
+func dispatchArgv(harness string, ocMajor int, msg, sys, model string, extra ...string) (name string, args []string) {
 	switch harness {
 	case HarnessOpencode:
 		args = []string{"run", "--pure", "--auto"}
@@ -231,8 +239,10 @@ func dispatchArgv(harness string, ocMajor int, msg, sys, model string) (name str
 			"--allowedTools", "Read", "Grep", "Glob",
 			"Bash(meshctl inbox respond:*)", "Bash(meshctl inbox decline:*)", "Bash(meshctl agent list:*)",
 			"Bash(meshctl memory recall:*)", "Bash(meshctl intuition recall:*)",
-			"--append-system-prompt", sys,
 		}
+		// Tools the target's grants add for this run (dispatch_grant_tools.go).
+		args = append(args, extra...)
+		args = append(args, "--append-system-prompt", sys)
 		if model != "" {
 			args = append(args, "--model", model)
 		}
@@ -260,7 +270,7 @@ func realDispatch(ctx context.Context, targetDir, msg, sys, model string, env []
 			ocMajor = oc.Major()
 		}
 	}
-	name, args := dispatchArgv(harness, ocMajor, msg, sys, model)
+	name, args := dispatchArgv(harness, ocMajor, msg, sys, model, dispatchToolsFromEnv(env)...)
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = targetDir

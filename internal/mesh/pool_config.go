@@ -26,6 +26,18 @@ import (
 type OutboundSurface struct {
 	Tools    []string `yaml:"tools"`
 	Commands []string `yaml:"commands"`
+	// Allow is what a peer dispatched by `ask` is given for this surface when
+	// it holds the surface's outbound grant, in each harness's own permission
+	// format. The regexes above stay what the gate matches and logs.
+	Allow OutboundAllow `yaml:"allow"`
+}
+
+// OutboundAllow is a surface's harness-native permissions for a granted
+// `ask` child: Claude `--allowedTools` entries, and opencode `permission`
+// keys merged into the child's inline config.
+type OutboundAllow struct {
+	Claude   []string       `yaml:"claude"`
+	Opencode map[string]any `yaml:"opencode"`
 }
 
 // ReconcileSettings is the config's `reconcile:` block.

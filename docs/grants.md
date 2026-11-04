@@ -18,9 +18,10 @@ Whether the action can actually run also depends on the tools that headless proc
 
 - **`pool upgrade --headless`** runs entirely in meshctl, so the `pool-upgrade` grant
   works on its own.
-- **A peer dispatched by `meshctl ask`** currently gets a fixed tool set: reads plus the
-  meshctl commands it needs to answer. That covers none of the granted actions, so in an
-  `ask` run a grant only lets a peer that `mutates` something be dispatched at all.
+- **A peer dispatched by `meshctl ask`** gets reads plus the meshctl commands it needs to
+  answer, and, for each grant that applies when it is dispatched, the tools that action
+  needs (see [Tools a dispatched peer gets](#tools-a-dispatched-peer-gets)). Its prompt
+  lists the granted actions.
 - **A distil run** can write candidates only.
 - **A headless run you start yourself** (with `AGENT_DISPATCH_DEPTH` set) can take a
   granted action when its harness permissions allow the command or tool involved.
@@ -67,7 +68,7 @@ grants:
 | `state-set` | `state set`, the current-state digest | the summary file |
 | `kb-confirm` | `kb confirm` of up to five entries a reconcile report reviewed | the report; `--accept-ungrounded` is refused, since overriding an ungrounded verdict stays a human call |
 | `triage-apply` | `inbox triage apply` closing requests the triage pass judged closed | the triage report |
-| `outbound:<surface>` | a write to that outbound surface; also lets a dispatchable peer that `mutates` that surface be dispatched at all | a grant for **every** surface the peer mutates, or it is not dispatched |
+| `outbound:<surface>` | a write to that outbound surface; also lets a dispatchable peer that `mutates` that surface be dispatched at all | a grant for **every** surface the peer mutates, or it is not dispatched; an `allow:` list on the surface for the tools an `ask` run gets |
 | `pool-upgrade` (pool-wide) | `meshctl pool upgrade --headless` | a clean `pool upgrade --check`: any doctrine conflict or warning sends it back to a human, and nothing is changed |
 
 Knowledge confirmed under a grant is kept apart from human confirmations. The ledger
@@ -75,6 +76,42 @@ entry says `by: policy` and names the grant, the `Confirm:` commit carries a
 `Confirmed-by: policy (grant …)` line, and recall shows the entry as `confirmed·policy`,
 ranked below human-confirmed knowledge. A later `kb confirm` in an interactive session
 makes it a human confirmation.
+
+## Tools a dispatched peer gets
+
+When `meshctl ask` dispatches a peer, meshctl reads the peer's grants that apply at that
+moment (held, not paused, under the cap) and adds only what those actions need. With no
+grant that applies, the peer's tools and prompt are exactly as without grants.
+
+| Grant | Added for the `ask` run |
+|---|---|
+| `kb-promote` | `meshctl kb begin`, `meshctl kb finish`, edits inside that run's KB worktree, and writing its summary file |
+| `state-set` | `meshctl state set` and writing its summary file |
+| `kb-confirm` | `meshctl kb reconcile`, `meshctl kb confirm` and writing the reconcile report |
+| `triage-apply` | `meshctl inbox triage` (including `apply`) and writing the triage report |
+| `outbound:<surface>` | the surface's `allow:` entries for the peer's harness |
+
+The tools only make the action reachable. The gate and the command still check the grant
+on every call and log what goes through, so pausing grants mid-run stops the next action.
+
+An outbound surface's regexes say what the gate matches; they cannot be turned into
+harness permissions, so a surface lists those separately under `allow:`, in each
+harness's own format:
+
+```yaml
+outbound:
+  tracker:
+    tools: ['create.*']            # what the gate matches and logs
+    commands: ['^trk create']
+    allow:                         # what a granted `ask` run is given
+      claude: ["mcp__tracker__create", "Bash(trk create:*)"]
+      opencode: { bash: { "trk create*": "allow" } }
+```
+
+`claude` entries are added to the run's `--allowedTools`. `opencode` keys are merged into
+the run's `permission` config. `doctor` warns when a peer holds an `outbound:` grant and
+the surface has no `allow:` entry for that peer's harness, since an `ask` run then gets
+no tools for it.
 
 ## Seeing what grants did
 

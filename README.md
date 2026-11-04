@@ -423,8 +423,8 @@ agreement to its intent, its grounding (cited, or marked *assumption*) and its p
    a later `kb confirm` makes it human. Every granted action is logged, a capped grant
    waits for a human once it reaches its daily cap, and the peer's next interactive
    session start lists everything grants let through since it last ran. `doctor`
-   validates the block. [`docs/grants.md`](docs/grants.md) covers each grant, the policy
-   log, caps, pausing and revoking.
+   validates the block. [`docs/grants.md`](docs/grants.md) covers each grant, the tools
+   a peer dispatched by `ask` gets for it, the policy log, caps, pausing and revoking.
 
 Recall marks unconfirmed entries; `memory recall --scope canonical` also reads canonical
 peers' knowledge. Session start shows a `# Pending work` block (parked branches, open

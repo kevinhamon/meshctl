@@ -12,6 +12,9 @@
 #   <surface>:            # must equal a `mutates` tag on the peers that write it
 #     tools: ['create.*', 'update.*', 'delete.*', 'transition.*']
 #     commands: ['curl .*api\.example\.test']
+#     allow:              # optional: tools a peer granted `outbound:<surface>` gets in an `ask` run
+#       claude: ['Bash(curl:*)']
+#       opencode: { bash: { 'curl *': 'allow' } }
 knowledge: canonical
 # reconcile:
 #   order: [<peer>, <peer>]   # overrides the reconciliation walk order computed from pool facts

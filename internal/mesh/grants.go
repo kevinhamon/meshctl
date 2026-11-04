@@ -149,6 +149,15 @@ func grantFindings(poolRoot string, cfg PoolConfig, agents []*Agent) []DoctorFin
 		out = append(out, DoctorFinding{Agent: "pool", Level: "error", Message: poolRel(poolRoot, PoolConfigFile) + ": " + p})
 	}
 	for _, a := range agents {
+		for _, m := range a.Mutates {
+			if _, ok := cfg.Settings.Grants.PeerGrant(a.Name, OutboundGrant(m)); !ok {
+				continue
+			}
+			allow := cfg.Settings.Outbound[m].Allow
+			if (a.HarnessName() == HarnessOpencode && len(allow.Opencode) == 0) || (a.HarnessName() != HarnessOpencode && len(allow.Claude) == 0) {
+				out = append(out, DoctorFinding{Agent: a.Name, Level: "warn", Message: fmt.Sprintf("holds `%s` but outbound surface %q has no `allow: { %s: … }` in %s — a peer dispatched by `ask` gets no tools for it", OutboundGrant(m), m, a.HarnessName(), poolRel(poolRoot, PoolConfigFile))})
+			}
+		}
 		if a.Dispatchable == nil || !*a.Dispatchable || len(a.Mutates) == 0 {
 			continue
 		}
