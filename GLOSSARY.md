@@ -61,16 +61,20 @@ A pointer from one peer's knowledge base entry to the fact owner's entry, in pla
 _Avoid_: copy, cross-link, mirror
 
 **Shared understanding**:
-The state in which the human has seen and agreed to a peer's intent, the grounding of its claims, and the precedent for its proposed pattern, before the peer acts.
+The state in which the human has seen and agreed to a peer's intent, the grounding of its claims, and the precedent for its proposed pattern, before the peer acts; an instructed action carries it already.
 _Avoid_: alignment, sign-off, approval
 
 **Decision round**:
-The way an agent asks the human for any decision on proposed changes: one numbered item per change saying what will hold from now on and what no longer holds (or, for an action, what it will do and why), ending in a recommended confirm, answered for all at once or disputed item by item, in small batches, before the agent acts.
+The way an agent asks the human for any decision on changes the agent proposes: one numbered item per change saying what will hold from now on and what no longer holds (or, for an action, what it will do and why), ending in a recommended confirm, answered for all at once or disputed item by item, in small batches, before the agent acts.
 _Avoid_: proposal dump, plan review, approval request
 
 **Confirmation round**:
-The decision round read out in chat before a promotion or outbound write, of what each entry will say from now on and what it no longer says, with its grounding and precedent, one item per entry, which the human confirms or disputes item by item; the record is the summary file and the permission prompt is only the signature.
+The decision round read out in chat before a promotion or outbound write, of what each entry will say from now on and what it no longer says, with its grounding and precedent, one item per entry, which the human confirms or disputes item by item; the record is the summary file and the permission prompt is only the signature. An instructed outbound write restates the ask in the summary and needs no more.
 _Avoid_: the ask (that is the prompt), diff review, approval prompt
+
+**Instructed action**:
+An action the human named in their own words, which carries shared understanding by itself: the agent does it and reports the outcome, asks only what the ask left open, and writes a summary that restates the instruction only where a gate signs on one.
+_Avoid_: pre-approved action, trivial action, routine task
 
 **Precedent**:
 Where a proposed pattern already exists in the ecosystem, in confirmed knowledge, or in pool doctrine; a pattern with none is new and must say so.

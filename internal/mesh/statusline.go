@@ -12,13 +12,17 @@ import (
 // statusline.go — the Claude Code status line.
 //
 // One line under the prompt: the agent this session runs as, then the pending
-// work that waits on the human, recomputed from Pending on every
-// call. No cache and no subprocess: Pending is directory listings plus one hash
-// pass, cheap enough to run on every refresh. Claude Code re-runs the command
-// on its own events and every StatusLineRefreshSeconds, so counts move while
-// the session is idle. Fail-open like the advisory hooks: anything it cannot
-// resolve renders as the plain directory name. When the pool's grants are
-// paused, a red [grants: paused] group ends the line.
+// work that waits on the human, recomputed on every call from the peer's own
+// workspace only (scopeOwn). No cache and no subprocess: that scope is
+// directory listings of the peer's own inbox and worktrees plus one hash pass
+// over its own knowledge, cheap enough to run on every refresh. The pool-wide
+// kinds (read-back, triage signals) are left out: the line never renders them,
+// and they cost every peer's inbox and archive plus git in every peer repo.
+// Claude Code re-runs the command on its own events and every
+// StatusLineRefreshSeconds, so counts move while the session is idle.
+// Fail-open like the advisory hooks: anything it cannot resolve renders as the
+// plain directory name. When the pool's grants are paused, a red
+// [grants: paused] group ends the line.
 
 // StatusLineRefreshSeconds is the refreshInterval wired with the status line.
 const StatusLineRefreshSeconds = 10
@@ -68,7 +72,7 @@ func StatusLine(agentsDir string, p StatusLinePayload, now time.Time) string {
 		}
 		return ansiDim + filepath.Base(cwd) + ansiReset
 	}
-	line := renderStatusLine(Pending(agentsDir, a, now))
+	line := renderStatusLine(pendingScoped(agentsDir, a, now, scopeOwn))
 	// The grants kill switch: one pool-config read, the same
 	// file read every gate call makes.
 	if LoadPoolConfig(agentsDir).Settings.Grants.Paused {

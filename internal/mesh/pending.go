@@ -173,9 +173,28 @@ func PendingAllMarkdown(agentsDir string, now time.Time) (string, error) {
 	return strings.Join(parts, "\n\n"), nil
 }
 
+// pendingScope is how far a pending computation looks.
+type pendingScope int
+
+const (
+	// scopePool reads the whole pool: every peer's inbox and archive for
+	// read-back and the triage signals, and git in every peer repo for work
+	// branches. The session-start block and `meshctl pending` use it.
+	scopePool pendingScope = iota
+	// scopeOwn reads only the peer's own workspace: no read-back line, no
+	// triage signals, no peer repos. The status line uses it: Claude Code
+	// re-runs the line on every transcript update, and the two pool-wide
+	// kinds are ones it never renders anyway.
+	scopeOwn
+)
+
 // Pending computes a peer's pending work, kinds in the fixed order; a kind
 // with nothing in it has no line.
 func Pending(agentsDir string, a *Agent, now time.Time) PendingBlock {
+	return pendingScoped(agentsDir, a, now, scopePool)
+}
+
+func pendingScoped(agentsDir string, a *Agent, now time.Time, scope pendingScope) PendingBlock {
 	b := PendingBlock{Agent: a.Name}
 	add := func(l *PendingLine) {
 		if l != nil {
@@ -185,8 +204,10 @@ func Pending(agentsDir string, a *Agent, now time.Time) PendingBlock {
 	add(pendingKBBranches(agentsDir, a, now))
 	report, hasReport := LatestReconcileReport(a.Dir())
 	add(pendingConflicts(a, report, hasReport, now))
-	add(pendingIntake(agentsDir, a, now))
-	add(pendingReadBack(agentsDir, a, now))
+	add(pendingIntake(agentsDir, a, now, scope))
+	if scope == scopePool {
+		add(pendingReadBack(agentsDir, a, now))
+	}
 	add(pendingDelegated(agentsDir, a, now))
 	add(pendingHealth(a, report, hasReport, now))
 	return b
@@ -300,7 +321,7 @@ func pendingConflicts(a *Agent, report string, ok bool, now time.Time) *PendingL
 	return finishLine(l)
 }
 
-func pendingIntake(agentsDir string, a *Agent, now time.Time) *PendingLine {
+func pendingIntake(agentsDir string, a *Agent, now time.Time, scope pendingScope) *PendingLine {
 	reqs, _ := ListRequests(a.InboxPath())
 	var open []*Request
 	l := &PendingLine{Kind: PendingIntake, Label: "Intake",
@@ -316,7 +337,9 @@ func pendingIntake(agentsDir string, a *Agent, now time.Time) *PendingLine {
 		return nil
 	}
 	l.Noun = fmt.Sprintf("%d pending", l.Count)
-	l.TriageSignals = pendingTriageSignals(agentsDir, a, open)
+	if scope == scopePool {
+		l.TriageSignals = pendingTriageSignals(agentsDir, a, open)
+	}
 	return l
 }
 

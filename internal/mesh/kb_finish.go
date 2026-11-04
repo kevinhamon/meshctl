@@ -159,7 +159,7 @@ func KBFinish(agentsDir string, agent *Agent, session string, o KBFinishOptions)
 	}
 
 	clearSessionBranch := func() {
-		if s, err := readSession(sessionPath(agent.Dir(), session)); err == nil {
+		if s, err := readAgentSession(agent.Dir(), session); err == nil {
 			s.KBBranch = ""
 			_ = writeSession(s)
 		}

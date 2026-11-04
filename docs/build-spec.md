@@ -244,8 +244,12 @@ dispatch — interactive sessions bypass it).
   Claude Code to tool subprocesses; matches the hook `session_id`), else minted.
   Presence is registered by a **session-start hook** installed per agent (during
   `onboard`).
-- Registry: `$AGENTS_DIR/<agent>/.sessions/<session-id>` = `{pid, started,
-  last_beat, current_claim, kb_branch?}`; heartbeat updates `last_beat`.
+- Registry: `pool/sessions/<session-id>` = `{agent, pid, started, last_beat,
+  current_claim, kb_branch?, harness_pid?, tty?, background?}`, one file per session
+  id for the whole pool; heartbeat updates `last_beat`. A session id belongs to the
+  agent that registered it: another agent's start is refused with a warning, and
+  its beats and ends leave the record alone (it was
+  `<agent>/.sessions/<session-id>`).
 - `meshctl session start` registers presence and **loudly prints any other live
   session in this workspace + outstanding claims**. `session end` deregisters.
   `session list` shows live sessions + claims.
@@ -285,8 +289,11 @@ dispatch — interactive sessions bypass it).
 
 ### Acceptance additions
 - Two concurrent `meshctl inbox next` calls never return the same request id.
-- A claim held by a live (heartbeating) session is never reclaimed; a claim from a
-  dead session is reclaimed after the stale window.
+- A claim held by a live session (heartbeating, or whose harness process is still
+  running) is never reclaimed; a claim from a dead session is reclaimed after the
+  stale window, and concurrent reclaimers yield exactly one owner.
+- A dispatch lock whose holder pid is dead is reclaimed at once; a live pid holding
+  it past twice the dispatch timeout (a reused pid) is reclaimed too.
 - `session start` in a workspace with another live session prints the overlap.
 - Two `kb begin`/edit/`kb finish` cycles on **different** files both land on `main`
   with no loss; on the **same** lines, `kb finish` surfaces a conflict (interactive)

@@ -233,31 +233,35 @@ func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
 	}
 
 	// Mesh-owned skills (regenerated from the embedded templates).
-	skillRoot := ".claude"
-	if a.HarnessName() == HarnessOpencode {
-		skillRoot = ".opencode"
-	}
+	h := HarnessByName(a.HarnessName())
 	skills := []string{"mesh-cognition"}
-	if hasSkill(dir, "mesh-steward") {
+	if isSteward(dir) {
 		skills = append(skills, "mesh-steward")
 	}
 	for _, s := range skills {
+		if !skillLinked(filepath.Dir(dir), dir, s, h) {
+			p.Actions = append(p.Actions, "link skill "+s+" to the pool's copy ("+PoolDirName(filepath.Dir(dir))+"/"+PoolSkillsDirName+"/"+s+")")
+			continue
+		}
 		want, err := renderedSkill(filepath.Dir(dir), s)
 		if err != nil {
 			continue
 		}
-		have, err := os.ReadFile(filepath.Join(dir, skillRoot, "skills", s, "SKILL.md"))
-		if err != nil || string(have) != want {
+		if have, err := os.ReadFile(filepath.Join(PoolSkillPath(filepath.Dir(dir), s), "SKILL.md")); err != nil || string(have) != want {
 			p.Actions = append(p.Actions, "refresh skill "+s)
 		}
 	}
 
 	// Workspace scaffolding onboard adds when missing (add-only).
 	if b, _ := os.ReadFile(filepath.Join(dir, ".gitignore")); !strings.Contains(string(b), gitignoreMarker) {
-		p.Actions = append(p.Actions, "add meshctl-managed block to .gitignore (.memory/, intake traffic)")
+		p.Actions = append(p.Actions, "add meshctl-managed block to .gitignore (.memory/, intake traffic, "+ClaudeLocalFile+", mesh skill links)")
+	} else if miss := missingManagedIgnores(string(b)); len(miss) > 0 {
+		p.Actions = append(p.Actions, "add to the .gitignore managed block: "+strings.Join(miss, ", "))
 	}
 	if !dirExists(filepath.Join(dir, IntakeDir)) {
 		p.Actions = append(p.Actions, "create "+IntakeDir+"/")
+	} else if !fileExists(filepath.Join(dir, IntakeDir, "README.md")) {
+		p.Actions = append(p.Actions, "recreate "+IntakeDir+"/README.md")
 	}
 	for _, area := range []string{"playbooks", "experience", "candidates", "reference"} {
 		if !fileExists(filepath.Join(dir, KnowledgeDir, area, "README.md")) {
@@ -265,22 +269,17 @@ func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
 		}
 	}
 
-	// CLAUDE.md stanzas onboard injects (the Cognition stanza and the comms
-	// Inbound order are also refreshed).
-	if b, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md")); err == nil {
-		if !hasCommsSection(string(b)) {
-			p.Actions = append(p.Actions, "add Agent Communication section to CLAUDE.md")
-		} else if _, stale := refreshedCommsSection(string(b)); stale {
-			p.Actions = append(p.Actions, "refresh Agent Communication Inbound order in CLAUDE.md")
-		}
-		if !hasCognitionSection(string(b)) {
-			p.Actions = append(p.Actions, "add Cognition stanza to CLAUDE.md")
-		} else if _, stale := refreshedCognitionSection(string(b), filepath.Dir(dir)); stale {
-			p.Actions = append(p.Actions, "refresh Cognition stanza in CLAUDE.md")
-		} else if cognitionStanzaUnrecognized(string(b)) {
-			p.Warnings = append(p.Warnings, "CLAUDE.md Cognition stanza has no ending meshctl recognises — left alone; replace it by hand with the current stanza")
-		}
+	// Standing orders: moved out of CLAUDE.md, (re)written in CLAUDE.local.md.
+	so := planStandingOrders(dir, filepath.Dir(dir))
+	if so.movedOut {
+		p.Actions = append(p.Actions, "move the mesh standing orders out of CLAUDE.md into "+ClaudeLocalFile)
 	}
+	if so.wroteLocal && so.freshLocal {
+		p.Actions = append(p.Actions, "write the mesh standing orders into "+ClaudeLocalFile)
+	} else if so.wroteLocal {
+		p.Actions = append(p.Actions, "refresh the mesh standing orders in "+ClaudeLocalFile)
+	}
+	p.Warnings = append(p.Warnings, so.kept...)
 
 	// Things the upgrade does not fix but the user must know before running it.
 	if n := len(liveSessions(dir, now)); n > 0 {
@@ -331,9 +330,6 @@ func UpgradeAgents(poolRoot, version string) ([]AgentUpgradePlan, error) {
 		}
 		if res.AddedIntake {
 			did = append(did, "created intake/")
-		}
-		if res.AddedCommsSec {
-			did = append(did, "added Agent Communication section to CLAUDE.md")
 		}
 		committed, warnings := commitUpgradeWiring(a.Dir(), before, version)
 		if committed != "" {

@@ -30,7 +30,7 @@ func TestSessions_ReportOpenSessionsAndJobs(t *testing.T) {
 	if s := e.Snapshot().Sessions; len(s) != 1 {
 		t.Fatalf("snapshot sessions: %+v", s)
 	}
-	_ = os.RemoveAll(a.Dir() + "/" + mesh.SessionsDir)
+	_ = os.RemoveAll(mesh.SessionStorePath(dir))
 	if got := Sessions(dir, now); len(got) != 0 {
 		t.Fatalf("no presence ⇒ no sessions: %+v", got)
 	}
@@ -40,10 +40,10 @@ func TestSessions_BackgroundSessionHasNoBringToFront(t *testing.T) {
 	dir, a := testPool(t)
 	now := time.Now()
 	// A live harness (this test process) with no window: listed, never focusable.
-	rec := fmt.Sprintf(`{"id":"bg-1","pid":1,"started":%d,"last_beat":%d,"harness_pid":%d,"tty":"/dev/ttys007","background":true}`,
-		now.Unix(), now.Unix(), os.Getpid())
-	os.MkdirAll(filepath.Join(a.Dir(), mesh.SessionsDir), 0o755)
-	if err := os.WriteFile(filepath.Join(a.Dir(), mesh.SessionsDir, "bg-1"), []byte(rec), 0o644); err != nil {
+	rec := fmt.Sprintf(`{"id":"bg-1","agent":%q,"pid":1,"started":%d,"last_beat":%d,"harness_pid":%d,"tty":"/dev/ttys007","background":true}`,
+		a.Name, now.Unix(), now.Unix(), os.Getpid())
+	os.MkdirAll(mesh.SessionStorePath(dir), 0o755)
+	if err := os.WriteFile(filepath.Join(mesh.SessionStorePath(dir), "bg-1"), []byte(rec), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	got := Sessions(dir, now)

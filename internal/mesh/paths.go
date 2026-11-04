@@ -28,17 +28,19 @@ const (
 
 	// Names inside the pool directory. Build paths with the *Path helpers below;
 	// nothing joins these onto a pool root directly.
-	PoolMarkerFile    = "pool.yaml"
-	PoolConfigFile    = "config.yaml"
-	PoolGlossaryFile  = "glossary.md"
-	PoolIgnoreFile    = ".gitignore"
-	DispatchLogFile   = "dispatch.log"
-	DispatchCountFile = "dispatch.count"
-	DispatchLockFile  = "dispatch.lock"
-	WorktreesDirName  = "worktrees"
-	DoctrineDirName   = "doctrine"
+	PoolMarkerFile      = "pool.yaml"
+	PoolConfigFile      = "config.yaml"
+	PoolGlossaryFile    = "glossary.md"
+	PoolIgnoreFile      = ".gitignore"
+	DispatchLogFile     = "dispatch.log"
+	DispatchCountFile   = "dispatch.count"
+	DispatchLockFile    = "dispatch.lock"
+	WorktreesDirName    = "worktrees"
+	PoolSkillsDirName   = "skills"   // mesh skills rendered once per pool (skills_link.go)
+	PoolSessionsDirName = "sessions" // session presence, one file per session id (session.go)
+	DoctrineDirName     = "doctrine"
 
-	SessionsDir = ".sessions" // per-agent, inside the agent workspace
+	SessionsDir = ".sessions" // per-agent presence folder of earlier versions, removed by hygiene
 
 	ManifestName = "agent.yaml"
 	IntakeDir    = "intake"
@@ -93,6 +95,11 @@ func DispatchLockPath(poolRoot string) string {
 }
 
 // WorktreesPath holds the KB and delegated-work worktrees of every peer.
+// SessionStorePath is the pool's session presence store (session.go).
+func SessionStorePath(poolRoot string) string {
+	return filepath.Join(PoolDir(poolRoot), PoolSessionsDirName)
+}
+
 func WorktreesPath(poolRoot string) string {
 	return filepath.Join(PoolDir(poolRoot), WorktreesDirName)
 }

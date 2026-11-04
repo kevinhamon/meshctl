@@ -10,8 +10,8 @@ _The main loop: what the user hands it, and the steps it runs._
 
 ## Operating principles
 
-- **Align before you act.** Reach **shared understanding** with the human first: their agreement to your intent, your grounding (cite each claim, or mark it *assumption*) and your **precedent** (cite where the pattern already exists, or mark it *new*). It is required whenever the work touches more than one artifact, makes any outbound write, makes any promotion (a `kb finish` beyond candidates, `state set`, `kb confirm`), or rests on any claim you cannot ground. Pools may tighten this in `local.md`, never loosen it.
-- **Before any outbound write** (a surface the pool declares outbound: tracker, wiki, chat, a product-repo PR), write your summary file `.memory/confirm/<session>.md` (Intent, Grounding, Precedent) and read the confirmation round in chat. The gate asks once per summary and denies a write without one.
+- **Align before you act.** Reach **shared understanding** with the human first: their agreement to your intent, your grounding (cite each claim, or mark it *assumption*) and your **precedent** (cite where the pattern already exists, or mark it *new*). It is required whenever the work touches more than one artifact, makes any outbound write, makes any promotion (a `kb finish` beyond candidates, `state set`, `kb confirm`), or rests on any claim you cannot ground. Pools may tighten this in `local.md`, never loosen it. An action the human named is already aligned: do it and report the outcome; ask only what the ask left open.
+- **Before any outbound write** (a surface the pool declares under `outbound:` in its config), write your summary file `.memory/confirm/<session>.md` (Intent, Grounding, Precedent) and read the confirmation round in chat. The gate asks once per summary and denies a write without one. For an action the human named, the summary restates the instruction and the round is that one line.
 - _Read before you write; match surrounding conventions._
 - _Verify behavior; report outcomes faithfully._
 - _When at a genuine crossroads, stop and ask — the user drives._
@@ -26,18 +26,7 @@ _If your work spans git repos, **sync before you inspect** — `git -C <repo> fe
 
 - _Deploy/safety rules, secrets handling, commit conventions, no AI attribution (global rule)._
 
-## Agent Communication (intake)
-
-Bidirectional file-based handoff — canonical protocol: your pool's `../__POOL_DIR__/doctrine/agent-comms.md`. Inbox: `intake/`. The roster is computed on demand — run `meshctl agent list` (do not maintain a peer list here); all `meshctl` commands scope to THIS pool automatically.
-
-- **Inbound — "check intake" shows the queue and stops.** On "check intake" or the session-start intake line, run `meshctl inbox list` (pending + in-progress, priority then age, a one-line ask each) and read it to the human as a short numbered queue (id, from, type, priority, age, ask). Propose an order (priority, then age; flag anything blocking another peer) and wait: claim and work nothing until the human confirms or reorders.
-- **Work in the human's order, by id.** Claim one at a time with `meshctl inbox claim <id>`; process it by `type`, write the outcome back with `meshctl inbox respond <id> --status answered|filed|needs-info|needs-human --response "…"` (intake files are meshctl-owned — never hand-edit them) and report it in a line before the next. When the human says something more important came up, re-plan. Skipped ids go on your handoff's `Deferred: <ids>` line. **Not yours?** `meshctl inbox decline <id> --reason "…" --redirect <owner>` — don't half-answer out-of-domain work.
-- **Ask for a decision as a decision round.** Whenever you need the human's decision on proposed changes (an intake order, a plan, a rule, a KB change, an outbound write), present one item per change: `📝 **C<n> — <short title>**`, then `From now on it says: …` / `It no longer says: …` (a change of rule or knowledge) or what you will do and why (an action), ending `➡️ ✅ Confirm`. Then say how to answer: `yes` for all, or `C<n> no: <reason>` for one. Keep rounds small (about 3–5 items) and wait for the answer before acting.
-- **Read-back:** `meshctl sent` lists requests you sent that came back (answered / declined / needs-info); read each, act, then `meshctl sent ack <id>`. The session start surfaces them automatically.
-- **Outbound:** `meshctl send <target> <type> "…"` writes a request into a peer's inbox; `meshctl ask <target> <type> "…"` also dispatches an advisory peer headlessly and blocks for the answer. Route work to the agent that **owns** it (find owners via `meshctl agent list`); never mutate a peer's KB/board directly.
-- **Blocked on a decision mid-task?** `meshctl ask <advisor> <type> "…"` for a synchronous answer; if it returns `needs-human`, stop and surface to the user.
-- **Under Claude Code, prefer `meshctl ask <advisor> <type> "…" --in-session`:** it records the dispatch and prints an Agent-tool delegation (`subagent_type: mesh-<advisor>`) — make that call, then read the answer with `meshctl sent`. The peer runs inside this session; no second terminal.
-- **Hub session — work a peer owns:** when the task is a peer's *work* (its KB, ADRs, repo), not just its opinion, use `meshctl ask <peer> <type> "…" --in-session --work` → `subagent_type: mesh-<peer>-work`. The peer edits and commits in its own workspace (or a worktree, if its own session is live) and ends with a receipt — relay it. Consult (advice only) stays `--in-session`. Delegating to a peer that `mutates` external state asks the human first. Worktree branches land with `meshctl work merge <id>` from the peer's own session.
+<!-- The mesh standing orders (Agent Communication, Cognition) are in CLAUDE.local.md, managed by meshctl. -->
 
 ## Guardrail — internal references never leave the mesh
 
@@ -50,5 +39,3 @@ Internal references (banned when crossing out): decision/ADR ids, risk ids, `kno
 ## Communication tone (external, human-facing)
 
 When a **human** will read what you write on an external surface (tickets, PRs, review, email, chat) — **especially speaking as the user** — be tactful: critique the work, not the person; don't flatly call a solution "wrong" — frame it as a trade-off, risk, or recommendation, and lead with what's sound. Direct on substance, diplomatic on tone. Be blunt only in internal mesh artifacts and this chat. Canonical: `../__POOL_DIR__/doctrine/agent-comms.md` Core rule 8. **This is a default — if THIS agent's role defines a different voice/communication style, that guidance wins (Core rule 9); state it above in ## Role.**
-
-__COGNITION__

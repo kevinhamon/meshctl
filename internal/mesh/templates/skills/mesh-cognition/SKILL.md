@@ -73,12 +73,30 @@ Recognize → Recall → Retrieve → Reconcile → Verify → **Align** → Act
    touches more than one artifact, makes any outbound write, makes any promotion, or
    rests on any claim you cannot ground. Pools may tighten this in `local.md`, never
    loosen it. For a promotion or an outbound write, this is the confirmation round (below).
+   An action the human named is already aligned: see *Instructed actions* below.
 5. **Act**, then **Learn** — distill anything durable (below).
+
+## Instructed actions — the human's ask is the alignment
+
+When the human names the action ("merge PR 123", "comment on ABC-42 that it ships
+Friday", "push the branch"), the instruction is the shared understanding. Do it, then
+report the outcome in a line. Do not interview: no grounding or precedent for how the
+action is done, no decision round about the mechanics, no reading the ask back. Ask only
+what the instruction leaves open (which PR, which account, which wording), as one plain
+question.
+
+A declared outbound surface still needs the summary file, because the gate signs nothing
+without one: `## Intent` is the instruction in the human's words, `## Changes` lists the
+writes, `## Grounding` is the word *instructed*, and `## Precedent` is left out. The
+confirmation round is that one item, or none when the human's own message already is the
+item; the summary restates the instruction and nothing more. The confirmation round below
+is for what you propose: a knowledge change, or a write the human did not name.
 
 ## Decision round — the default way to ask the human
 
-Whenever you need the human's decision on proposed changes (an intake order, a plan, a
-rule, a KB change, an outbound write), present a decision round, one item per change:
+Whenever you need the human's decision on changes you propose (an intake order, a plan, a
+rule, a KB change, an outbound write you originate), present a decision round, one item
+per change:
 
 ```
 📝 **C<n> — <short title>**
@@ -95,8 +113,9 @@ this same format with its extra fields.
 ## Confirmation round — read before truth changes or anything leaves the mesh
 
 Before a promotion (a `kb finish` that touches more than `candidates/`, `state set`,
-`kb confirm`, `inbox triage apply`) or an outbound write, write ONE summary file for the
-session, `.memory/confirm/<session>.md`:
+`kb confirm`, `inbox triage apply`) or an outbound write you propose (an instructed one
+restates the instruction, above), write ONE summary file for the session,
+`.memory/confirm/<session>.md`:
 
 ```
 ## Intent

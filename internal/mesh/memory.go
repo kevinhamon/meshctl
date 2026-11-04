@@ -98,9 +98,8 @@ func frontMatterTags(body string) []string {
 }
 
 // MemoryRebuild computes the KB topic index and writes it to index.json via
-// temp+atomic-rename. Idempotent. NOTE: recall now reads live via
-// computeTopics — the persisted index is legacy (kept for inspection/back-compat),
-// no longer on the routing path, so its staleness is no longer a doctor warning.
+// temp+atomic-rename. Idempotent. The persisted index is the cache every
+// recall path reads through topicIndex; a rebuild only forces it fresh.
 func MemoryRebuild(agent *Agent) (*MemoryIndex, error) {
 	idx, err := computeTopics(agent)
 	if err != nil {
@@ -110,6 +109,60 @@ func MemoryRebuild(agent *Agent) (*MemoryIndex, error) {
 		return nil, err
 	}
 	return idx, nil
+}
+
+// topicIndex is the topic index every recall reads: the persisted index.json
+// when it was built from the knowledge tree as it is now, else a fresh
+// computeTopics, persisted for the next caller. The per-prompt hook, the gate
+// and cross-peer recall all route through here, so the cost of a recall with
+// an unchanged KB is one stat walk and one JSON read instead of reading every
+// note and the O(n²) cross-reference pass computeTopics runs.
+//
+// Freshness is exact, not "newer than": the index names the newest
+// modification time (nanoseconds) across the knowledge tree, its directories
+// and the manifest, and any difference rebuilds. Directory times cover
+// deletions and renames, which touch no file; the manifest covers the tags.
+func topicIndex(agent *Agent) (*MemoryIndex, error) {
+	stamp := kbNewestMtime(agent)
+	if idx, err := LoadMemoryIndex(agent); err == nil && idx.Agent == agent.Name && idx.BuiltFromMtime != "" && idx.BuiltFromMtime == stamp {
+		return idx, nil
+	}
+	idx, err := computeTopics(agent)
+	if err != nil {
+		return nil, err
+	}
+	_ = writeMemoryIndex(agent.Dir(), idx) // best-effort cache; the result is good either way
+	return idx, nil
+}
+
+// kbNewestMtime is the freshness stamp topicIndex compares: the newest
+// modification time over knowledge/ (files and directories) and agent.yaml,
+// RFC 3339 with nanoseconds; "" when there is no knowledge tree.
+func kbNewestMtime(agent *Agent) string {
+	var newest time.Time
+	bump := func(info os.FileInfo) {
+		if info != nil && info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+	}
+	kb := filepath.Join(agent.Dir(), KnowledgeDir)
+	_ = filepath.WalkDir(kb, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() || strings.HasSuffix(p, ".md") {
+			info, _ := d.Info()
+			bump(info)
+		}
+		return nil
+	})
+	if newest.IsZero() {
+		return ""
+	}
+	if info, err := os.Stat(filepath.Join(agent.Dir(), ManifestName)); err == nil {
+		bump(info)
+	}
+	return newest.UTC().Format(time.RFC3339Nano)
 }
 
 // computeTopics scans <agent>/knowledge/**/*.md + the manifest and returns the
@@ -130,7 +183,9 @@ func computeTopics(agent *Agent) (*MemoryIndex, error) {
 		topics []string
 	}
 	var files []fileInfo
-	var newest time.Time
+	// Stamped before the walk: a note written while we read is newer than the
+	// stamp, so the next topicIndex rebuilds rather than trusting this pass.
+	stamp := kbNewestMtime(agent)
 
 	// Superseded/deprecated/rejected decisions are history, not knowledge:
 	// they never enter the topic index, so recall cannot route to them.
@@ -146,9 +201,6 @@ func computeTopics(agent *Agent) (*MemoryIndex, error) {
 			return nil
 		}
 		info, _ := d.Info()
-		if info != nil && info.ModTime().After(newest) {
-			newest = info.ModTime()
-		}
 		b, err := os.ReadFile(p)
 		if err != nil {
 			return nil
@@ -208,12 +260,10 @@ func computeTopics(agent *Agent) (*MemoryIndex, error) {
 	}
 
 	idx := &MemoryIndex{
-		Generated:    MemoryGenerated,
-		Agent:        agent.Name,
-		ManifestTags: manifestTags,
-	}
-	if !newest.IsZero() {
-		idx.BuiltFromMtime = newest.UTC().Format(time.RFC3339)
+		Generated:      MemoryGenerated,
+		Agent:          agent.Name,
+		BuiltFromMtime: stamp,
+		ManifestTags:   manifestTags,
 	}
 	for topic, a := range byTopic {
 		var srcs []string
@@ -325,7 +375,7 @@ func LoadMemoryIndex(agent *Agent) (*MemoryIndex, error) {
 // familiarity facts, ranked by refs then freshness — WITHOUT reading source
 // bodies (recall routes, the KB read that follows answers).
 func MemoryRecall(agent *Agent, query string) ([]MemoryTopic, error) {
-	idx, err := LoadMemoryIndex(agent)
+	idx, err := topicIndex(agent)
 	if err != nil {
 		return nil, err
 	}
@@ -378,36 +428,19 @@ func MemoryRecall(agent *Agent, query string) ([]MemoryTopic, error) {
 	return hits, nil
 }
 
-// MemoryStale reports whether the index is missing or older than the newest KB
-// file (doctor staleness check; warn-only, like the other KB checks).
+// MemoryStale reports whether the index is missing or was not built from the
+// knowledge tree as it is now (doctor staleness check; warn-only, and
+// self-healing, since every recall rebuilds through topicIndex).
 func MemoryStale(agent *Agent) (stale bool, reason string) {
 	idx, err := LoadMemoryIndex(agent)
 	if err != nil {
 		return true, "no memory index"
 	}
-	kb := filepath.Join(agent.Dir(), KnowledgeDir)
-	var newest time.Time
-	filepath.WalkDir(kb, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".md") {
-			return nil
-		}
-		if info, e := d.Info(); e == nil && info.ModTime().After(newest) {
-			newest = info.ModTime()
-		}
-		return nil
-	})
 	if idx.BuiltFromMtime == "" {
 		return true, "index has no build mtime"
 	}
-	built, err := time.Parse(time.RFC3339, idx.BuiltFromMtime)
-	if err != nil {
-		return true, "index build mtime unparseable"
-	}
-	// Compare at second granularity: built_from_mtime is stored as RFC3339
-	// (second precision), so a full-precision file mtime in the same second must
-	// not read as "newer".
-	if newest.Truncate(time.Second).After(built) {
-		return true, "older than newest KB file"
+	if idx.BuiltFromMtime != kbNewestMtime(agent) {
+		return true, "knowledge changed since the index was built"
 	}
 	return false, ""
 }

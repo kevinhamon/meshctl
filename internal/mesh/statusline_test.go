@@ -133,7 +133,7 @@ func TestStatusLine_InvalidPayloadIsTolerated(t *testing.T) {
 // reads its standing orders, or the hint would rely on the model guessing.
 func TestStatusLine_EveryPhraseIsDefinedInTheStandingOrders(t *testing.T) {
 	texts := templateTexts(t)
-	for _, name := range []string{"cognitionSection", "templates/CLAUDE.md", "templates/skills/mesh-cognition/SKILL.md"} {
+	for _, name := range []string{"cognitionSection", "templates/skills/mesh-cognition/SKILL.md"} {
 		text := texts[name]
 		if !strings.Contains(text, "`meshctl pending` first") {
 			t.Errorf("%s: phrases must start from a fresh `meshctl pending`", name)

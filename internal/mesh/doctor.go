@@ -405,14 +405,30 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: p})
 	}
 
-	// CLAUDE.md intake section.
-	claude := filepath.Join(a.Dir(), "CLAUDE.md")
-	if b, err := os.ReadFile(claude); err == nil {
-		if !hasCommsSection(string(b)) {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md missing the Agent Communication (intake) section — run `meshctl agent onboard " + a.Name + "`"})
-		}
-	} else {
+	// Standing orders: a current managed block in CLAUDE.local.md, and no
+	// leftover copy in the tracked CLAUDE.md (standing_orders.go).
+	if !fileExists(filepath.Join(a.Dir(), "CLAUDE.md")) {
 		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "no CLAUDE.md"})
+	}
+	so := planStandingOrders(a.Dir(), filepath.Dir(a.Dir()))
+	switch {
+	case so.movedOut:
+		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md still carries the mesh standing orders — run `meshctl agent onboard " + a.Name + "` to move them into " + ClaudeLocalFile})
+	case so.wroteLocal && so.freshLocal:
+		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "mesh standing orders missing from " + ClaudeLocalFile + " — run `meshctl agent onboard " + a.Name + "`"})
+	case so.wroteLocal:
+		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "mesh standing orders in " + ClaudeLocalFile + " are out of date — run `meshctl agent onboard " + a.Name + "`"})
+	}
+	for _, k := range so.kept {
+		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: k})
+	}
+	// Session start over the harness's context cap gets trimmed (hook.go).
+	if _, trimmed := sessionStartContext(filepath.Dir(a.Dir()), a, HookPayload{Cwd: a.Dir()}, "", "", time.Now()); trimmed {
+		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: fmt.Sprintf(
+			"session start is trimmed to fit the %d-char limit — the agent sees only part of %s/%s; shorten it with `meshctl state set`", SessionStartBudget, KnowledgeDir, StateFile)})
+	}
+	if dirExists(filepath.Join(a.Dir(), IntakeDir)) && !fileExists(filepath.Join(a.Dir(), IntakeDir, "README.md")) {
+		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: IntakeDir + "/README.md missing — run `meshctl agent onboard " + a.Name + "` to recreate it"})
 	}
 
 	// Peer glossaries retire: leftover file, `owns` coupling.
@@ -508,9 +524,9 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 		}
 		// The persisted memory index is off the routing path — recall
 		// reads live — so its staleness is no longer a doctor warning.
-		// Cognition wiring: the mesh-cognition skill + the always-present
-		// "## Cognition" standing-order stanza in CLAUDE.md. An agent with a knowledge/
-		// tree must have both, else the learn loop has no trigger (warn only).
+		// Cognition wiring: the mesh-cognition skill (the Cognition stanza is
+		// checked with the standing orders above). An agent with a knowledge/
+		// tree needs it, else the learn loop has no trigger (warn only).
 		// Skill location is harness-specific: .claude/skills vs .opencode/skills.
 		skillDir := ".claude"
 		if a.HarnessName() == HarnessOpencode {
@@ -518,11 +534,6 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 		}
 		if !fileExists(filepath.Join(a.Dir(), skillDir, "skills", "mesh-cognition", "SKILL.md")) {
 			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "mesh-cognition skill not installed (" + skillDir + "/skills/mesh-cognition/) — run `meshctl agent onboard " + a.Name + "`"})
-		}
-		if b, err := os.ReadFile(claude); err == nil && !hasCognitionSection(string(b)) {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md missing the Cognition standing-order stanza — run `meshctl agent onboard " + a.Name + "`"})
-		} else if err == nil && cognitionStanzaUnrecognized(string(b)) {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "CLAUDE.md Cognition stanza has no ending meshctl recognises, so onboard cannot refresh it — replace it by hand with the current stanza"})
 		}
 		// Harness wiring present?
 		if a.HarnessName() == HarnessOpencode && !fileExists(filepath.Join(a.Dir(), "opencode.json")) {

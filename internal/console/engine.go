@@ -302,8 +302,8 @@ func (e *Engine) Run(ctx context.Context) error {
 }
 
 // WatchPaths lists the directories whose changes can move a snapshot: the
-// pool directory and its worktrees, and per peer its workspace root, inbox,
-// presence, runtime state (session records, confirmations, reconcile reports,
+// pool directory, its worktrees and session store, and per peer its
+// workspace root, inbox, runtime state (session records, confirmations, reconcile reports,
 // outbound audit) and knowledge top level (with candidates), plus the git
 // files that name branches. Directories only (kqueue opens one descriptor
 // per watched file); knowledge sub-folders are covered by the minute tick and
@@ -318,7 +318,9 @@ func WatchPaths(dir string) []string {
 	pool := mesh.PoolDir(dir)
 	add(pool)
 	add(filepath.Join(pool, mesh.WorktreesDirName))
-	add(filepath.Join(pool, mesh.MemoryDir)) // the upgrade stamp
+	add(filepath.Join(pool, mesh.MemoryDir))                   // the upgrade stamp
+	add(filepath.Join(pool, mesh.PoolSessionsDirName))         // presence, every agent's
+	add(filepath.Join(pool, mesh.PoolSessionsDirName, "jobs")) // scheduled jobs, per harness process
 	agents, _, err := mesh.ScanAgents(dir)
 	if err != nil {
 		return out
@@ -327,8 +329,6 @@ func WatchPaths(dir string) []string {
 		d := a.Dir()
 		add(d)
 		add(a.InboxPath())
-		add(filepath.Join(d, mesh.SessionsDir))         // presence
-		add(filepath.Join(d, mesh.SessionsDir, "jobs")) // scheduled jobs, per harness process
 		add(filepath.Join(d, mesh.MemoryDir))
 		for _, sub := range []string{"sessions", "confirm", "reconcile", mesh.OutboundDir} {
 			add(filepath.Join(d, mesh.MemoryDir, sub))

@@ -106,7 +106,7 @@ func TestDocFolderFindings_MissingAndEscaping(t *testing.T) {
 // Every surface that tells a peer where to write says the same rule.
 func TestDocsRule_InEveryStandingOrder(t *testing.T) {
 	texts := templateTexts(t)
-	for _, name := range []string{"cognitionSection", "templates/CLAUDE.md", "templates/skills/mesh-cognition/SKILL.md", "templates/doctrine/agent-comms.md"} {
+	for _, name := range []string{"cognitionSection", "templates/skills/mesh-cognition/SKILL.md", "templates/doctrine/agent-comms.md"} {
 		text := strings.Join(strings.Fields(texts[name]), " ")
 		for _, want := range []string{"`docs/`", "never in a repo", "YYYY-MM-DD-<slug>", "mermaid", "`docs/local/`"} {
 			if !strings.Contains(text, want) {
@@ -137,8 +137,8 @@ func TestOnboard_BringsAnOlderWorkspaceToTheDocsConvention(t *testing.T) {
 	if strings.Count(string(b), DocsLocalDir+"/") != 1 {
 		t.Errorf("onboard must add docs/local/ once:\n%s", b)
 	}
-	claude, _ := os.ReadFile(filepath.Join(a.Dir(), "CLAUDE.md"))
-	if !strings.Contains(string(claude), "Documents for the person go in") {
+	local, _ := os.ReadFile(filepath.Join(a.Dir(), ClaudeLocalFile))
+	if !strings.Contains(string(local), "Documents for the person go in") {
 		t.Errorf("the managed stanza carries the docs rule")
 	}
 }

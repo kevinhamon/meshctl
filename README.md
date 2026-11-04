@@ -164,9 +164,8 @@ only ever added within a schema version, lists are `[]` when empty, and the exit
 the same as without the flag. `agent list --json` is the older bare array, plus `live`.
 
 **Keeping a pool clean across upgrades.** A pool accumulates drift as meshctl evolves:
-stale claims and presence records, orphan KB worktrees, a dead dispatch lock, retired
-files (`.memory/index.json`), legacy intake statuses, per-session state from long-dead
-sessions, leftovers of earlier doctrine upgrades, and references to retired command
+stale claims and presence records, orphan KB worktrees, a dead dispatch lock, legacy
+intake statuses, per-session state from long-dead sessions, leftovers of earlier doctrine upgrades, and references to retired command
 names in hand-written files. `meshctl doctor` reports every such item and marks the
 ones it can repair as *fixable*; `meshctl doctor --fix` repairs them. `meshctl pool
 upgrade` runs the same repairs as its last step and ends with `pool clean ✓`, or lists
@@ -230,8 +229,8 @@ python, no loose scripts, no machine-absolute paths):
 
 | | Claude Code | opencode V1 (1.x) | opencode V2 (2.x) |
 |---|---|---|---|
-| rules | `.claude/settings.json` | `opencode.json` `instructions:["CLAUDE.md"]` | plugin injects `CLAUDE.md` (V2 ignores `instructions`) |
-| skills | `.claude/skills/<n>/SKILL.md` | `.opencode/skills/<n>/SKILL.md` | `.opencode/skills/<n>/SKILL.md` |
+| rules | `CLAUDE.md` + `CLAUDE.local.md` (native) | `opencode.json` `instructions:["CLAUDE.md","CLAUDE.local.md"]` | plugin injects `CLAUDE.md` then `CLAUDE.local.md` (V2 ignores `instructions`) |
+| skills | `.claude/skills/<n>` → `pool/skills/<n>` (symlink) | `.opencode/skills/<n>` → `pool/skills/<n>` | `.opencode/skills/<n>` → `pool/skills/<n>` |
 | hooks | settings.json → `meshctl hook …` | `.opencode/plugin/meshctl.js` → `meshctl hook …` | `.opencode/plugins/meshctl.js` → `meshctl hook …` |
 | inject | `hookSpecificOutput` JSON | `experimental.chat.system.transform` | `session.hook("context")` |
 | capture | SessionEnd | `session.idle` = heartbeat; session-end after an idle window | `session.execution.succeeded` = heartbeat; session-end after an idle window (`AGENT_MESH_OPENCODE_IDLE_SEC`, 600s) or `session.deleted` |
@@ -249,9 +248,10 @@ release workflow runs it before building.
 <!-- parity:begin (generated from internal/mesh/parity.go; do not edit by hand) -->
 | Feature | Claude Code | opencode V2 (2.x) | opencode V1 (1.x) |
 |---|---|---|---|
-| Doctrine and mesh skills loaded | ✅ CLAUDE.md, `.claude/skills/` | ✅ plugin injects CLAUDE.md; `.opencode/skills/` | ✅ `instructions`; `.opencode/skills/` |
+| Doctrine and mesh skills loaded | ✅ CLAUDE.md + CLAUDE.local.md, `.claude/skills/` | ✅ plugin injects CLAUDE.md + CLAUDE.local.md; `.opencode/skills/` | ✅ `instructions`; `.opencode/skills/` |
 | Session start: handoff, state digest, pending work, intuition | ✅ | ✅ | ✅ |
 | Session presence and capture | ✅ SessionEnd | ✅ heartbeat, idle window | ✅ idle event |
+| Console "Bring to front" (iTerm2 on macOS) | ✅ | ✅ with `--standalone`; ✗ in the background-service mode (no terminal) | untested |
 | Pre-tool gate: memory stores, intake, KB rules, peer contracts | ✅ | ✅ | ✗ no pre-tool hook |
 | Promotion asks: `kb finish`, `kb confirm`, `state set`, `inbox triage apply` | ✅ gate ask | ✅ opencode's permission ask | ✗ refused |
 | Agent writes to `pool/` | ✅ asked, committed after | ✗ refused; edit by hand | ✗ |
@@ -379,7 +379,9 @@ Every agent maintains a git-tracked `knowledge/` KB in two tiers — a **current
 Agents propose; only the human confirms. Before anything changes what other sessions treat
 as true, or leaves the mesh, the agent reaches **shared understanding** with the human:
 agreement to its intent, its grounding (cited, or marked *assumption*) and its precedent
-(cited, or marked *new*). The flow is the same for every gated write:
+(cited, or marked *new*). An action the human named is not a proposal: the agent does
+it, and where a gate signs on a summary, that summary restates the instruction. The flow
+is the same for every gated write the agent proposes:
 
 1. **Summary.** The agent writes one file per session, `<peer>/.memory/confirm/<session>.md`
    (Intent, Grounding, Precedent, Coherence when related canonical entries exist).
@@ -456,9 +458,10 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
      [--mutates code] [--dispatchable] --harness <claude|opencode> --rgb r,g,b --badge LABEL
    ```
    Rule: one agent per distinct responsibility with a real ownership boundary; advisory agents are `dispatchable`, anything that writes code/a tracker sets `--mutates` (⇒ not dispatchable, `send`-only, human-triggered).
-4. **Flesh each agent's `CLAUDE.md`** with its operating doctrine (the scaffold adds the intake + Cognition stanzas; add the role-specific substance).
+4. **Flesh each agent's `CLAUDE.md`** with its operating doctrine: the role-specific substance. The mesh standing orders (Agent Communication + Cognition) are not in it: they live in a block meshctl manages in the gitignored `CLAUDE.local.md`, rewritten on every onboard and `pool upgrade`, so a meshctl change never needs a commit in an agent repo and an agent repo is safe to share with people who don't run meshctl. The mesh skills are symlinks into `pool/skills/`, rendered once per pool.
 5. **Verify.** `meshctl doctor` (clean but for empty-KB warnings) and `meshctl agent list`.
-6. **Onboard an existing directory** into the mesh instead of creating fresh: `meshctl agent onboard <path>` (add-only; infers title/role; autodetects harness).
+6. **Onboard an existing directory** into the mesh instead of creating fresh: `meshctl agent onboard <path>` (add-only; infers title/role; autodetects harness; recreates a missing `intake/README.md`).
+   An agent onboarded by an earlier meshctl gets its standing orders moved out of `CLAUDE.md` on the next onboard or upgrade (one commit in its repo). A customised Agent Communication section (one holding lines meshctl never wrote) stays where it is, and doctor flags it: move the role-specific lines under another heading and delete the section to get the current intake order.
 7. **Operate.** Reach a peer with `meshctl msg send|ask`; on "check intake" read `meshctl inbox list` to the human (pending + in-progress, priority then age, a one-line ask each), propose an order and wait, then `meshctl inbox claim <id>` in the order they give, answer with `meshctl inbox respond` (or `inbox decline --redirect` when it isn't yours), and read replies with `meshctl sent`; recall with `meshctl memory recall`; record decisions via `meshctl kb begin/finish`; leave a handoff with `meshctl handoff set`.
 
 ## Repo layout
@@ -476,8 +479,8 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
 ## Conventions
 
 - A pool is a plain container of workspaces — not itself a git repo. Each agent is its
-  own repo in the pool, and `pool/` (doctrine, glossary, config) is its own git repo. Runtime artifacts (`pool/dispatch.*`, `pool/worktrees/`, `.sessions/`,
-  `.memory/`) are git-ignored.
+  own repo in the pool, and `pool/` (doctrine, glossary, config) is its own git repo. Runtime artifacts (`pool/dispatch.*`, `pool/worktrees/`, `pool/sessions/`,
+  `pool/skills/`, `.memory/`) are git-ignored.
 - Prefer SSH git remotes.
 - A change to what a harness can do updates `internal/mesh/parity.go` in the same commit:
   every command is classified there, and the README table above is generated from it.

@@ -75,8 +75,9 @@ meshctl agent new <name> \
 ```
 
 Then, for each new agent, **flesh out its `CLAUDE.md` body** — the operating doctrine
-for its role (it starts as a skeleton). Keep the mesh-neutral scaffolding (the intake +
-Cognition stanzas `meshctl agent onboard` injects) and add the role-specific substance.
+for its role (it starts as a skeleton). The mesh standing orders (intake +
+Cognition) are not in it: meshctl keeps them in the agent's gitignored `CLAUDE.local.md`.
+Add the role-specific substance.
 Give each a distinct badge colour so the human can tell them apart.
 
 Verify with `meshctl doctor` and show the new roster with `meshctl agent list`.
@@ -138,7 +139,7 @@ meshctl doctor
 
 `--check` writes nothing. It lists doctrine files to update, doctrine files that differ
 from this binary's copy (conflicts), each agent's wiring changes (plugin/hook swap,
-skill refreshes, missing CLAUDE.md stanzas) and warnings: live sessions, uncommitted
+skill links, standing orders moved into or refreshed in `CLAUDE.local.md`) and warnings: live sessions, uncommitted
 changes, and harness config outside the pool (e.g. a global opencode config with V1 keys).
 
 **b. Explain and get approval.** Summarise for the user in plain terms: what changes in

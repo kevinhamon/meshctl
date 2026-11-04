@@ -20,12 +20,14 @@ type ParityRow struct {
 
 // HarnessParity is the feature × harness table, in README order.
 var HarnessParity = []ParityRow{
-	{"Doctrine and mesh skills loaded", "✅ CLAUDE.md, `.claude/skills/`", "✅ plugin injects CLAUDE.md; `.opencode/skills/`", "✅ `instructions`; `.opencode/skills/`",
+	{"Doctrine and mesh skills loaded", "✅ CLAUDE.md + CLAUDE.local.md, `.claude/skills/`", "✅ plugin injects CLAUDE.md + CLAUDE.local.md; `.opencode/skills/`", "✅ `instructions`; `.opencode/skills/`",
 		[]string{"agent new", "agent onboard", "agent bootstrap", "pool upgrade"}},
 	{"Session start: handoff, state digest, pending work, intuition", "✅", "✅", "✅",
 		[]string{"hook session-start", "hook user-prompt"}},
 	{"Session presence and capture", "✅ SessionEnd", "✅ heartbeat, idle window", "✅ idle event",
 		[]string{"hook session-beat", "hook session-end", "session"}},
+	{"Console \"Bring to front\" (iTerm2 on macOS)", "✅", "✅ with `--standalone`; ✗ in the background-service mode (no terminal)", "untested",
+		nil},
 	{"Pre-tool gate: memory stores, intake, KB rules, peer contracts", "✅", "✅", "✗ no pre-tool hook",
 		[]string{"hook pre-tool-use"}},
 	{"Promotion asks: `kb finish`, `kb confirm`, `state set`, `inbox triage apply`", "✅ gate ask", "✅ opencode's permission ask", "✗ refused",

@@ -169,12 +169,14 @@ const run = async (cwd, sub, payload) => (await exec(cwd, sub, payload, 30000)).
 // AGENT_MESH_OPENCODE_IDLE_SEC, default 10 minutes.
 const idleMs = (Number(process.env.AGENT_MESH_OPENCODE_IDLE_SEC) || 600) * 1000
 
+// The agent's role (CLAUDE.md, unless opencode already loads it as AGENTS.md)
+// then the managed standing orders (CLAUDE.local.md), as Claude Code loads them.
 const doctrine = (cwd) => {
-  try {
-    const claude = join(cwd, "CLAUDE.md")
-    try { if (realpathSync(join(cwd, "AGENTS.md")) === realpathSync(claude)) return "" } catch {}
-    return readFileSync(claude, "utf8").trim()
-  } catch { return "" }
+  const read = (p) => { try { return readFileSync(p, "utf8").trim() } catch { return "" } }
+  const claude = join(cwd, "CLAUDE.md")
+  let role = read(claude)
+  try { if (realpathSync(join(cwd, "AGENTS.md")) === realpathSync(claude)) role = "" } catch {}
+  return [role, read(join(cwd, "CLAUDE.local.md"))].filter(Boolean).join("\n\n")
 }
 
 export default {
@@ -189,25 +191,34 @@ export default {
     const prompts = new Map()
     const idle = new Map()
 
-    // Session lookup, cached: {parentID, agent}; null when it failed (not
-    // cached, so the next call retries). A parentID marks a subagent's child.
+    // Session lookup, cached: {parentID, agent, directory}; null when it
+    // failed (not cached, so the next call retries). A parentID marks a
+    // subagent's child.
     const sessions = new Map()
     const sessionInfo = async (sid) => {
       if (!sid) return null
       if (sessions.has(sid)) return sessions.get(sid)
       try {
         const s = await ctx.session.get({ sessionID: sid })
-        const info = { parentID: (s && s.parentID) || "", agent: (s && s.agent) || "" }
+        const info = { parentID: (s && s.parentID) || "", agent: (s && s.agent) || "",
+          directory: (s && s.location && s.location.directory) || "" }
         sessions.set(sid, info)
         return info
       } catch { return null }
     }
+    // opencode's background service hosts every project's sessions and runs
+    // every loaded plugin's hooks for each of them. A session that runs in
+    // another workspace belongs to that workspace's agent: this plugin leaves
+    // its doctrine, gate and presence alone. An unknown directory (a failed
+    // lookup) is treated as ours, so the gate stays fail-closed.
+    const elsewhere = (info) => !!(info && info.directory && info.directory !== cwd)
     const isPeer = (agent) => typeof agent === "string" && agent.startsWith("mesh-")
 
     // The gate is the mesh's one fail-CLOSED hook: if meshctl cannot be run
     // or does not answer, the call is refused with the reason, not waved through.
     await ctx.tool.hook("execute.before", async (e) => {
       const info = await sessionInfo(e.sessionID)
+      if (elsewhere(info)) return
       const agent = e.agent || (info && info.agent) || ""
       if (!agent && (!info || info.parentID)) throw new Error("mesh gate cannot tell which agent runs this session and refuses rather than run a peer under the wrong rules; retry, or run meshctl doctor")
       const payload = { cwd, session_id: (info && info.parentID) || e.sessionID || "", tool_name: e.tool, tool_input: e.input }
@@ -257,6 +268,7 @@ export default {
     await ctx.session.hook("context", async (e) => {
       const sid = e.sessionID || ""
       const info = await sessionInfo(sid)
+      if (elsewhere(info)) return
       if (info && info.parentID) {
         // A subagent: no session of its own to start or recall for. A mesh
         // peer takes its role from its definition and "agent brief", not

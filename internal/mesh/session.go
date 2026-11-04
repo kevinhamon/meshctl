@@ -11,10 +11,13 @@ import (
 	"time"
 )
 
-// Session is a live presence record. One file per session
-// under <agent>/.sessions/<session-id>.
+// Session is a live presence record. One file per session id for the whole
+// pool, under pool/sessions/<session-id>, naming the agent it belongs to: a
+// session id can belong to one agent only, so it can never be live under
+// several (it was <agent>/.sessions/<session-id>).
 type Session struct {
 	ID           string `json:"id"`
+	Agent        string `json:"agent"`
 	PID          int    `json:"pid"`
 	Started      int64  `json:"started"`
 	LastBeat     int64  `json:"last_beat"`
@@ -40,7 +43,8 @@ type Session struct {
 // Claude Code keeps a session's jobs across /clear, which ends one session id
 // and starts another in the same process. So they are stored per harness
 // process (per session id when the process is unknown), under
-// <agent>/.sessions/jobs/, a folder the session listings skip.
+// pool/sessions/jobs/, a folder the session listings skip, each file prefixed
+// with its agent.
 
 // JobSet is the scheduled jobs one harness process runs, as of At.
 type JobSet struct {
@@ -53,18 +57,22 @@ type JobSet struct {
 
 func jobsDir(agentDir string) string { return filepath.Join(sessionsDir(agentDir), "jobs") }
 
+// sessionAgent is the agent key a workspace's presence records carry: its
+// directory name, which is the agent's name.
+func sessionAgent(agentDir string) string { return filepath.Base(agentDir) }
+
 // jobsPath is where the jobs of session s are kept: by its harness process,
 // else by its id. A scoped pid carries its scope's tag, since the same pid in
 // two namespaces is two processes.
 func jobsPath(agentDir string, s *Session) string {
 	if s.HarnessPID > 0 {
-		name := "pid-" + strconv.Itoa(s.HarnessPID)
+		name := sessionAgent(agentDir) + "-pid-" + strconv.Itoa(s.HarnessPID)
 		if s.ProcScope != "" {
 			name += "-" + scopeTag(s.ProcScope)
 		}
 		return filepath.Join(jobsDir(agentDir), name+".json")
 	}
-	return filepath.Join(jobsDir(agentDir), "session-"+s.ID+".json")
+	return filepath.Join(jobsDir(agentDir), sessionAgent(agentDir)+"-session-"+s.ID+".json")
 }
 
 // SessionJobs returns the scheduled jobs of the process running session s.
@@ -104,9 +112,49 @@ type SessionJob struct {
 	Prompt    string `json:"prompt"`
 }
 
-func sessionsDir(agentDir string) string { return filepath.Join(agentDir, SessionsDir) }
+// sessionsDir is the pool's session store; agents sit directly under the
+// pool root.
+func sessionsDir(agentDir string) string { return SessionStorePath(filepath.Dir(agentDir)) }
 func sessionPath(agentDir, id string) string {
 	return filepath.Join(sessionsDir(agentDir), id)
+}
+
+// errOtherAgent is a session id registered to another agent.
+type errOtherAgent struct{ id, agent string }
+
+func (e errOtherAgent) Error() string {
+	return fmt.Sprintf("session %s belongs to agent %q", e.id, e.agent)
+}
+
+// readAgentSession reads session id when it belongs to the agent at agentDir;
+// a record of another agent is an errOtherAgent, never this agent's.
+func readAgentSession(agentDir, id string) (*Session, error) {
+	s, err := readSession(sessionPath(agentDir, id))
+	if err != nil {
+		return nil, err
+	}
+	if s.Agent != sessionAgent(agentDir) {
+		return nil, errOtherAgent{id, s.Agent}
+	}
+	return s, nil
+}
+
+// agentSessions lists the records of the agent at agentDir.
+func agentSessions(agentDir string) []*Session {
+	entries, err := os.ReadDir(sessionsDir(agentDir))
+	if err != nil {
+		return nil
+	}
+	var out []*Session
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if s, err := readSession(sessionPath(agentDir, e.Name())); err == nil && s.Agent == sessionAgent(agentDir) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // sessionIDEnv lists the env vars that carry the harness session id, in
@@ -154,6 +202,13 @@ func SessionStart(agent *Agent, id string, pid int, now time.Time) (warning stri
 		return "", err
 	}
 
+	// One session, one agent: an id another agent registered stays theirs.
+	if _, err := readAgentSession(agent.Dir(), id); err != nil {
+		if o, ok := err.(errOtherAgent); ok {
+			return fmt.Sprintf("⚠ session %s is already registered to agent %q, so it is not registered as %q; if this session is %q's, run `meshctl doctor`.", id, o.agent, agent.Name, agent.Name), nil
+		}
+	}
+
 	others := liveSessions(agent.Dir(), now)
 	var live []*Session
 	for _, s := range others {
@@ -162,7 +217,7 @@ func SessionStart(agent *Agent, id string, pid int, now time.Time) (warning stri
 		}
 	}
 
-	s := &Session{ID: id, PID: pid, Started: now.Unix(), LastBeat: now.Unix(), path: sessionPath(agent.Dir(), id)}
+	s := &Session{ID: id, Agent: sessionAgent(agent.Dir()), PID: pid, Started: now.Unix(), LastBeat: now.Unix(), path: sessionPath(agent.Dir(), id)}
 	s.HarnessPID, s.TTY = harnessTerminal(os.Getpid())
 	s.Background = harnessInBackground(s.HarnessPID)
 	s.ProcScope = procScope()
@@ -191,16 +246,19 @@ func SessionStart(agent *Agent, id string, pid int, now time.Time) (warning stri
 
 // SessionEnd deregisters a session.
 func SessionEnd(agent *Agent, id string) error {
-	err := os.Remove(sessionPath(agent.Dir(), id))
-	if os.IsNotExist(err) {
-		return nil
+	s, err := readAgentSession(agent.Dir(), id)
+	if err != nil {
+		return nil // not registered, or another agent's
 	}
-	return err
+	if err := os.Remove(s.path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // SessionBeat refreshes a session's heartbeat (and optionally its claim/branch).
 func SessionBeat(agent *Agent, id string, now time.Time) error {
-	s, err := readSession(sessionPath(agent.Dir(), id))
+	s, err := readAgentSession(agent.Dir(), id)
 	if err != nil {
 		return err
 	}
@@ -213,12 +271,15 @@ func SessionBeat(agent *Agent, id string, now time.Time) error {
 // long-running session stays alive (and its claims unstealable).
 func TouchSession(agent *Agent, id string, pid int, now time.Time) error {
 	p := sessionPath(agent.Dir(), id)
-	s, err := readSession(p)
+	s, err := readAgentSession(agent.Dir(), id)
+	if _, other := err.(errOtherAgent); other {
+		return nil // another agent's session: leave its record alone
+	}
 	if err != nil {
 		if err := os.MkdirAll(sessionsDir(agent.Dir()), 0o755); err != nil {
 			return err
 		}
-		s = &Session{ID: id, PID: pid, Started: now.Unix(), path: p}
+		s = &Session{ID: id, Agent: sessionAgent(agent.Dir()), PID: pid, Started: now.Unix(), path: p}
 		s.HarnessPID, s.TTY = harnessTerminal(os.Getpid())
 		s.Background = harnessInBackground(s.HarnessPID)
 		s.ProcScope = procScope()
@@ -233,7 +294,7 @@ func SetSessionJobs(agent *Agent, id string, pid int, jobs []SessionJob, now tim
 	if err := TouchSession(agent, id, pid, now); err != nil {
 		return err
 	}
-	s, err := readSession(sessionPath(agent.Dir(), id))
+	s, err := readAgentSession(agent.Dir(), id)
 	if err != nil {
 		return err
 	}
@@ -253,19 +314,8 @@ func SetSessionJobs(agent *Agent, id string, pid int, jobs []SessionJob, now tim
 // or, when that is unknown (not recorded, or recorded in another scope), whose
 // heartbeat is fresh. Oldest first.
 func OpenSessions(agent *Agent, now time.Time) []*Session {
-	entries, err := os.ReadDir(sessionsDir(agent.Dir()))
-	if err != nil {
-		return nil
-	}
 	var out []*Session
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		s, err := readSession(sessionPath(agent.Dir(), e.Name()))
-		if err != nil {
-			continue
-		}
+	for _, s := range agentSessions(agent.Dir()) {
 		fresh := int(now.Unix()-s.LastBeat) <= staleSec()
 		if alive, known := s.harnessState(); (known && alive) || (!known && fresh) {
 			out = append(out, s)
@@ -280,30 +330,28 @@ func SessionList(agent *Agent, now time.Time) []*Session {
 	return liveSessions(agent.Dir(), now)
 }
 
-// sessionAlive reports whether a session is registered and heartbeating.
+// sessionAlive reports whether a session is registered and either heartbeating
+// or run by a harness process that is known to be running here. The second
+// clause is the one liveSessions uses to keep an open, idle session on the
+// roster; a claim must not be stealable from a session the roster still lists.
+// Heartbeats only arrive on prompts, so a user who claims a request and walks
+// away for the stale window would otherwise lose it to the next dispatch.
 func sessionAlive(agentDir, id string, now time.Time) bool {
 	if id == "" {
 		return false
 	}
-	s, err := readSession(sessionPath(agentDir, id))
+	s, err := readAgentSession(agentDir, id)
 	if err != nil {
 		return false
 	}
-	return int(now.Unix()-s.LastBeat) <= staleSec()
+	return int(now.Unix()-s.LastBeat) <= staleSec() || s.harnessAlive()
 }
 
 // countLiveSessions counts what liveSessions returns, without reaping.
 func countLiveSessions(agentDir string, now time.Time) int {
-	entries, err := os.ReadDir(sessionsDir(agentDir))
-	if err != nil {
-		return 0
-	}
 	n := 0
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if s, err := readSession(sessionPath(agentDir, e.Name())); err == nil && int(now.Unix()-s.LastBeat) <= staleSec() {
+	for _, s := range agentSessions(agentDir) {
+		if int(now.Unix()-s.LastBeat) <= staleSec() {
 			n++
 		}
 	}
@@ -311,19 +359,8 @@ func countLiveSessions(agentDir string, now time.Time) int {
 }
 
 func liveSessions(agentDir string, now time.Time) []*Session {
-	entries, err := os.ReadDir(sessionsDir(agentDir))
-	if err != nil {
-		return nil
-	}
 	var out []*Session
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		s, err := readSession(sessionPath(agentDir, e.Name()))
-		if err != nil {
-			continue
-		}
+	for _, s := range agentSessions(agentDir) {
 		if int(now.Unix()-s.LastBeat) > staleSec() {
 			// Stale: reap it opportunistically — unless its harness is still
 			// running (an open, idle session keeps its terminal and jobs).

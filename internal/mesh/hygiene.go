@@ -296,23 +296,25 @@ func agentHygiene(agentsDir string, a *Agent, now time.Time) []HygieneItem {
 		})
 	}
 
-	// Stale presence records.
-	if entries, err := os.ReadDir(sessionsDir(dir)); err == nil {
-		for _, e := range entries {
-			if e.IsDir() {
-				continue // jobs/: below
-			}
-			p := filepath.Join(sessionsDir(dir), e.Name())
-			s, err := readSession(p)
-			if err != nil || (int(now.Unix()-s.LastBeat) > staleSec() && !s.harnessAlive()) {
-				add("stale session record "+e.Name(), removeFix(p))
-			}
+	// Stale presence records: this agent's, in the pool's session store.
+	for _, s := range agentSessions(dir) {
+		if int(now.Unix()-s.LastBeat) > staleSec() && !s.harnessAlive() {
+			add("stale session record "+s.ID, removeFix(s.path))
 		}
 	}
+	// The per-agent presence folder of earlier versions: live
+	// sessions re-register in the pool on their next prompt, so it goes once
+	// nothing in it has beaten within the stale window.
+	if legacy := filepath.Join(dir, SessionsDir); dirExists(legacy) && !legacyPresenceLive(legacy, now) {
+		add("presence folder "+SessionsDir+"/ from an earlier meshctl (sessions now live in the pool)", removeFix(legacy))
+	}
 	// Scheduled-job lists of processes that have exited (or, kept per
-	// session, of sessions that are gone).
+	// session, of sessions that are gone): this agent's, by file prefix.
 	if entries, err := os.ReadDir(jobsDir(dir)); err == nil {
 		for _, e := range entries {
+			if !strings.HasPrefix(e.Name(), sessionAgent(dir)+"-") {
+				continue
+			}
 			p := filepath.Join(jobsDir(dir), e.Name())
 			var js JobSet
 			b, err := os.ReadFile(p)
@@ -325,7 +327,8 @@ func agentHygiene(agentsDir string, a *Agent, now time.Time) []HygieneItem {
 				// Another scope's process: its list is refreshed every turn.
 				gone = int(now.Unix()-js.At) > staleSec()
 			default:
-				gone = !fileExists(sessionPath(dir, js.Session))
+				_, err := readAgentSession(dir, js.Session)
+				gone = err != nil
 			}
 			if gone {
 				add("scheduled-job list of an ended session "+e.Name(), removeFix(p))
@@ -349,11 +352,6 @@ func agentHygiene(agentsDir string, a *Agent, now time.Time) []HygieneItem {
 			}
 			return nil
 		})
-	}
-
-	// Retired memory index (recall computes live since v1.1; the file is dead).
-	if p := filepath.Join(dir, MemoryDir, MemoryIndexFile); fileExists(p) {
-		add("retired "+MemoryDir+"/"+MemoryIndexFile+" (recall is computed live; the file is unused)", removeFix(p))
 	}
 
 	// Per-session state older than the window: nudge markers, rule acks,
@@ -484,4 +482,22 @@ func kbBranchHygiene(agentsDir, agent, session, wt string, now time.Time) (Hygie
 	}
 	return HygieneItem{Agent: "pool", Message: fmt.Sprintf("KB branch %s (%s) unmerged for %d days — confirm it from %s's own session (`meshctl kb finish --agent %s --session %s`) or `--abort`",
 		branch, agent, int(age.Hours()/24), agent, agent, session)}, true
+}
+
+// legacyPresenceLive reports whether a pre-pool presence folder still holds a
+// record beaten within the stale window.
+func legacyPresenceLive(legacy string, now time.Time) bool {
+	entries, err := os.ReadDir(legacy)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if s, err := readSession(filepath.Join(legacy, e.Name())); err == nil && int(now.Unix()-s.LastBeat) <= staleSec() {
+			return true
+		}
+	}
+	return false
 }

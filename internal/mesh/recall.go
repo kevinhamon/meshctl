@@ -240,7 +240,7 @@ func recall(agent *Agent, query string, limit int, includeKB, includeActivity bo
 
 	// KB topics (authoritative; live). Inactive decisions are already gone
 	// (computeTopics drops them); tiers rank what is left.
-	if idx, err := computeTopics(agent); err == nil && includeKB {
+	if idx, err := topicIndex(agent); err == nil && includeKB {
 		ledger := newLedgerCheck(agent.Dir()) // no ledger ⇒ unconfirmed
 		for _, t := range idx.Topics {
 			s := len(tokens) == 0 // empty query → include, score 0

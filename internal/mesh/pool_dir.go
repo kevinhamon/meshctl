@@ -31,6 +31,13 @@ const (
 // ignore block written before it was one of the block's lines.
 const poolIgnoreMemoryCommit = "pool: ignore " + MemoryDir + "/"
 
+// lateIgnores are pool ignore lines added after the block was first written:
+// pools whose block predates them get each one added and committed.
+var lateIgnores = []string{PoolSkillsDirName + "/", PoolSessionsDirName + "/"}
+
+// poolIgnoreLateCommit is the subject of the commit adding late ignore lines.
+func poolIgnoreLateCommit(lines []string) string { return "pool: ignore " + strings.Join(lines, ", ") }
+
 // poolIgnoreBlock is the meshctl-managed block of the pool repo's ignore file:
 // runtime state never enters the pool's history. Doctrine merge scratch
 // (`.upstream`, `.bak-*`) is meshctl's, not knowledge, so it stays out too.
@@ -41,6 +48,10 @@ var poolIgnoreBlock = "\n" + gitignoreMarker + " — do not edit\n" +
 	DispatchLockFile + "\n" +
 	DispatchLockFile + ".*\n" +
 	WorktreesDirName + "/\n" +
+	"# mesh skills, rendered from the binary on every onboard\n" +
+	PoolSkillsDirName + "/\n" +
+	"# session presence, one file per open session\n" +
+	PoolSessionsDirName + "/\n" +
 	"# machine-local markers and the upgrade stamp, disposable\n" +
 	MemoryDir + "/\n" +
 	"# doctrine merge scratch written by `meshctl pool upgrade`\n" +
@@ -61,7 +72,8 @@ type poolDirState struct {
 	glossaryMissing     bool
 	repoMissing         bool
 	ignoreMissing       bool
-	memoryIgnoreMissing bool // the block predates its .memory/ line
+	memoryIgnoreMissing bool     // the block predates its .memory/ line
+	lateIgnoresMissing  []string // lateIgnores the block predates
 	commitMissing       bool
 	worktrees           int // live worktree links the rename must repair
 }
@@ -84,6 +96,13 @@ func readPoolDirState(poolRoot string) poolDirState {
 		// Blocks written before .memory/ joined them (the upgrade stamp
 		// lives there, so the repo was left dirty after every upgrade).
 		st.memoryIgnoreMissing = true
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, PoolIgnoreFile)); strings.Contains(string(b), gitignoreMarker) {
+		for _, l := range lateIgnores {
+			if !hasIgnoreLine(string(b), l) {
+				st.lateIgnoresMissing = append(st.lateIgnoresMissing, l)
+			}
+		}
 	}
 	if st.repoMissing {
 		st.commitMissing = true
@@ -110,7 +129,7 @@ func poolRepoPresent(dir string) bool {
 
 func (st poolDirState) pending() bool {
 	return st.legacy || st.markerMissing || st.configMissing || st.splitTools == splitAuto ||
-		st.glossaryMissing || st.repoMissing || st.ignoreMissing || st.memoryIgnoreMissing || st.commitMissing
+		st.glossaryMissing || st.repoMissing || st.ignoreMissing || st.memoryIgnoreMissing || len(st.lateIgnoresMissing) > 0 || st.commitMissing
 }
 
 // hasIgnoreLine reports whether an ignore file carries line on a line of its own.
@@ -182,6 +201,9 @@ func PlanPoolDir(poolRoot string) (steps, warnings []string) {
 	}
 	if st.memoryIgnoreMissing {
 		steps = append(steps, "add "+MemoryDir+"/ to "+cur+PoolIgnoreFile+" (machine-local state)")
+	}
+	if len(st.lateIgnoresMissing) > 0 {
+		steps = append(steps, "add "+strings.Join(st.lateIgnoresMissing, ", ")+" to "+cur+PoolIgnoreFile+" (rendered skills, session presence)")
 	}
 	if st.commitMissing {
 		steps = append(steps, "first commit in "+cur+" with your git identity (`"+poolInitialCommit+"`)")
@@ -276,6 +298,19 @@ func UpgradePoolDir(poolRoot string, now time.Time) ([]string, error) {
 		did = append(did, "added "+MemoryDir+"/ to "+poolRel(abs, PoolIgnoreFile))
 		if !st.commitMissing {
 			if _, err := commitPoolPaths(dir, []string{PoolIgnoreFile}, poolIgnoreMemoryCommit, ""); err != nil {
+				return did, fmt.Errorf("commit in %s/ failed (%v) — set git user.name and user.email, then rerun `meshctl pool upgrade`", PoolDirName(abs), err)
+			}
+		}
+	}
+	if len(st.lateIgnoresMissing) > 0 {
+		for _, l := range st.lateIgnoresMissing {
+			if err := ensureGitignoreLine(dir, l); err != nil {
+				return did, err
+			}
+		}
+		did = append(did, "added "+strings.Join(st.lateIgnoresMissing, ", ")+" to "+poolRel(abs, PoolIgnoreFile))
+		if !st.commitMissing {
+			if _, err := commitPoolPaths(dir, []string{PoolIgnoreFile}, poolIgnoreLateCommit(st.lateIgnoresMissing), ""); err != nil {
 				return did, fmt.Errorf("commit in %s/ failed (%v) — set git user.name and user.email, then rerun `meshctl pool upgrade`", PoolDirName(abs), err)
 			}
 		}

@@ -84,13 +84,19 @@ func workWorktrees(agentsDir, agent string) []PendingWork {
 	if err != nil {
 		return nil
 	}
+	// One roster scan for the whole listing, not one manifest parse per
+	// worktree per peer: this runs on every status-line refresh.
+	agents, _, err := ScanAgents(agentsDir)
+	if err != nil {
+		return nil
+	}
 	var out []PendingWork
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		wt := filepath.Join(root, e.Name())
-		owner := AgentFromWorktreePath(agentsDir, wt)
+		owner := agentForWorktreeBase(agents, e.Name())
 		if owner == "" || (agent != "" && owner != agent) {
 			continue
 		}

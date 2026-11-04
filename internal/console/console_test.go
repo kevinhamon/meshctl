@@ -300,9 +300,11 @@ func TestEngine_UpgradeNotice(t *testing.T) {
 
 func TestServer_DoctorFixRepairsFixableItems(t *testing.T) {
 	dir, a := testPool(t)
-	retired := filepath.Join(a.Dir(), mesh.MemoryDir, mesh.MemoryIndexFile)
-	_ = os.MkdirAll(filepath.Dir(retired), 0o755)
-	if err := os.WriteFile(retired, []byte("{}"), 0o644); err != nil {
+	// A stale session record (no heartbeat since epoch, no harness pid) is
+	// the simplest fixable hygiene item.
+	stale := filepath.Join(a.Dir(), mesh.SessionsDir, "dead")
+	_ = os.MkdirAll(filepath.Dir(stale), 0o755)
+	if err := os.WriteFile(stale, []byte(`{"id":"dead","pid":1,"started":1,"last_beat":1}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	e := NewEngine(dir, "test")
@@ -317,7 +319,7 @@ func TestServer_DoctorFixRepairsFixableItems(t *testing.T) {
 		return n
 	}
 	if fixable() == 0 {
-		t.Fatal("the retired index should be a fixable finding")
+		t.Fatal("the stale session record should be a fixable finding")
 	}
 	h := (&Server{Engine: e, Settings: Settings{Port: 7717, Token: "secret"}}).Handler()
 	post := func(token, origin string) *httptest.ResponseRecorder {
@@ -349,8 +351,8 @@ func TestServer_DoctorFixRepairsFixableItems(t *testing.T) {
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &res) != nil || len(res.Fixed) == 0 || res.Failed == nil {
 		t.Fatalf("fix: %d %s", w.Code, w.Body)
 	}
-	if _, err := os.Stat(retired); !os.IsNotExist(err) {
-		t.Errorf("retired index still there: %v", err)
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale session record still there: %v", err)
 	}
 	if n := fixable(); n != 0 {
 		t.Errorf("%d fixable findings after the repair", n)

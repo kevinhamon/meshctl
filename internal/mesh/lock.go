@@ -241,15 +241,28 @@ func lockAge(lockPath string, now time.Time) int {
 	return int(now.Sub(info.ModTime()).Seconds())
 }
 
+// lockCeilingSec is the longest a live holder can hold the dispatch lock before
+// it is reclaimed anyway: twice the dispatch timeout, which bounds a real
+// dispatch, or the stale window if that is longer. A pid that is alive past
+// this is not the dispatch that took the lock. A SIGKILLed `ask` never runs
+// release(), and once the kernel hands its pid to some long-lived process the
+// "live holder" would otherwise keep every later ask out of the pool until a
+// human removed the directory.
+func lockCeilingSec() int { return max(staleSec(), 2*timeoutSec()) }
+
 // lockReclaimable decides whether a held lock may be taken over. The holder's
 // pid is recorded in $LOCK/info; a dead pid is reclaimable at once, a live one
-// never is (a hung holder is the operator's call, see the BUSY message), and an
-// unknown one (no info yet, a platform that cannot probe, or a holder in another
-// scope, whose pid means nothing here) falls back to age.
+// only past lockCeilingSec (a hung holder inside that window is the operator's
+// call, see the BUSY message), and an unknown one (no info yet, a platform that
+// cannot probe, or a holder in another scope, whose pid means nothing here)
+// falls back to the stale window.
 func lockReclaimable(lockPath string, now time.Time) bool {
 	if pid := lockHolderPID(lockPath); pid > 0 && scopeLocal(lockInfoField(lockPath, "scope")) {
 		if alive, known := pidAlive(pid); known {
-			return !alive
+			if !alive {
+				return true
+			}
+			return lockAge(lockPath, now) > lockCeilingSec()
 		}
 	}
 	return lockAge(lockPath, now) > staleSec()

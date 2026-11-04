@@ -194,6 +194,21 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 	}
 	warn, _ := SessionStart(a, id, pid, now) // presence registration; ignore errors
 
+	ctx, _ := sessionStartContext(agentsDir, a, p, id, warn, now)
+	return ctx
+}
+
+// SessionStartBudget is the most session-start text meshctl injects. Claude
+// Code caps a hook's additionalContext at 10,000 characters and, over it,
+// shows the agent only a 2,000-char preview; the margin covers counting bytes
+// and the harness's own framing.
+const SessionStartBudget = 9500
+
+// sessionStartContext renders the session-start block without side effects
+// (doctor measures it too). Over SessionStartBudget, the state digest is
+// trimmed first, then the handoff, each ending on a pointer to its full file;
+// trimmed reports that it happened.
+func sessionStartContext(agentsDir string, a *Agent, p HookPayload, id, warn string, now time.Time) (ctx string, trimmed bool) {
 	handoff, _ := HandoffShow(a)
 	handoff = strings.TrimSpace(handoff)
 
@@ -248,7 +263,7 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 	}
 	// Tool reference: mesh-wide + agent tools, self-serve --help.
 	if resumed {
-		return strings.TrimSpace(b.String())
+		return strings.TrimSpace(b.String()), false
 	}
 	if md := ToolsMarkdown(EffectiveTools(LoadPoolConfig(agentsDir), a)); md != "" {
 		b.WriteString(md)
@@ -256,15 +271,44 @@ func HookSessionStart(agentsDir string, p HookPayload, pid int, now time.Time) s
 	}
 	// Current-state digest (S1): what the world looks like, before where the
 	// last session stopped.
-	if st := StateBlock(a); st != "" {
-		b.WriteString(st)
-		b.WriteString("\n\n")
-	}
+	head := b.String()
+	st := StateBlock(a)
+	ho := ""
 	if handoff != "" {
-		b.WriteString("# Session handoff — resume point (authoritative; rewrite it before you leave)\n\n")
-		b.WriteString(handoff)
+		ho = "# Session handoff — resume point (authoritative; rewrite it before you leave)\n\n" + handoff
 	}
-	return strings.TrimSpace(b.String())
+	join := func() string { return strings.TrimSpace(head + st + "\n\n" + ho) }
+	if len(join()) <= SessionStartBudget {
+		return join(), false
+	}
+	// Digest first: the KB files hold its detail. Then the handoff.
+	st = trimToFit(st, SessionStartBudget-len(head)-len(ho)-4, KnowledgeDir+"/"+StateFile)
+	if len(join()) > SessionStartBudget {
+		ho = trimToFit(ho, SessionStartBudget-len(head)-len(st)-4, KnowledgeDir+"/"+HandoffFile)
+	}
+	return join(), true
+}
+
+// trimToFit cuts block at a line boundary so it fits max bytes including a
+// closing pointer to the full file; a block with no room left keeps only the
+// pointer.
+func trimToFit(block string, max int, file string) string {
+	if block == "" {
+		return ""
+	}
+	note := "\n\n… trimmed to fit the session-start limit — read `" + file + "` for the rest."
+	room := max - len(note)
+	if room <= 0 {
+		return strings.TrimSpace(note)
+	}
+	if len(block) <= room {
+		return block
+	}
+	cut := block[:room]
+	if i := strings.LastIndex(cut, "\n"); i > 0 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, "\n") + note
 }
 
 // ResumeSummaryLine names a resumed session's confirmation summary path: the
@@ -325,7 +369,7 @@ func HookSessionEnd(agentsDir string, p HookPayload, pid int, now time.Time) {
 	// Read the session's start time from presence BEFORE deregistering, so the
 	// record's git-since window and duration are accurate.
 	started := ""
-	if s, err := readSession(sessionPath(a.Dir(), id)); err == nil && s.Started > 0 {
+	if s, err := readAgentSession(a.Dir(), id); err == nil && s.Started > 0 {
 		started = time.Unix(s.Started, 0).UTC().Format(time.RFC3339)
 	}
 	_, _ = CaptureSession(a, p.TranscriptPath, id, started, now)

@@ -36,13 +36,15 @@ func TestPoolHygiene_FindsAndFixesDrift(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(lock, "info"), []byte("pid=999999999 caller=x target=y\n"), 0o644)
 	_ = os.Chtimes(lock, old, old)
 
-	// Agent: stale claim, stale session, retired index, old nudge marker, legacy status.
+	// Agent: stale claim, stale session, old nudge marker, legacy status. The
+	// memory index is live state (the recall cache), never a hygiene item.
 	req, _ := WriteRequest(a, "guidance", "x", "u", "P2", nil, now)
 	_ = os.WriteFile(claimPath(req.Path()), []byte(`{"owner_session":"dead","pid":1,"heartbeat":1}`), 0o644)
 	_ = os.MkdirAll(sessionsDir(a.Dir()), 0o755)
-	_ = os.WriteFile(sessionPath(a.Dir(), "dead"), []byte(`{"id":"dead","pid":1,"started":1,"last_beat":1}`), 0o644)
+	_ = os.WriteFile(sessionPath(a.Dir(), "dead"), []byte(`{"id":"dead","agent":"`+sessionAgent(a.Dir())+`","pid":1,"started":1,"last_beat":1}`), 0o644)
 	_ = os.MkdirAll(filepath.Join(a.Dir(), MemoryDir, ruleAckDir), 0o755)
-	_ = os.WriteFile(filepath.Join(a.Dir(), MemoryDir, MemoryIndexFile), []byte("{}"), 0o644)
+	idx := filepath.Join(a.Dir(), MemoryDir, MemoryIndexFile)
+	_ = os.WriteFile(idx, []byte("{}"), 0o644)
 	nudge := filepath.Join(a.Dir(), MemoryDir, ".distill-nudge-s9.json")
 	_ = os.WriteFile(nudge, []byte("{}"), 0o644)
 	_ = os.Chtimes(nudge, old, old)
@@ -58,7 +60,7 @@ func TestPoolHygiene_FindsAndFixesDrift(t *testing.T) {
 	msgs := hygieneMessages(items)
 	for _, want := range []string{
 		"doctrine backup", "differs from this meshctl's copy", "dispatch lock held by a dead process",
-		"stale claim", "stale session record", "retired .memory/index.json",
+		"stale claim", "stale session record",
 		"distillation nudge marker", "KB-rule ack", `status "done" → "answered"`,
 		"CLAUDE.md:3 references the retired",
 	} {
@@ -78,11 +80,13 @@ func TestPoolHygiene_FindsAndFixesDrift(t *testing.T) {
 	if len(fixed) != len(items)-len(manual) {
 		t.Fatalf("fixed %d of %d fixable", len(fixed), len(items)-len(manual))
 	}
-	for _, gone := range []string{bak, lock, claimPath(req.Path()), sessionPath(a.Dir(), "dead"),
-		filepath.Join(a.Dir(), MemoryDir, MemoryIndexFile), nudge, ack} {
+	for _, gone := range []string{bak, lock, claimPath(req.Path()), sessionPath(a.Dir(), "dead"), nudge, ack} {
 		if _, err := os.Stat(gone); err == nil {
 			t.Errorf("%s should have been removed", gone)
 		}
+	}
+	if _, err := os.Stat(idx); err != nil {
+		t.Error("the memory index is the recall cache and must be kept")
 	}
 	if _, err := os.Stat(up); err != nil {
 		t.Error("upstream doctrine copy is a manual item and must be kept")

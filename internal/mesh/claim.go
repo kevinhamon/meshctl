@@ -15,16 +15,24 @@ type Claim struct {
 	OwnerSession string `json:"owner_session"`
 	PID          int    `json:"pid"`
 	Heartbeat    int64  `json:"heartbeat"`
-	agent        string `json:"-"`
 	path         string `json:"-"`
 }
 
 // claimPath is the sidecar path for a request file.
 func claimPath(requestPath string) string { return requestPath + ".claim" }
 
+// claimReclaimPath is the mutex directory a stale-claim reclaim is done under
+// (the .dispatch.lock pattern, see reclaimLocked).
+func claimReclaimPath(cp string) string { return cp + ".reclaim" }
+
 // ClaimRequest attempts an atomic O_EXCL claim of a request. Returns the winning
 // claim and whether this caller now owns it. A loser gets ok=false and the
 // existing claim. A stale claim from a dead session is reclaimed.
+//
+// Reclaim runs under a per-claim mutex and re-reads the claim inside it. A bare
+// remove-then-create let two reclaimers that both judged the old claim stale
+// end up owning the request: the second one's remove deleted the first one's
+// fresh claim, and its create then succeeded.
 func ClaimRequest(requestPath, session string, pid int, now time.Time) (*Claim, bool) {
 	cp := claimPath(requestPath)
 	c := &Claim{OwnerSession: session, PID: pid, Heartbeat: now.Unix(), path: cp}
@@ -57,12 +65,40 @@ func ClaimRequest(requestPath, session string, pid int, now time.Time) (*Claim, 
 		return existing, true
 	}
 	if reclaimable(requestPath, existing, now) {
-		_ = os.Remove(cp)
-		if write() {
+		if removeAbandonedClaim(requestPath, cp, now) && write() {
 			return c, true
+		}
+		// Lost the reclaim mutex or the create to a concurrent caller: report
+		// whatever claim is there now.
+		if cur, err := readClaim(cp); err == nil {
+			return cur, false
 		}
 	}
 	return existing, false
+}
+
+// removeAbandonedClaim removes the claim at cp if, re-read under the reclaim
+// mutex, it is still abandoned, and reports whether the caller may now race for
+// the create. The mutex is released on return, so the O_EXCL create that follows
+// stays the only arbiter: the mutex only guarantees that what gets removed is
+// the abandoned claim, never a fresh one. False means another reclaimer holds
+// the mutex, or the claim turned out to be live.
+func removeAbandonedClaim(requestPath, cp string, now time.Time) bool {
+	reclaim := claimReclaimPath(cp)
+	if !reclaimLocked(reclaim) {
+		return false
+	}
+	defer os.Remove(reclaim)
+	cur, err := readClaim(cp)
+	switch {
+	case os.IsNotExist(err):
+		return true // already removed by the previous reclaimer; race for the create
+	case err != nil:
+		return false // unreadable: treat as held
+	case !reclaimable(requestPath, cur, now):
+		return false // a concurrent reclaimer already replaced it with a live claim
+	}
+	return os.Remove(cp) == nil || !fileExists(cp)
 }
 
 // ReleaseClaim removes a claim, but only if held by the given session (never
@@ -78,10 +114,16 @@ func ReleaseClaim(requestPath, session string, now time.Time) error {
 		}
 		return err
 	}
-	if existing.OwnerSession != session && !reclaimable(requestPath, existing, now) {
+	if existing.OwnerSession == session {
+		return os.Remove(cp)
+	}
+	if !reclaimable(requestPath, existing, now) {
 		return fmt.Errorf("claim on %s is held by live session %q, not %q", filepath.Base(requestPath), existing.OwnerSession, session)
 	}
-	return os.Remove(cp)
+	// Abandoned by someone else: release under the reclaim mutex so a claim a
+	// concurrent reclaimer just created in its place is not the one removed.
+	removeAbandonedClaim(requestPath, cp, now)
+	return nil
 }
 
 // reclaimable reports whether a claim may be stolen: its own heartbeat is stale
@@ -93,10 +135,7 @@ func reclaimable(requestPath string, c *Claim, now time.Time) bool {
 	// Cross-check the owner's session registry. The agent dir is two levels up
 	// from the request file (…/<agent>/intake/<req>).
 	agentDir := filepath.Dir(filepath.Dir(requestPath))
-	if sessionAlive(agentDir, c.OwnerSession, now) {
-		return false
-	}
-	return true
+	return !sessionAlive(agentDir, c.OwnerSession, now)
 }
 
 func readClaim(cp string) (*Claim, error) {

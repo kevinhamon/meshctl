@@ -2,7 +2,6 @@ package mesh
 
 import (
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -71,24 +70,20 @@ func scaffoldLedger(dest string) (bool, error) {
 	return true, WriteLedger(dest, Ledger{})
 }
 
-// scaffoldSkills installs the shared mesh skills, rendered into the given
-// harness's native location. Add-only: never clobbers an existing
-// skill; a second run is a no-op. mesh-cognition is every agent's primary
-// cognition instructions.
+// scaffoldSkills links the shared mesh skills into the given harness's native
+// location, each a symlink to the pool's rendered copy (skills_link.go); a
+// second run only refreshes the pool copy. mesh-cognition is every agent's
+// primary cognition instructions.
 func scaffoldSkills(poolRoot, dest string, h Harness) ([]string, error) {
 	var added []string
 	skills := []string{"mesh-cognition"}
 	// Update the steward skill too if this agent already has it (it's a steward),
 	// so onboard propagates mesh-steward updates without adding it to other agents.
-	if hasSkill(dest, "mesh-steward") {
+	if isSteward(dest) {
 		skills = append(skills, "mesh-steward")
 	}
 	for _, skill := range skills {
-		body, err := renderedSkill(poolRoot, skill)
-		if err != nil {
-			return added, err
-		}
-		ok, err := h.RenderSkill(skill, body, dest)
+		ok, err := linkSkill(poolRoot, dest, skill, h)
 		if err != nil {
 			return added, err
 		}
@@ -156,12 +151,15 @@ const gitignoreEnd = "# end meshctl-managed ignores"
 
 // managedIgnores are the managed block's lines, in order.
 var managedIgnores = []string{
-	".memory/",             // generated, disposable (meshctl memory rebuild)
-	IntakeArchiveDir + "/", // archived closed requests
-	"intake/*.md",          // ephemeral inbox traffic
-	"!intake/README.md",    // …but keep the inbox doc
-	"intake/*.claim",       // runtime claim locks
-	DocsLocalDir + "/",     // documents that must never leave the machine
+	".memory/",                // generated, disposable (meshctl memory rebuild)
+	IntakeArchiveDir + "/",    // archived closed requests
+	"intake/*.md",             // ephemeral inbox traffic
+	"!intake/README.md",       // …but keep the inbox doc
+	"intake/*.claim",          // runtime claim locks
+	DocsLocalDir + "/",        // documents that must never leave the machine
+	ClaudeLocalFile,           // the managed standing orders (standing_orders.go)
+	".claude/skills/mesh-*",   // links to the pool's mesh skills (skills_link.go)
+	".opencode/skills/mesh-*", // …the opencode equivalent
 }
 
 func ensureMemoryIgnored(dest string) error {
@@ -213,12 +211,14 @@ func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error)
 		}
 	}
 
-	// Rendered template files.
-	// The Cognition stanza has one source, cognitionSection, so a fresh
-	// workspace gets exactly the text onboard refreshes (issue #11).
-	repl := strings.NewReplacer("__NAME__", spec.Name, "__DIR__", spec.Name, "__BADGE__", spec.Badge.Label, poolDirToken, PoolDirName(agentsDir),
-		cognitionToken, strings.TrimLeft(renderPoolTokens(agentsDir, cognitionSection), "\n"))
+	// Rendered template files. The standing orders have one source,
+	// standingOrdersBlock, so a fresh workspace gets exactly the block onboard
+	// rewrites (issues #11, #12).
+	repl := strings.NewReplacer("__NAME__", spec.Name, "__DIR__", spec.Name, "__BADGE__", spec.Badge.Label, poolDirToken, PoolDirName(agentsDir))
 	if err := renderTemplate("templates/CLAUDE.md", filepath.Join(dest, "CLAUDE.md"), repl); err != nil {
+		return "", err
+	}
+	if _, err := syncStandingOrders(dest, agentsDir); err != nil {
 		return "", err
 	}
 	if err := renderTemplate("templates/intake/README.md", filepath.Join(dest, IntakeDir, "README.md"), repl); err != nil {
@@ -264,7 +264,6 @@ type OnboardResult struct {
 	Dir           string
 	AddedManifest bool
 	AddedIntake   bool
-	AddedCommsSec bool
 	InferredTitle string
 	InferredRole  bool
 	Notes         []string
@@ -346,57 +345,34 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 		res.AddedManifest = true
 	}
 
-	// 2. Intake dir.
+	// 2. Intake dir, and its README: recreated when missing even though the
+	// dir exists (a restored or migrated workspace), since the gate refuses a
+	// hand-written copy (issue #19).
 	intake := filepath.Join(abs, IntakeDir)
 	if !dirExists(intake) {
 		if err := os.MkdirAll(intake, 0o755); err != nil {
 			return nil, err
 		}
-		repl := strings.NewReplacer("__NAME__", name, "__DIR__", name, poolDirToken, PoolDirName(agentsDir))
-		if err := renderTemplate("templates/intake/README.md", filepath.Join(intake, "README.md"), repl); err != nil {
-			return nil, err
-		}
 		res.AddedIntake = true
 	}
-
-	// 3. CLAUDE.md intake section.
-	if len(claudeBody) > 0 && !hasCommsSection(string(claudeBody)) {
-		if err := appendCommsSection(claudePath, agentsDir); err != nil {
+	if readme := filepath.Join(intake, "README.md"); !fileExists(readme) {
+		repl := strings.NewReplacer("__NAME__", name, "__DIR__", name, poolDirToken, PoolDirName(agentsDir))
+		if err := renderTemplate("templates/intake/README.md", readme, repl); err != nil {
 			return nil, err
 		}
-		if b, err := os.ReadFile(claudePath); err == nil {
-			claudeBody = b // a Cognition refresh below rewrites from this body
+		if !res.AddedIntake {
+			res.Notes = append(res.Notes, "recreated "+IntakeDir+"/README.md")
 		}
-		res.AddedCommsSec = true
-	} else if len(claudeBody) == 0 {
-		res.Notes = append(res.Notes, "no CLAUDE.md — skipped intake-section injection")
-	} else if fresh, stale := refreshedCommsSection(string(claudeBody)); stale {
-		// A known older Inbound bullet becomes the current intake order;
-		// human text around it is untouched.
-		if err := os.WriteFile(claudePath, []byte(fresh), 0o644); err != nil {
-			return nil, err
-		}
-		claudeBody = []byte(fresh)
-		res.Notes = append(res.Notes, "refreshed Agent Communication Inbound order in CLAUDE.md")
 	}
 
-	// 3b. CLAUDE.md cognition standing-order stanza: added when
-	// missing, refreshed in place when an earlier onboard wrote an older text
-	// (one re-onboard picks everything up). Human text outside the
-	// managed stanza is never touched.
-	if len(claudeBody) > 0 && !hasCognitionSection(string(claudeBody)) {
-		if err := appendCognitionSection(claudePath, agentsDir); err != nil {
-			return nil, err
-		}
-		res.Notes = append(res.Notes, "added Cognition standing-order stanza to CLAUDE.md")
-	} else if len(claudeBody) > 0 {
-		if fresh, stale := refreshedCognitionSection(string(claudeBody), agentsDir); stale {
-			if err := os.WriteFile(claudePath, []byte(fresh), 0o644); err != nil {
-				return nil, err
-			}
-			res.Notes = append(res.Notes, "refreshed Cognition standing-order stanza in CLAUDE.md")
-		}
+	// 3. Standing orders (Agent Communication + Cognition): a managed block
+	// in the gitignored CLAUDE.local.md, rewritten whole; copies an earlier
+	// meshctl wrote into CLAUDE.md move out (standing_orders.go, issue #12).
+	notes, err := syncStandingOrders(abs, agentsDir)
+	if err != nil {
+		return nil, err
 	}
+	res.Notes = append(res.Notes, notes...)
 
 	// 3c. Rendered pointers follow the pool directory: after `pool
 	// upgrade` moved it, the next onboard re-points what earlier renders wrote.
@@ -455,9 +431,26 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 
 // hasSkill reports whether an agent already has a skill under either harness's
 // skills dir (used to update, not add, a skill on onboard).
+// isSteward reports whether workspace dest is the mesh steward: it has the
+// steward skill, or carries the steward's name (a fresh clone has no
+// gitignored skill links yet).
+func isSteward(dest string) bool {
+	return hasSkill(dest, "mesh-steward") || filepath.Base(dest) == StewardName
+}
+
 func hasSkill(dest, name string) bool {
-	return fileExists(filepath.Join(dest, ".claude", "skills", name, "SKILL.md")) ||
-		fileExists(filepath.Join(dest, ".opencode", "skills", name, "SKILL.md"))
+	for _, root := range []string{".claude", ".opencode"} {
+		d := filepath.Join(dest, root, "skills", name)
+		// A link counts even while it dangles: a fresh clone has the link
+		// before onboard renders the pool's copy.
+		if fileExists(filepath.Join(d, "SKILL.md")) {
+			return true
+		}
+		if fi, err := os.Lstat(d); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // StewardName is the mesh onboarding-hub agent scaffolded by `pool init` /
@@ -495,7 +488,8 @@ func ScaffoldSteward(agentsDir, harness string, now time.Time) (string, []string
 	}
 	notes := []string{"scaffolded steward (" + HarnessByName(harness).Name() + ")"}
 
-	// Steward CLAUDE.md = the steward role + the standard comms + cognition stanzas.
+	// Steward CLAUDE.md = the steward role; the standing orders are in
+	// CLAUDE.local.md, written by New.
 	claudePath := filepath.Join(dir, "CLAUDE.md")
 	body, err := templatesFS.ReadFile("templates/steward/CLAUDE.md")
 	if err != nil {
@@ -504,19 +498,9 @@ func ScaffoldSteward(agentsDir, harness string, now time.Time) (string, []string
 	if err := os.WriteFile(claudePath, []byte(renderPoolTokens(agentsDir, string(body))), 0o644); err != nil {
 		return dir, notes, err
 	}
-	if err := appendCommsSection(claudePath, agentsDir); err != nil {
-		return dir, notes, err
-	}
-	if err := appendCognitionSection(claudePath, agentsDir); err != nil {
-		return dir, notes, err
-	}
 
 	// The mesh-steward skill (the interview/roster/scaffold playbook), per harness.
-	sb, err := renderedSkill(agentsDir, "mesh-steward")
-	if err != nil {
-		return dir, notes, err
-	}
-	if _, err := HarnessByName(harness).RenderSkill("mesh-steward", sb, dir); err != nil {
+	if _, err := linkSkill(agentsDir, dir, "mesh-steward", HarnessByName(harness)); err != nil {
 		return dir, notes, err
 	}
 	notes = append(notes, "installed mesh-steward skill")
@@ -718,21 +702,20 @@ func inferRole(claude string) string {
 	return strings.TrimSpace(strings.Join(buf, " "))
 }
 
-func hasCommsSection(claude string) bool {
-	return strings.Contains(claude, "Agent Communication (intake)") ||
-		strings.Contains(claude, "agent-comms.md")
-}
-
+// commsSection is the Agent Communication section of the managed standing
+// orders (standing_orders.go); its intake order is inboundStanza.
 const commsSection = `
 
 ## Agent Communication (intake)
 
-Bidirectional file-based handoff — canonical protocol: your pool's ` + "`../__POOL_DIR__/doctrine/agent-comms.md`" + `. Inbox: ` + "`intake/`" + ` (in this workspace). The roster is computed on demand — run ` + "`meshctl agent list`" + ` (do not maintain a peer list here).
+Bidirectional file-based handoff — canonical protocol: your pool's ` + "`" + `../__POOL_DIR__/doctrine/agent-comms.md` + "`" + `. Inbox: ` + "`" + `intake/` + "`" + `. The roster is computed on demand — run ` + "`" + `meshctl agent list` + "`" + ` (do not maintain a peer list here); all ` + "`" + `meshctl` + "`" + ` commands scope to THIS pool automatically.
 
-` + inboundStanza + `- **Read-back:** ` + "`meshctl sent`" + ` lists requests you sent that came back (answered / declined / needs-info); read each, act, then ` + "`meshctl sent ack <id>`" + `. The session start surfaces them automatically.
-- **Outbound:** ` + "`meshctl send <target> <type> \"…\"`" + ` writes a request into a peer's inbox; ` + "`meshctl ask <target> <type> \"…\"`" + ` also dispatches an advisory peer headlessly and blocks for the answer. State-mutating peers (pm→tracker, developer→code) are ` + "`send`" + `-only and human-triggered.
-- **Blocked on a decision mid-task?** ` + "`meshctl ask <advisor> <type> \"…\"`" + ` for a synchronous answer; if it returns ` + "`needs-human`" + `, stop and surface to the user.
-- **Under Claude Code, prefer ` + "`meshctl ask <advisor> <type> \"…\" --in-session`" + `:** it records the dispatch and prints an Agent-tool delegation (` + "`subagent_type: mesh-<advisor>`" + `) — make that call, then read the answer with ` + "`meshctl sent`" + `. The peer runs inside this session; no second terminal.
+` +
+	inboundStanza + `- **Read-back:** ` + "`" + `meshctl sent` + "`" + ` lists requests you sent that came back (answered / declined / needs-info); read each, act, then ` + "`" + `meshctl sent ack <id>` + "`" + `. The session start surfaces them automatically.
+- **Outbound:** ` + "`" + `meshctl send <target> <type> "…"` + "`" + ` writes a request into a peer's inbox; ` + "`" + `meshctl ask <target> <type> "…"` + "`" + ` also dispatches an advisory peer headlessly and blocks for the answer. Route work to the agent that **owns** it (find owners via ` + "`" + `meshctl agent list` + "`" + `); never mutate a peer's KB/board directly.
+- **Blocked on a decision mid-task?** ` + "`" + `meshctl ask <advisor> <type> "…"` + "`" + ` for a synchronous answer; if it returns ` + "`" + `needs-human` + "`" + `, stop and surface to the user.
+- **Under Claude Code, prefer ` + "`" + `meshctl ask <advisor> <type> "…" --in-session` + "`" + `:** it records the dispatch and prints an Agent-tool delegation (` + "`" + `subagent_type: mesh-<advisor>` + "`" + `) — make that call, then read the answer with ` + "`" + `meshctl sent` + "`" + `. The peer runs inside this session; no second terminal.
+- **Hub session — work a peer owns:** when the task is a peer's *work* (its KB, ADRs, repo), not just its opinion, use ` + "`" + `meshctl ask <peer> <type> "…" --in-session --work` + "`" + ` → ` + "`" + `subagent_type: mesh-<peer>-work` + "`" + `. The peer edits and commits in its own workspace (or a worktree, if its own session is live) and ends with a receipt — relay it. Consult (advice only) stays ` + "`" + `--in-session` + "`" + `. Delegating to a peer that ` + "`" + `mutates` + "`" + ` external state asks the human first. Worktree branches land with ` + "`" + `meshctl work merge <id>` + "`" + ` from the peer's own session.
 `
 
 // inboundStanza is the managed intake order inside the Agent Communication
@@ -744,64 +727,6 @@ const inboundStanza = `- **Inbound — "check intake" shows the queue and stops.
 - **Work in the human's order, by id.** Claim one at a time with ` + "`" + `meshctl inbox claim <id>` + "`" + `; process it by ` + "`" + `type` + "`" + `, write the outcome back with ` + "`" + `meshctl inbox respond <id> --status answered|filed|needs-info|needs-human --response "…"` + "`" + ` (intake files are meshctl-owned — never hand-edit them) and report it in a line before the next. When the human says something more important came up, re-plan. Skipped ids go on your handoff's ` + "`" + `Deferred: <ids>` + "`" + ` line. **Not yours?** ` + "`" + `meshctl inbox decline <id> --reason "…" --redirect <owner>` + "`" + ` — don't half-answer out-of-domain work.
 - **Ask for a decision as a decision round.** Whenever you need the human's decision on proposed changes (an intake order, a plan, a rule, a KB change, an outbound write), present one item per change: ` + "`" + `📝 **C<n> — <short title>**` + "`" + `, then ` + "`" + `From now on it says: …` + "`" + ` / ` + "`" + `It no longer says: …` + "`" + ` (a change of rule or knowledge) or what you will do and why (an action), ending ` + "`" + `➡️ ✅ Confirm` + "`" + `. Then say how to answer: ` + "`" + `yes` + "`" + ` for all, or ` + "`" + `C<n> no: <reason>` + "`" + ` for one. Keep rounds small (about 3–5 items) and wait for the answer before acting.
 `
-
-// staleInboundBullets are Inbound bullets earlier onboards wrote, exactly.
-var staleInboundBullets = []string{
-	"- **Inbound:** at session start / on \"check intake\", run `meshctl inbox next --claim` (atomic claim) or scan `intake/*.md` for `status: pending`; process by `type`, then write the outcome back with `meshctl inbox respond <id> --status answered|filed|needs-info|needs-human --response \"…\"` (intake files are meshctl-owned — never hand-edit them). **Not yours?** `meshctl inbox decline <id> --reason \"…\" --redirect <owner>` — don't half-answer out-of-domain work.\n",
-}
-
-// claimOldest is the command older Inbound bullets told the agent to run on
-// "check intake"; inboundQueueAndWait replaces it inside a hand-customised
-// bullet, so the bullet's own words stay and only the claim-first order goes.
-var (
-	claimOldest         = []string{"`meshctl inbox next --claim` (atomic claim)", "`meshctl inbox next --claim`"}
-	inboundQueueAndWait = "`meshctl inbox list`, read the queue to the human as a short numbered list, propose an order and wait for the human to confirm or reorder before claiming anything (then `meshctl inbox claim <id>`, one at a time)"
-)
-
-// refreshedCommsSection returns claude with a known stale Inbound bullet
-// replaced by the current intake order, or, in a hand-customised Inbound
-// bullet, only its claim-the-oldest command swapped for the queue-and-wait
-// order; stale=false when there is nothing to change.
-func refreshedCommsSection(claude string) (fresh string, stale bool) {
-	for _, old := range staleInboundBullets {
-		if i := strings.Index(claude, old); i >= 0 && (i == 0 || claude[i-1] == '\n') {
-			return claude[:i] + inboundStanza + claude[i+len(old):], true
-		}
-	}
-	lines := strings.SplitAfter(claude, "\n")
-	for n, ln := range lines {
-		if !strings.HasPrefix(strings.TrimSpace(ln), "- **Inbound") {
-			continue
-		}
-		for _, cmd := range claimOldest {
-			if strings.Contains(ln, cmd) {
-				lines[n] = strings.Replace(ln, cmd, inboundQueueAndWait, 1)
-				stale = true
-				break
-			}
-		}
-	}
-	if !stale {
-		return claude, false
-	}
-	return strings.Join(lines, ""), true
-}
-
-func appendCommsSection(claudePath, poolRoot string) error {
-	f, err := os.OpenFile(claudePath, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = io.WriteString(f, renderPoolTokens(poolRoot, commsSection))
-	return err
-}
-
-// hasCognitionSection detects the cognition standing-order stanza.
-func hasCognitionSection(claude string) bool {
-	return strings.Contains(claude, "## Cognition") &&
-		strings.Contains(claude, "mesh-cognition")
-}
 
 const cognitionSection = `
 
@@ -818,8 +743,9 @@ Run the **` + "`mesh-cognition`" + ` skill** for the full procedure; its short f
   **precedent** (cite, or mark *new*). Required for more than one artifact, any outbound
   write, any promotion, or any claim you cannot ground. Pools may tighten this in
   ` + "`local.md`" + `, never loosen it. Before any outbound write, write the summary file
-  ` + "`.memory/confirm/<session>.md`" + ` and read the confirmation round in chat. Ask
-  for any decision as a decision round (` + "`📝 **C<n> — <short title>**`" + `, ending
+  ` + "`.memory/confirm/<session>.md`" + ` and read the confirmation round in chat. An
+  action the human named is already aligned: do it and report the outcome; the summary
+  restates the instruction. Ask for any decision as a decision round (` + "`📝 **C<n> — <short title>**`" + `, ending
   ` + "`➡️ ✅ Confirm`" + `; answers ` + "`yes`" + ` or ` + "`C<n> no: <reason>`" + `).
 - **Pending work first.** When session start shows a ` + "`# Pending work`" + ` block, read it to
   the human before new work and offer triage now, a subset, or deferral; the human
@@ -873,7 +799,6 @@ Authoritative spec: ` + "`../__POOL_DIR__/doctrine/agent-comms.md`" + ` §Knowle
 // whose spec line ended on a separate ADR line; peers onboarded then carry
 // it until their next refresh.
 const (
-	cognitionToken         = "__COGNITION__" // where templates/CLAUDE.md takes the stanza
 	cognitionStanzaHeading = "## Cognition — maintain your own knowledge base (standing order)"
 	cognitionStanzaEnd     = "§Knowledge & Memory.\n"
 	cognitionStanzaADREnd  = "(ADR-0014–0018).\n"
@@ -894,43 +819,6 @@ func cognitionStanzaBounds(claude string) (start, end int, ok bool) {
 		}
 	}
 	return start, end, end >= 0
-}
-
-// cognitionStanzaUnrecognized reports a CLAUDE.md that has the stanza's
-// heading but no closing line meshctl knows: the refresh cannot bound it, so
-// it is left alone and must be reported rather than called current.
-func cognitionStanzaUnrecognized(claude string) bool {
-	if !strings.Contains(claude, cognitionStanzaHeading) {
-		return false
-	}
-	_, _, ok := cognitionStanzaBounds(claude)
-	return !ok
-}
-
-// refreshedCognitionSection returns claude with its managed Cognition stanza
-// replaced by the current one; stale=false when it is already current or the
-// stanza's bounds cannot be found (a hand-edited heading or ending is left
-// alone, and reported: cognitionStanzaUnrecognized).
-func refreshedCognitionSection(claude, poolRoot string) (fresh string, stale bool) {
-	start, end, ok := cognitionStanzaBounds(claude)
-	if !ok {
-		return claude, false
-	}
-	want := strings.TrimLeft(renderPoolTokens(poolRoot, cognitionSection), "\n")
-	if claude[start:end] == want {
-		return claude, false
-	}
-	return claude[:start] + want + claude[end:], true
-}
-
-func appendCognitionSection(claudePath, poolRoot string) error {
-	f, err := os.OpenFile(claudePath, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(renderPoolTokens(poolRoot, cognitionSection))
-	return err
 }
 
 // emitDoctrine writes the embedded doctrine docs (agent-comms.md, distiller.md)
@@ -1182,25 +1070,36 @@ func doctrineVersion() string {
 // addMissingIgnores adds managed lines a block written by an older meshctl
 // lacks, just before its end marker. A block without an end marker (edited
 // by hand) is left alone.
-func addMissingIgnores(gi, text string) error {
+// missingManagedIgnores lists the managed lines the block lacks.
+func missingManagedIgnores(text string) []string {
 	start := strings.Index(text, gitignoreMarker)
+	if start < 0 {
+		return managedIgnores
+	}
 	end := strings.Index(text[start:], gitignoreEnd)
 	if end < 0 {
 		return nil
 	}
-	end += start
 	have := map[string]bool{}
-	for _, l := range strings.Split(text[start:end], "\n") {
+	for _, l := range strings.Split(text[start:start+end], "\n") {
 		have[strings.TrimSpace(l)] = true
 	}
-	var add string
+	var miss []string
 	for _, l := range managedIgnores {
 		if !have[l] {
-			add += l + "\n"
+			miss = append(miss, l)
 		}
 	}
-	if add == "" {
+	return miss
+}
+
+func addMissingIgnores(gi, text string) error {
+	miss := missingManagedIgnores(text)
+	start := strings.Index(text, gitignoreMarker)
+	end := strings.Index(text[start:], gitignoreEnd)
+	if end < 0 || len(miss) == 0 {
 		return nil
 	}
-	return os.WriteFile(gi, []byte(text[:end]+add+text[end:]), 0o644)
+	end += start
+	return os.WriteFile(gi, []byte(text[:end]+strings.Join(miss, "\n")+"\n"+text[end:]), 0o644)
 }

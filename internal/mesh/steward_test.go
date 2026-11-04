@@ -25,8 +25,10 @@ func TestScaffoldSteward(t *testing.T) {
 	if a.IsDispatchable() {
 		t.Fatal("steward must not be dispatchable")
 	}
-	// CLAUDE.md = steward role + the standard stanzas.
+	// CLAUDE.md = steward role; CLAUDE.local.md = the standing orders.
 	cb, _ := os.ReadFile(filepath.Join(sdir, "CLAUDE.md"))
+	lb, _ := os.ReadFile(filepath.Join(sdir, ClaudeLocalFile))
+	cb = append(append(cb, '\n'), lb...)
 	for _, want := range []string{"Mesh Steward", "mesh-steward", "Cognition", "Agent Communication"} {
 		if !strings.Contains(string(cb), want) {
 			t.Fatalf("steward CLAUDE.md missing %q", want)

@@ -24,6 +24,9 @@ func TestHarnessTerminal_WalksToTheFirstTTY(t *testing.T) {
 		return n.ppid, n.tty, ok
 	}
 	defer func() { psParentTTY = old }()
+	oldComm := psComm
+	psComm = func(int) string { return "" } // no harness names: the walk is name-blind
+	defer func() { psComm = oldComm }()
 	if pid, tty := harnessTerminal(500); pid != 300 || tty != "/dev/ttys010" {
 		t.Fatalf("got %d %q", pid, tty)
 	}
@@ -48,6 +51,9 @@ func TestHarnessInBackground_ParentWithoutTerminal(t *testing.T) {
 		return n.ppid, n.tty, ok
 	}
 	defer func() { psParentTTY = old }()
+	oldComm := psComm
+	psComm = func(int) string { return "" } // no harness names: the walk is name-blind
+	defer func() { psComm = oldComm }()
 	if harnessInBackground(300) {
 		t.Fatal("a harness under a shell in a window is not in the background")
 	}
@@ -105,6 +111,9 @@ func TestScheduledJobs_SurviveClear(t *testing.T) {
 	// Every process in the walk reports a terminal: the harness is this test process.
 	psParentTTY = func(pid int) (int, string, bool) { return 1, "ttys042", true }
 	defer func() { psParentTTY = old }()
+	oldComm := psComm
+	psComm = func(int) string { return "" } // no harness names: the walk is name-blind
+	defer func() { psComm = oldComm }()
 	now := time.Now()
 	jobs := []SessionJob{{ID: "j1", Schedule: "*/5 * * * *", Recurring: true, Prompt: "watch the inbox"}}
 	HookSessionBeat(dir, HookPayload{Cwd: a.Dir(), SessionID: "before-clear", SessionCrons: &jobs}, now)
@@ -121,7 +130,7 @@ func TestScheduledJobs_SurviveClear(t *testing.T) {
 		t.Fatalf("jobs after /clear: %+v %v", js, ok)
 	}
 	// Hygiene keeps a live process's list and drops a dead one's.
-	dead := filepath.Join(jobsDir(a.Dir()), "pid-999999.json")
+	dead := filepath.Join(jobsDir(a.Dir()), sessionAgent(a.Dir())+"-pid-999999.json")
 	_ = os.WriteFile(dead, []byte(`{"harness_pid":999999,"jobs":[],"at":1}`), 0o644)
 	var flagged []string
 	for _, h := range PoolHygiene(dir, now) {
@@ -145,6 +154,7 @@ func TestOpenSessions_AliveHarnessOrFreshBeat(t *testing.T) {
 	_ = os.MkdirAll(sessionsDir(a.Dir()), 0o755)
 	write := func(s Session) {
 		s.path = sessionPath(a.Dir(), s.ID)
+		s.Agent = sessionAgent(a.Dir())
 		if err := writeSession(&s); err != nil {
 			t.Fatal(err)
 		}
@@ -171,8 +181,8 @@ func TestIdleOpenSession_NotReapedNorStale(t *testing.T) {
 	now := time.Now()
 	old := now.Add(-2 * time.Hour).Unix()
 	_ = os.MkdirAll(sessionsDir(a.Dir()), 0o755)
-	idle := Session{ID: "idle", Started: old, LastBeat: old, HarnessPID: os.Getpid(), path: sessionPath(a.Dir(), "idle")}
-	dead := Session{ID: "dead", Started: old, LastBeat: old, HarnessPID: 999999, path: sessionPath(a.Dir(), "dead")}
+	idle := Session{ID: "idle", Agent: sessionAgent(a.Dir()), Started: old, LastBeat: old, HarnessPID: os.Getpid(), path: sessionPath(a.Dir(), "idle")}
+	dead := Session{ID: "dead", Agent: sessionAgent(a.Dir()), Started: old, LastBeat: old, HarnessPID: 999999, path: sessionPath(a.Dir(), "dead")}
 	_ = writeSession(&idle)
 	_ = writeSession(&dead)
 	if live := liveSessions(a.Dir(), now); len(live) != 0 {

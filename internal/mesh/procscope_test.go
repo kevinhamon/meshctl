@@ -45,6 +45,7 @@ func writeTestSession(t *testing.T, agentDir string, s *Session) {
 		t.Fatal(err)
 	}
 	s.path = sessionPath(agentDir, s.ID)
+	s.Agent = sessionAgent(agentDir)
 	if err := writeSession(s); err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +109,7 @@ func TestJobsPath_ScopedSessionsDoNotShareAFile(t *testing.T) {
 	if a == b {
 		t.Fatal("the same pid in two namespaces must not share a job list")
 	}
-	if filepath.Base(legacy) != "pid-7.json" {
+	if filepath.Base(legacy) != filepath.Base(dir)+"-pid-7.json" {
 		t.Fatalf("an unscoped session keeps its old path, got %s", legacy)
 	}
 }
@@ -126,11 +127,11 @@ func TestHygiene_ForeignJobListGoesByAge(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("pid-1-fresh.json", JobSet{HarnessPID: deadPID, ProcScope: elsewhere, At: now.Unix()})
-	write("pid-1-old.json", JobSet{HarnessPID: os.Getpid(), ProcScope: elsewhere, At: now.Unix() - int64(staleSec()) - 60})
+	write(filepath.Base(dir)+"-pid-1-fresh.json", JobSet{HarnessPID: deadPID, ProcScope: elsewhere, At: now.Unix()})
+	write(filepath.Base(dir)+"-pid-1-old.json", JobSet{HarnessPID: os.Getpid(), ProcScope: elsewhere, At: now.Unix() - int64(staleSec()) - 60})
 
 	var msgs []string
-	for _, it := range agentHygiene(t.TempDir(), &Agent{Name: "peer", dir: dir}, now) {
+	for _, it := range agentHygiene(t.TempDir(), &Agent{Name: filepath.Base(dir), dir: dir}, now) {
 		msgs = append(msgs, it.Message)
 	}
 	got := strings.Join(msgs, "\n")

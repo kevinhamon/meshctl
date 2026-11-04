@@ -79,7 +79,7 @@ func KBHolder(agentsDir string, agent *Agent, session string, now time.Time) *Se
 	if !dirExists(worktreePath(agentsDir, agent.Name, session)) {
 		return nil
 	}
-	s, err := readSession(sessionPath(agent.Dir(), session))
+	s, err := readAgentSession(agent.Dir(), session)
 	if err != nil || int(now.Unix()-s.LastBeat) > staleSec() {
 		return nil
 	}
@@ -224,7 +224,7 @@ func KBBegin(agentsDir string, agent *Agent, session string, now time.Time) (str
 	}
 
 	// Point the session at the branch, if a session record exists.
-	if s, err := readSession(sessionPath(agent.Dir(), session)); err == nil {
+	if s, err := readAgentSession(agent.Dir(), session); err == nil {
 		s.KBBranch = branch
 		_ = writeSession(s)
 	}

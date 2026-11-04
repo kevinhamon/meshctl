@@ -81,8 +81,7 @@ func templateTexts(t *testing.T) map[string]string {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// As scaffolded: the Cognition stanza arrives through its token.
-			out[p] = strings.ReplaceAll(string(b), cognitionToken, cognitionSection)
+			out[p] = string(b)
 		}
 	}
 	walk("templates")
@@ -108,11 +107,16 @@ func TestTemplateStandingOrders_NoMeshctlADRRefs(t *testing.T) {
 func TestTemplateStandingOrders_AlignBeforeAct(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", true, nil)
+	// What the agent loads: its role, then the managed standing orders.
 	b, err := os.ReadFile(filepath.Join(a.Dir(), "CLAUDE.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	claude := string(b)
+	lb, err := os.ReadFile(filepath.Join(a.Dir(), ClaudeLocalFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claude := string(b) + "\n" + string(lb)
 	if strings.Contains(strings.ToLower(claude), "plan before acting") {
 		t.Fatal("standing orders still say plan before acting")
 	}
@@ -274,7 +278,7 @@ func TestStandingOrders_IntakeOrderAndDecisionRound(t *testing.T) {
 	}
 	intake := []string{"`meshctl inbox list`", "an order (priority, then age", "`meshctl inbox claim <id>`", "`Deferred: <ids>`"}
 	round := []string{"📝 **C<n> — <short title>**", "From now on it says: …", "It no longer says: …", "➡️ ✅ Confirm", "`yes`", "`C<n> no: <reason>`"}
-	for _, name := range []string{"commsSection", "templates/CLAUDE.md", "templates/skills/mesh-cognition/SKILL.md", "templates/doctrine/agent-comms.md"} {
+	for _, name := range []string{"commsSection", "templates/skills/mesh-cognition/SKILL.md", "templates/doctrine/agent-comms.md"} {
 		text := texts[name]
 		for _, want := range intake {
 			if !strings.Contains(strings.ReplaceAll(text, "\n   ", " "), want) {
@@ -287,7 +291,7 @@ func TestStandingOrders_IntakeOrderAndDecisionRound(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"commsSection", "templates/CLAUDE.md"} {
+	for _, name := range []string{"commsSection"} {
 		if !strings.Contains(texts[name], inboundStanza) {
 			t.Errorf("%s does not carry the managed Inbound order verbatim", name)
 		}
@@ -305,5 +309,46 @@ func TestStandingOrders_IntakeOrderAndDecisionRound(t *testing.T) {
 		if !strings.Contains(brief, "work the one request you were given") {
 			t.Errorf("in-session contracts must keep a peer on its one request: %s", brief)
 		}
+	}
+}
+
+// An action the human named is already aligned: every surface that carries the
+// align order also carries the instructed-action rule, so no agent reads one
+// without the other and interviews the human about an action they asked for.
+func TestDoctrine_InstructedActionsSkipTheRound(t *testing.T) {
+	skill, err := renderedSkill(meshRoot(t), "mesh-cognition")
+	if err != nil {
+		t.Fatal(err)
+	}
+	comms, _ := templatesFS.ReadFile("templates/doctrine/agent-comms.md")
+	claude, _ := templatesFS.ReadFile("templates/CLAUDE.md")
+	for name, text := range map[string]string{
+		"mesh-cognition skill": skill,
+		"agent-comms.md":       string(comms),
+		"templates/CLAUDE.md":  string(claude),
+		"cognition stanza":     strings.ReplaceAll(cognitionSection, "\n  ", " "),
+	} {
+		for _, want := range []string{"the human named", "already aligned", "restates the instruction"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s lacks the instructed-action rule phrase %q", name, want)
+			}
+		}
+	}
+	for _, want := range []string{
+		"## Instructed actions", "the instruction is the shared understanding",
+		"Do not interview", "`## Grounding` is the word *instructed*", "`## Precedent` is left out",
+		"a write the human did not name",
+	} {
+		if !strings.Contains(skill, want) {
+			t.Errorf("mesh-cognition skill missing %q", want)
+		}
+	}
+	rule7 := string(comms)[strings.Index(string(comms), "7. **Internal references"):]
+	rule7 = rule7[:strings.Index(rule7, "\n8. ")]
+	if !strings.Contains(rule7, "needs no round beyond that signature") {
+		t.Error("agent-comms rule 7 does not exempt an instructed action from the round")
+	}
+	if strings.Contains(string(claude), "a product-repo PR") {
+		t.Error("the CLAUDE.md template still names a PR as outbound regardless of the pool's config")
 	}
 }

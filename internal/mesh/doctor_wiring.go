@@ -193,14 +193,21 @@ func opencodeInstructionsFindings(a *Agent) []DoctorFinding {
 	if v2 {
 		return nil
 	}
-	for _, i := range cfg.Instructions {
-		if strings.Contains(i, "CLAUDE.md") {
-			return nil
+	var out []DoctorFinding
+	for _, want := range []string{"CLAUDE.md", ClaudeLocalFile} {
+		listed := false
+		for _, i := range cfg.Instructions {
+			if filepath.Base(i) == want {
+				listed = true
+			}
+		}
+		if !listed {
+			out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
+				Message: "opencode.json does not list " + want + " under `instructions` — opencode discovers AGENTS.md " +
+					"only, so it never loads; run `meshctl agent onboard " + a.Name + "`"})
 		}
 	}
-	return []DoctorFinding{{Agent: a.Name, Level: "warn",
-		Message: "opencode.json does not list CLAUDE.md under `instructions` — opencode discovers AGENTS.md " +
-			"only, so the agent's role and comms doctrine never load; run `meshctl agent onboard " + a.Name + "`"}}
+	return out
 }
 
 // pluginState classifies the meshctl plugin file at one path.

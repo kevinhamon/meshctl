@@ -2,6 +2,7 @@ package mesh
 
 import (
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -31,14 +32,43 @@ var psParentTTY = func(pid int) (ppid int, tty string, ok bool) {
 	return ppid, tty, true
 }
 
+// psComm returns a process's command name ("" when unreadable); a var so
+// tests can fake the process tree.
+var psComm = func(pid int) string {
+	out, err := exec.Command("ps", "-o", "comm=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// isHarnessProc reports whether a command name is a harness's own process
+// (Claude Code, or opencode's launcher and native binary).
+func isHarnessProc(comm string) bool {
+	switch filepath.Base(comm) {
+	case "claude", "opencode":
+		return true
+	}
+	return false
+}
+
 // harnessTerminal walks up from pid to the first ancestor with a terminal and
 // returns it and the terminal's device path; 0, "" when none is found (a
-// headless run, or a system without ps).
+// headless run, or a system without ps). The walk passes through the
+// harness's own processes but never above them: a harness with no terminal (a
+// headless run, opencode's background service) records none rather than the
+// terminal of some session further up the tree.
 func harnessTerminal(pid int) (int, string) {
+	inHarness := false
 	for hops := 0; pid > 1 && hops < 16; hops++ {
 		ppid, tty, ok := psParentTTY(pid)
 		if !ok {
 			return 0, ""
+		}
+		if isHarnessProc(psComm(pid)) {
+			inHarness = true
+		} else if inHarness {
+			return 0, "" // climbed past the harness without finding its terminal
 		}
 		if tty != "" {
 			if !strings.HasPrefix(tty, "/dev/") {

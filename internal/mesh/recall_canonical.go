@@ -95,7 +95,7 @@ func CanonicalPeerHits(agent *Agent, query string) ([]RecallHit, error) {
 	tokens := queryTokens(query)
 	best := map[string]RecallHit{}
 	for _, p := range peers {
-		idx, err := computeTopics(p)
+		idx, err := topicIndex(p)
 		if err != nil {
 			continue // no knowledge/ yet
 		}

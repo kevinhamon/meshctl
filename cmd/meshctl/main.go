@@ -1044,13 +1044,10 @@ func onboardCmd() *cobra.Command {
 			if res.AddedIntake {
 				fmt.Println("  + created intake/ (+ README.md)")
 			}
-			if res.AddedCommsSec {
-				fmt.Println("  + injected Agent Communication (intake) section into CLAUDE.md")
-			}
 			for _, n := range res.Notes {
 				fmt.Println("  · " + n)
 			}
-			if !res.AddedManifest && !res.AddedIntake && !res.AddedCommsSec && len(res.Notes) == 0 {
+			if !res.AddedManifest && !res.AddedIntake && len(res.Notes) == 0 {
 				fmt.Println("  (nothing to add — already a full mesh member)")
 			}
 			if err := refreshMembers(dir); err != nil {

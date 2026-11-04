@@ -22,6 +22,8 @@ type Harness interface {
 	// RenderSkill writes one shared skill into the harness's native location.
 	// Add-only: never clobbers an existing skill file.
 	RenderSkill(name, body, dest string) (bool, error)
+	// SkillDir is where the harness discovers skill name in workspace dest.
+	SkillDir(dest, name string) string
 	// EmitContext formats a hook's injected context for this harness and writes
 	// it to w. Empty ctx ⇒ nothing written.
 	EmitContext(w io.Writer, event, ctx string) error
@@ -145,8 +147,12 @@ func ensureDistillerAgent(dest string) ([]string, error) {
 }
 
 // RenderSkill writes .claude/skills/<name>/SKILL.md (add-only).
-func (claudeHarness) RenderSkill(name, body, dest string) (bool, error) {
-	out := filepath.Join(dest, ".claude", "skills", name, "SKILL.md")
+func (claudeHarness) SkillDir(dest, name string) string {
+	return filepath.Join(dest, ".claude", "skills", name)
+}
+
+func (h claudeHarness) RenderSkill(name, body, dest string) (bool, error) {
+	out := filepath.Join(h.SkillDir(dest, name), "SKILL.md")
 	return writeSkillFile(out, body)
 }
 
@@ -200,8 +206,12 @@ func (h opencodeHarness) Major() int {
 
 // RenderSkill writes .opencode/skills/<name>/SKILL.md — the Anthropic Agent
 // Skills spec form the opencode-skills plugin discovers (same body as Claude).
-func (opencodeHarness) RenderSkill(name, body, dest string) (bool, error) {
-	out := filepath.Join(dest, ".opencode", "skills", name, "SKILL.md")
+func (opencodeHarness) SkillDir(dest, name string) string {
+	return filepath.Join(dest, ".opencode", "skills", name)
+}
+
+func (h opencodeHarness) RenderSkill(name, body, dest string) (bool, error) {
+	out := filepath.Join(h.SkillDir(dest, name), "SKILL.md")
 	return writeSkillFile(out, body)
 }
 
@@ -298,7 +308,8 @@ func (h opencodeHarness) WireAgent(dest string) ([]string, error) {
 	return append(notes, n...), err
 }
 
-// ensureOpencodeConfig add-only merges opencode.json: instructions ⊇ CLAUDE.md,
+// ensureOpencodeConfig add-only merges opencode.json: instructions ⊇ CLAUDE.md
+// and CLAUDE.local.md (the managed standing orders),
 // and on V2 the ask rules for the gate-asked commands.
 func ensureOpencodeConfig(dest string, major int) ([]string, error) {
 	path := filepath.Join(dest, "opencode.json")
@@ -309,8 +320,10 @@ func ensureOpencodeConfig(dest string, major int) ([]string, error) {
 		}
 	}
 	var notes []string
-	if addStringToArray(root, "instructions", "CLAUDE.md") {
-		notes = append(notes, "opencode.json: instructions += CLAUDE.md")
+	for _, f := range []string{"CLAUDE.md", ClaudeLocalFile} {
+		if addStringToArray(root, "instructions", f) {
+			notes = append(notes, "opencode.json: instructions += "+f)
+		}
 	}
 	if major >= 2 {
 		if added := ensureOpencodeAskRules(root); len(added) > 0 {

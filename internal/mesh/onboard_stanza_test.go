@@ -7,9 +7,10 @@ import (
 	"testing"
 )
 
-// onboard_stanza_test.go — re-onboard refreshes the managed Cognition stanza
-// in an already-onboarded peer's CLAUDE.md in place (one
-// re-onboard picks everything up), and leaves human text around it alone.
+// onboard_stanza_test.go — the mesh standing orders live in a managed block in
+// the gitignored CLAUDE.local.md (standing_orders.go, issues #12 and #19).
+// Onboard moves the copies an earlier meshctl wrote into CLAUDE.md out, keeps
+// the human's text, and rewrites the block whole; a second run changes nothing.
 
 const oldCognitionStanza = `## Cognition — maintain your own knowledge base (standing order)
 
@@ -21,118 +22,9 @@ Authoritative spec: ` + "`.agentmesh/doctrine/agent-comms.md`" + ` §Knowledge &
 (ADR-0014–0018).
 `
 
-func TestOnboard_RefreshesStaleCognitionStanzaInPlace(t *testing.T) {
-	dir := meshRoot(t)
-	a := newTestAgent(t, dir, "architect", false, nil)
-	claude := filepath.Join(a.Dir(), "CLAUDE.md")
-	b, err := os.ReadFile(claude)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cur := string(b)
-	start := strings.Index(cur, "## Cognition — ")
-	if start < 0 {
-		t.Fatalf("fresh CLAUDE.md lacks the stanza:\n%s", cur)
-	}
-	end := strings.Index(cur[start:], cognitionStanzaEnd) + start + len(cognitionStanzaEnd)
-	stale := "# HUMAN-HEADER\n\n" + cur[:start] + oldCognitionStanza + cur[end:] + "\n## Human notes\n\nHUMAN-TRAILER keep me.\n"
-	if err := os.WriteFile(claude, []byte(stale), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	b, _ = os.ReadFile(claude)
-	got := string(b)
-	if strings.Contains(got, "OLD-STANZA-LINE") {
-		t.Fatalf("stale stanza not replaced:\n%s", got)
-	}
-	if !strings.Contains(got, "Align before you act") {
-		t.Fatalf("current stanza text missing:\n%s", got)
-	}
-	if n := strings.Count(got, "## Cognition — "); n != 1 {
-		t.Fatalf("want exactly one stanza, got %d:\n%s", n, got)
-	}
-	for _, keep := range []string{"# HUMAN-HEADER", "## Human notes\n\nHUMAN-TRAILER keep me."} {
-		if !strings.Contains(got, keep) {
-			t.Fatalf("human text %q lost:\n%s", keep, got)
-		}
-	}
-	if strings.Contains(got, "__POOL_DIR__") {
-		t.Fatalf("pool token left unrendered:\n%s", got)
-	}
-
-	// A second onboard is a no-op.
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	if b, _ := os.ReadFile(claude); string(b) != got {
-		t.Fatalf("re-onboard of a current stanza changed CLAUDE.md:\n%s", b)
-	}
-}
-
-func TestPoolUpgradePlan_NamesStaleCognitionStanza(t *testing.T) {
-	dir := meshRoot(t)
-	a := newTestAgent(t, dir, "architect", false, nil)
-	claude := filepath.Join(a.Dir(), "CLAUDE.md")
-	b, _ := os.ReadFile(claude)
-	cur := string(b)
-	start := strings.Index(cur, "## Cognition — ")
-	end := strings.Index(cur[start:], cognitionStanzaEnd) + start + len(cognitionStanzaEnd)
-	if err := os.WriteFile(claude, []byte(cur[:start]+oldCognitionStanza+cur[end:]), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	p := planAgent(a, finishNow)
-	if !strings.Contains(strings.Join(p.Actions, "\n"), "refresh Cognition stanza") {
-		t.Fatalf("plan does not name the stale stanza: %v", p.Actions)
-	}
-}
-
 // oldInboundBullet is the Agent Communication Inbound bullet every onboard
 // wrote before the clean queue: it claimed the oldest request on "check intake".
 const oldInboundBullet = "- **Inbound:** at session start / on \"check intake\", run `meshctl inbox next --claim` (atomic claim) or scan `intake/*.md` for `status: pending`; process by `type`, then write the outcome back with `meshctl inbox respond <id> --status answered|filed|needs-info|needs-human --response \"…\"` (intake files are meshctl-owned — never hand-edit them). **Not yours?** `meshctl inbox decline <id> --reason \"…\" --redirect <owner>` — don't half-answer out-of-domain work.\n"
-
-func TestOnboard_RefreshesStaleInboundOrderInPlace(t *testing.T) {
-	dir := meshRoot(t)
-	a := newTestAgent(t, dir, "architect", false, nil)
-	claude := filepath.Join(a.Dir(), "CLAUDE.md")
-	stale := "# HUMAN-HEADER\n\n## Agent Communication (intake)\n\nHUMAN-INTRO keep me.\n\n" + oldInboundBullet + "- **Read-back:** HUMAN-BULLET keep me.\n"
-	if err := os.WriteFile(claude, []byte(stale), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if p := planAgent(a, finishNow); !strings.Contains(strings.Join(p.Actions, "\n"), "refresh Agent Communication Inbound order") {
-		t.Fatalf("plan does not name the stale Inbound order: %v", p.Actions)
-	}
-
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	b, _ := os.ReadFile(claude)
-	got := string(b)
-	if strings.Contains(got, "inbox next --claim") {
-		t.Fatalf("stale Inbound bullet not replaced:\n%s", got)
-	}
-	for _, want := range []string{"\"check intake\" shows the queue and stops", "`meshctl inbox list`", "`meshctl inbox claim <id>`", "📝 **C<n> — <short title>**"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("current Inbound text missing %q:\n%s", want, got)
-		}
-	}
-	for _, keep := range []string{"# HUMAN-HEADER", "HUMAN-INTRO keep me.", "HUMAN-BULLET keep me."} {
-		if !strings.Contains(got, keep) {
-			t.Fatalf("human text %q lost:\n%s", keep, got)
-		}
-	}
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	if b, _ := os.ReadFile(claude); string(b) != got {
-		t.Fatalf("re-onboard of a current Inbound order changed CLAUDE.md:\n%s", b)
-	}
-	if p := planAgent(a, finishNow); strings.Contains(strings.Join(p.Actions, "\n"), "Inbound order") {
-		t.Fatalf("a current CLAUDE.md still plans an Inbound refresh: %v", p.Actions)
-	}
-}
 
 // legacyCognitionStanza is the stanza the retired templates/ tree wrote: no
 // ADR closing line, and no docs/ bullet (issue #11).
@@ -146,62 +38,256 @@ Run the **` + "`mesh-cognition`" + ` skill** for the full procedure; its short f
 Authoritative spec: your pool's ` + "`../pool/doctrine/agent-comms.md`" + ` §Knowledge & Memory.
 `
 
-func TestOnboard_RefreshesLegacyCognitionStanza(t *testing.T) {
-	dir := meshRoot(t)
-	a := newTestAgent(t, dir, "architect", false, nil)
-	claude := filepath.Join(a.Dir(), "CLAUDE.md")
-	b, _ := os.ReadFile(claude)
-	cur := string(b)
-	start := strings.Index(cur, "## Cognition — ")
-	end := strings.Index(cur[start:], cognitionStanzaEnd) + start + len(cognitionStanzaEnd)
-	stale := cur[:start] + legacyCognitionStanza + "\n## Human notes\n\nHUMAN-TRAILER keep me.\n" + cur[end:]
-	if err := os.WriteFile(claude, []byte(stale), 0o644); err != nil {
+func readFile(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if p := planAgent(a, finishNow); !strings.Contains(strings.Join(p.Actions, "\n"), "refresh Cognition stanza") {
-		t.Fatalf("plan must name the legacy stanza, got actions %v warnings %v", p.Actions, p.Warnings)
+	return string(b)
+}
+
+func actions(p AgentUpgradePlan) string { return strings.Join(p.Actions, "\n") }
+
+// A fresh workspace: role text in CLAUDE.md, the current block in
+// CLAUDE.local.md, gitignored, nothing to plan.
+func TestScaffold_StandingOrdersInClaudeLocal(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", false, nil)
+	claude := readFile(t, filepath.Join(a.Dir(), "CLAUDE.md"))
+	if strings.Contains(claude, commsHeading) || strings.Contains(claude, cognitionStanzaHeading) {
+		t.Fatalf("fresh CLAUDE.md carries standing orders:\n%s", claude)
+	}
+	local := readFile(t, filepath.Join(a.Dir(), ClaudeLocalFile))
+	if local != standingOrdersBlock(dir, true) {
+		t.Fatalf("fresh %s is not the current block:\n%s", ClaudeLocalFile, local)
+	}
+	for _, want := range []string{"Hub session — work a peer owns", "Align before you act", inboundStanza} {
+		if !strings.Contains(local, want) {
+			t.Fatalf("block lacks %q", want)
+		}
+	}
+	if gi := readFile(t, filepath.Join(a.Dir(), ".gitignore")); !strings.Contains(gi, "\n"+ClaudeLocalFile+"\n") {
+		t.Fatalf(".gitignore does not ignore %s:\n%s", ClaudeLocalFile, gi)
+	}
+	if acts := actions(planAgent(a, finishNow)); strings.Contains(acts, "standing orders") {
+		t.Fatalf("a fresh workspace plans a standing-orders change: %s", acts)
+	}
+}
+
+// An agent onboarded by an earlier meshctl: both stanzas move out of CLAUDE.md,
+// stale ones included, and the human's text around them stays.
+func TestOnboard_MovesStandingOrdersOutOfClaudeMd(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", false, nil)
+	claudePath := filepath.Join(a.Dir(), "CLAUDE.md")
+	old := "# HUMAN-HEADER\n\n## Role\n\nHUMAN-ROLE keep me.\n\n" + commsHeading + "\n\n" + oldInboundBullet +
+		"\n## Guardrails\n\nHUMAN-GUARD keep me.\n\n" + oldCognitionStanza + "\n## Human notes\n\nHUMAN-TRAILER keep me.\n"
+	if err := os.WriteFile(claudePath, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if acts := actions(planAgent(a, finishNow)); !strings.Contains(acts, "move the mesh standing orders out of CLAUDE.md") {
+		t.Fatalf("plan does not name the move: %s", acts)
+	}
+	if !strings.Contains(findingsText(doctorAgentFindings(a, PoolConfig{}, nil, false)), "CLAUDE.md still carries the mesh standing orders") {
+		t.Fatal("doctor does not flag standing orders left in CLAUDE.md")
 	}
 	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	b, _ = os.ReadFile(claude)
-	got := string(b)
-	if strings.Contains(got, "Session start nags") || !strings.Contains(got, "Documents for the person go in") {
-		t.Fatalf("legacy stanza not replaced with the current one:\n%s", got)
+	got := readFile(t, claudePath)
+	want := "# HUMAN-HEADER\n\n## Role\n\nHUMAN-ROLE keep me.\n\n## Guardrails\n\nHUMAN-GUARD keep me.\n\n## Human notes\n\nHUMAN-TRAILER keep me.\n"
+	if got != want {
+		t.Fatalf("CLAUDE.md after the move:\n%s\nwant:\n%s", got, want)
 	}
-	if n := strings.Count(got, "## Cognition — "); n != 1 || !strings.Contains(got, "HUMAN-TRAILER keep me.") {
-		t.Fatalf("want one stanza and the human text kept:\n%s", got)
+	if local := readFile(t, filepath.Join(a.Dir(), ClaudeLocalFile)); local != standingOrdersBlock(dir, true) {
+		t.Fatalf("%s is not the current block:\n%s", ClaudeLocalFile, local)
+	}
+	// Idempotent: nothing left to do, nothing rewritten.
+	res, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Join(res.Notes, "\n"); strings.Contains(n, "standing orders") {
+		t.Fatalf("second onboard touched the standing orders: %s", n)
+	}
+	if readFile(t, claudePath) != want {
+		t.Fatal("second onboard changed CLAUDE.md")
 	}
 }
 
-// A stanza whose ending meshctl does not know is warned about, never called current.
-func TestPoolUpgradePlan_WarnsOnUnrecognizedCognitionStanza(t *testing.T) {
+func TestOnboard_MovesLegacyCognitionStanza(t *testing.T) {
 	dir := meshRoot(t)
 	a := newTestAgent(t, dir, "architect", false, nil)
-	claude := filepath.Join(a.Dir(), "CLAUDE.md")
-	b, _ := os.ReadFile(claude)
-	cur := string(b)
-	start := strings.Index(cur, "## Cognition — ")
-	end := strings.Index(cur[start:], cognitionStanzaEnd) + start + len(cognitionStanzaEnd)
-	edited := cur[:start] + "## Cognition — maintain your own knowledge base (standing order)\n\nRun the mesh-cognition skill. Hand-rewritten, no known ending.\n" + cur[end:]
-	if err := os.WriteFile(claude, []byte(edited), 0o644); err != nil {
+	claudePath := filepath.Join(a.Dir(), "CLAUDE.md")
+	if err := os.WriteFile(claudePath, []byte("# Role\n\n"+legacyCognitionStanza+"\n## Human notes\n\nHUMAN-TRAILER keep me.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, claudePath); got != "# Role\n\n## Human notes\n\nHUMAN-TRAILER keep me.\n" {
+		t.Fatalf("legacy stanza not moved out:\n%s", got)
+	}
+}
+
+// A stanza whose ending meshctl does not know stays, and is reported.
+func TestStandingOrders_UnrecognizedCognitionStanzaIsKeptAndReported(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", false, nil)
+	claudePath := filepath.Join(a.Dir(), "CLAUDE.md")
+	edited := "# Role\n\n" + cognitionStanzaHeading + "\n\nRun the mesh-cognition skill. Hand-rewritten, no known ending.\n"
+	if err := os.WriteFile(claudePath, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if w := strings.Join(planAgent(a, finishNow).Warnings, "\n"); !strings.Contains(w, "no ending meshctl recognises") {
+		t.Fatalf("plan does not warn: %s", w)
+	}
+	if !strings.Contains(findingsText(doctorAgentFindings(a, PoolConfig{}, nil, false)), "no ending meshctl recognises") {
+		t.Fatal("doctor does not warn")
+	}
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if readFile(t, claudePath) != edited {
+		t.Fatal("an unrecognised stanza was rewritten")
+	}
+}
+
+// The human's own text in CLAUDE.local.md stays; a stale or edited block is
+// replaced in place.
+func TestOnboard_RefreshesBlockKeepsLocalHumanText(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", false, nil)
+	localPath := filepath.Join(a.Dir(), ClaudeLocalFile)
+	block := standingOrdersBlock(dir, true)
+	edited := "MY-LOCAL-NOTE keep me.\n\n" + strings.Replace(block, "Align before you act", "EDITED-INSIDE", 1) + "\nMY-TRAILER keep me.\n"
+	if err := os.WriteFile(localPath, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if acts := actions(planAgent(a, finishNow)); !strings.Contains(acts, "refresh the mesh standing orders in "+ClaudeLocalFile) {
+		t.Fatalf("plan does not name the refresh: %s", acts)
+	}
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := readFile(t, localPath), "MY-LOCAL-NOTE keep me.\n\n"+block+"\nMY-TRAILER keep me.\n"; got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// Issue #19: standing orders moved into CLAUDE.local.md by hand become the
+// managed block, once, and the tracked CLAUDE.md is never written.
+func TestOnboard_HandMovedStandingOrdersBecomeTheBlock(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", false, nil)
+	claudePath := filepath.Join(a.Dir(), "CLAUDE.md")
+	neutral := "# Shared team repo\n\nTool-neutral notes.\n"
+	if err := os.WriteFile(claudePath, []byte(neutral), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hand := "PERSONAL keep me.\n\n" + strings.TrimSpace(renderPoolTokens(dir, commsSection)) + "\n\n" + strings.TrimSpace(renderPoolTokens(dir, oldCognitionStanza)) + "\n"
+	localPath := filepath.Join(a.Dir(), ClaudeLocalFile)
+	if err := os.WriteFile(localPath, []byte(hand), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if readFile(t, claudePath) != neutral {
+		t.Fatal("onboard wrote into the tracked CLAUDE.md")
+	}
+	got := readFile(t, localPath)
+	if got != "PERSONAL keep me.\n\n"+standingOrdersBlock(dir, true) {
+		t.Fatalf("hand-moved orders not turned into the block:\n%s", got)
+	}
+	if n := strings.Count(got, commsHeading); n != 1 {
+		t.Fatalf("want one Agent Communication section, got %d", n)
+	}
+}
+
+// opencode loads neither CLAUDE file natively: the V2 plugin injects
+// CLAUDE.local.md after CLAUDE.md, and V1 lists both under instructions.
+func TestOpencode_LoadsClaudeLocal(t *testing.T) {
+	if !strings.Contains(opencodePluginV2JS, "CLAUDE.local.md") {
+		t.Fatal("V2 plugin does not inject CLAUDE.local.md")
+	}
+	dest := t.TempDir()
+	if _, err := ensureOpencodeConfig(dest, 1); err != nil {
+		t.Fatal(err)
+	}
+	if cfg := readFile(t, filepath.Join(dest, "opencode.json")); !strings.Contains(cfg, ClaudeLocalFile) {
+		t.Fatalf("opencode.json instructions lack %s:\n%s", ClaudeLocalFile, cfg)
+	}
+}
+
+func findingsText(fs []DoctorFinding) string {
+	var out []string
+	for _, f := range fs {
+		out = append(out, f.Message)
+	}
+	return strings.Join(out, "\n")
+}
+
+// Issue #19: onboard recreates intake/README.md when intake/ exists without
+// it (the gate refuses a hand-written copy); doctor and the plan flag it.
+func TestOnboard_RecreatesMissingIntakeReadme(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", false, nil)
+	readme := filepath.Join(a.Dir(), IntakeDir, "README.md")
+	if err := os.Remove(readme); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(findingsText(doctorAgentFindings(a, PoolConfig{}, nil, false)), IntakeDir+"/README.md missing") {
+		t.Fatal("doctor does not flag the missing intake README")
+	}
+	if acts := actions(planAgent(a, finishNow)); !strings.Contains(acts, "recreate "+IntakeDir+"/README.md") {
+		t.Fatalf("plan does not name the missing README: %s", acts)
+	}
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if !fileExists(readme) {
+		t.Fatal("onboard did not recreate intake/README.md")
+	}
+}
+
+// A customised Agent Communication section holds the human's role-specific
+// lines: it stays in CLAUDE.md untouched, the Cognition stanza still moves, and
+// the managed block leaves its own Agent Communication section out.
+func TestOnboard_KeepsCustomisedCommsSection(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", false, nil)
+	claudePath := filepath.Join(a.Dir(), "CLAUDE.md")
+	custom := commsHeading + "\n\n" + oldInboundBullet + "- Architect proposes/advises; ROLE-SPECIFIC keep me.\n"
+	if err := os.WriteFile(claudePath, []byte("# Role\n\n"+custom+"\n"+oldCognitionStanza), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	p := planAgent(a, finishNow)
-	if !strings.Contains(strings.Join(p.Warnings, "\n"), "no ending meshctl recognises") {
-		t.Fatalf("plan must warn, got actions %v warnings %v", p.Actions, p.Warnings)
+	if w := strings.Join(p.Warnings, "\n"); !strings.Contains(w, "CLAUDE.md keeps a customised Agent Communication section") {
+		t.Fatalf("plan does not warn about the customised section: %s", w)
+	}
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, claudePath); got != "# Role\n\n"+custom {
+		t.Fatalf("customised section not kept as is, or Cognition not moved:\n%s", got)
+	}
+	if local := readFile(t, filepath.Join(a.Dir(), ClaudeLocalFile)); local != standingOrdersBlock(dir, false) || strings.Contains(local, commsHeading) {
+		t.Fatalf("block must omit its Agent Communication section:\n%s", local)
+	}
+	if !strings.Contains(findingsText(doctorAgentFindings(a, PoolConfig{}, nil, false)), "customised Agent Communication section") {
+		t.Fatal("doctor does not flag the customised section")
 	}
 }
 
-// A fresh workspace's stanza is the one onboard refreshes to: nothing to plan.
-func TestScaffold_FreshCognitionStanzaIsCurrent(t *testing.T) {
-	dir := meshRoot(t)
-	a := newTestAgent(t, dir, "architect", false, nil)
-	b, _ := os.ReadFile(filepath.Join(a.Dir(), "CLAUDE.md"))
-	if strings.Contains(string(b), cognitionToken) || !strings.Contains(string(b), "Align before you act") {
-		t.Fatalf("fresh CLAUDE.md lacks the current stanza:\n%s", b)
+// meshctl's own older Agent Communication text moves, whichever pool dir name it carries.
+func TestKnownCommsSection(t *testing.T) {
+	cur := strings.TrimPrefix(strings.TrimSpace(renderPoolTokens("", commsSection)), commsHeading)
+	if !knownCommsSection(cur) || !knownCommsSection(strings.ReplaceAll(cur, "../pool/", "../.agentmesh/")) || !knownCommsSection(oldInboundBullet) {
+		t.Fatal("meshctl's own text is not recognised")
 	}
-	if p := planAgent(a, finishNow); strings.Contains(strings.Join(p.Actions, "\n"), "Cognition") {
-		t.Fatalf("a fresh workspace plans a Cognition change: %v", p.Actions)
+	if knownCommsSection(cur + "\n- a human line\n") {
+		t.Fatal("a human line was taken for meshctl's")
 	}
 }

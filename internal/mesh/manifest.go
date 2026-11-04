@@ -201,6 +201,14 @@ func AgentFromWorktreePath(agentsDir, cwd string) string {
 	if err != nil {
 		return ""
 	}
+	return agentForWorktreeBase(agents, base)
+}
+
+// agentForWorktreeBase names the peer a worktree directory `<agent>-<session>`
+// belongs to, the longest matching name winning (a peer "pm" must not claim
+// "pm-tools-abc"). Callers that walk many worktrees scan the roster once and
+// use this directly.
+func agentForWorktreeBase(agents []*Agent, base string) string {
 	best := ""
 	for _, a := range agents {
 		if base == a.Name || strings.HasPrefix(base, a.Name+"-") {
