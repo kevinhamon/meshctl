@@ -227,3 +227,87 @@ func TestPoolUpgrade_CommitsOnlyWhatItWrote(t *testing.T) {
 		t.Fatalf("the person's file must stay uncommitted:\n%s", status)
 	}
 }
+
+// symlinkedSkillRepo is an agent repo whose tracked skill file the upgrade
+// has just replaced with a symlinked directory into the pool (issue #23).
+func symlinkedSkillRepo(t *testing.T) (dir string, before map[string]string) {
+	t.Helper()
+	gitIdentity(t)
+	root := t.TempDir()
+	dir = filepath.Join(root, "agent")
+	skill := filepath.Join(dir, ".opencode", "skills", "mesh-cognition")
+	poolSkill := filepath.Join(root, "pool", "skills", "mesh-cognition")
+	for _, d := range []string{skill, poolSkill} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite := func(p, s string) {
+		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite(filepath.Join(skill, "SKILL.md"), "old copy\n")
+	mustWrite(filepath.Join(poolSkill, "SKILL.md"), "pool copy\n")
+	mustWrite(filepath.Join(dir, "notes.md"), "mine\n")
+	initAgentRepo(dir) // commits everything above as the baseline
+	if out, _ := git(dir, "ls-files"); !strings.Contains(out, "SKILL.md") {
+		t.Fatalf("baseline must track the old skill file, got %q", out)
+	}
+	before = dirtySnapshot(dir)
+	// What the upgrade writes: the link replaces the directory, and an
+	// ignore line keeps the link itself out of the repo.
+	if err := os.RemoveAll(skill); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../../../pool/skills/mesh-cognition", skill); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(filepath.Join(dir, ".gitignore"), ".opencode/skills/mesh-*\n")
+	return dir, before
+}
+
+func TestCommitChangedPaths_RemovalBehindSymlink(t *testing.T) {
+	dir, before := symlinkedSkillRepo(t)
+	action, warnings := commitChangedPaths(dir, before, "upgrade")
+	if action == "" || len(warnings) > 0 {
+		t.Fatalf("want a clean commit, got action %q warnings %v", action, warnings)
+	}
+	if status, _ := git(dir, "status", "--porcelain"); strings.TrimSpace(status) != "" {
+		t.Fatalf("repo must be clean after the upgrade commit:\n%s", status)
+	}
+	files, _ := git(dir, "show", "--name-status", "--format=", "HEAD")
+	if !strings.Contains(files, "D\t.opencode/skills/mesh-cognition/SKILL.md") || !strings.Contains(files, ".gitignore") {
+		t.Fatalf("commit must remove the old skill and add the ignore line:\n%s", files)
+	}
+	// Git must not have followed the link and committed the pool's copy.
+	if out, err := git(dir, "ls-files", ".opencode"); err != nil || strings.TrimSpace(out) != "" {
+		t.Fatalf("nothing under .opencode may stay tracked, got %q (%v)", out, err)
+	}
+}
+
+func TestCommitChangedPaths_RemovalBehindSymlinkWithPersonStaged(t *testing.T) {
+	dir, before := symlinkedSkillRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("mine, edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(dir, "add", "notes.md"); err != nil {
+		t.Fatal(err)
+	}
+	before["notes.md"] = dirtySnapshot(dir)["notes.md"] // the person's edit predates the upgrade
+	action, warnings := commitChangedPaths(dir, before, "upgrade")
+	if action == "" {
+		t.Fatalf("the ignore line must still be committed, warnings %v", warnings)
+	}
+	if !strings.Contains(strings.Join(warnings, "\n"), "SKILL.md") {
+		t.Fatalf("the removal left staged must be named, got %v", warnings)
+	}
+	files, _ := git(dir, "show", "--name-only", "--format=", "HEAD")
+	if strings.Contains(files, "notes.md") || strings.Contains(files, "SKILL.md") {
+		t.Fatalf("commit must not take the person's staged work or follow the link:\n%s", files)
+	}
+	status, _ := git(dir, "status", "--porcelain")
+	if !strings.Contains(status, "M  notes.md") || !strings.Contains(status, "D  .opencode/skills/mesh-cognition/SKILL.md") {
+		t.Fatalf("the person's edit and the removal must stay staged:\n%s", status)
+	}
+}

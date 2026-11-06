@@ -415,13 +415,103 @@ func commitChangedPaths(dir string, before map[string]string, subject string) (s
 	if len(written) == 0 {
 		return "", warnings
 	}
-	if _, err := git(dir, append([]string{"add", "-A", "--"}, written...)...); err != nil {
-		return "", append(warnings, "could not stage the upgrade's files: "+err.Error())
+	// Anything the person had staged before meshctl stages its own paths.
+	// Unknown (nil) on an unborn branch, which takes the pathspec commit.
+	var preStaged []string
+	if out, err := git(dir, "-c", "core.quotePath=false", "diff", "--cached", "--name-only"); err == nil {
+		mine := map[string]bool{}
+		for _, p := range written {
+			mine[p] = true
+		}
+		preStaged = []string{}
+		for _, p := range strings.Split(strings.TrimSpace(out), "\n") {
+			if p != "" && !mine[p] {
+				preStaged = append(preStaged, p)
+			}
+		}
 	}
-	if _, err := git(dir, append([]string{"commit", "-q", "-m", subject, "--"}, written...)...); err != nil {
+	// A tracked file the upgrade replaced with a symlinked parent (issue #23:
+	// .opencode/skills/mesh-cognition/SKILL.md, now under a link into the
+	// pool) cannot be named to `git add` — git rejects the whole pathspec as
+	// "beyond a symbolic link". Stage its removal from the index instead.
+	var add, rm, behindLink []string
+	isBehindLink := map[string]bool{}
+	for _, p := range written {
+		switch {
+		case beyondSymlink(dir, p):
+			rm = append(rm, p)
+			behindLink = append(behindLink, p)
+			isBehindLink[p] = true
+		case !pathExists(filepath.Join(dir, p)):
+			rm = append(rm, p)
+		default:
+			add = append(add, p)
+		}
+	}
+	if len(add) > 0 {
+		if _, err := git(dir, append([]string{"add", "-A", "--"}, add...)...); err != nil {
+			return "", append(warnings, "could not stage the upgrade's files: "+err.Error())
+		}
+	}
+	if len(rm) > 0 {
+		if _, err := git(dir, append([]string{"rm", "-q", "-r", "--cached", "--ignore-unmatch", "--"}, rm...)...); err != nil {
+			return "", append(warnings, "could not stage the upgrade's removals: "+err.Error())
+		}
+	}
+	if preStaged != nil && len(preStaged) == 0 {
+		// The index holds only meshctl's paths: commit it as staged. A
+		// pathspec commit would re-read each named path from disk, and for a
+		// path behind a symlink git follows the link and commits the target's
+		// content in place of the removal.
+		if _, err := git(dir, "commit", "-q", "-m", subject); err != nil {
+			return "", append(warnings, "could not commit the upgrade's files (left staged): "+err.Error())
+		}
+		return fmt.Sprintf("committed %d path(s): %s", len(written), subject), warnings
+	}
+	// The person has their own staged work: commit only meshctl's paths and
+	// leave theirs staged. Paths behind a symlink cannot go through a
+	// pathspec commit (see above), so they stay staged for the person.
+	only := add
+	for _, p := range rm {
+		if !isBehindLink[p] {
+			only = append(only, p)
+		}
+	}
+	if len(behindLink) > 0 {
+		warnings = append(warnings, "staged but not committed, because other changes were already staged (commit them together): removal of "+strings.Join(behindLink, ", "))
+	}
+	if len(only) == 0 {
+		return "", warnings
+	}
+	sort.Strings(only)
+	if _, err := git(dir, append([]string{"commit", "-q", "-m", subject, "--"}, only...)...); err != nil {
 		return "", append(warnings, "could not commit the upgrade's files (left staged): "+err.Error())
 	}
-	return fmt.Sprintf("committed %d path(s): %s", len(written), subject), warnings
+	return fmt.Sprintf("committed %d path(s): %s", len(only), subject), warnings
+}
+
+// beyondSymlink reports whether the repo-relative path p sits under a
+// directory that is now a symbolic link, so git refuses it in a pathspec.
+func beyondSymlink(dir, p string) bool {
+	parts := strings.Split(filepath.ToSlash(p), "/")
+	cur := dir
+	for _, part := range parts[:len(parts)-1] {
+		cur = filepath.Join(cur, part)
+		fi, err := os.Lstat(cur)
+		if err != nil {
+			return false
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// pathExists reports whether p exists, without following a final symlink.
+func pathExists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
 }
 
 // opencodeV1ConfigKeys are V1 opencode.json keys that V2 renames or reshapes
