@@ -103,8 +103,8 @@ edited in place (go:embed cannot reach outside the package, so it lives there).
 ### `meshctl agent new <name> [--badge LABEL --rgb r,g,b --title ... --model ...]`
 Scaffold a **new** agent workspace as a sibling of the mesh, including its
 `agent.yaml` manifest. Creates:
-`<name>/{agent.yaml, intake/README.md, CLAUDE.md, Taskfile.yaml}` (add `--iterm2` for
-an optional macOS iTerm2 profile under `.iterm2/`).
+`<name>/{agent.yaml, intake/README.md, CLAUDE.md}` plus the harness wiring. The other
+agents' in-session peer subagents are refreshed for the new roster, one commit per repo.
 Preconditions: dest must not exist. Emit next-steps (write CLAUDE.md body, create git
 remote, run `meshctl agent identity` for a portable terminal badge).
 
@@ -224,9 +224,9 @@ manifest (`badge.label` + `badge.{r,g,b}`). It uses only OSC title-setting and S
 truecolor, so it works in any terminal on any OS — run it on shell entry in an agent
 workspace (shell rc or a direnv `.envrc`).
 
-`meshctl agent new --iterm2` additionally writes a macOS iTerm2 dynamic profile under
-`.iterm2/` (badge + per-agent color) for users who want the native iTerm treatment;
-it's opt-in and platform-specific, never required.
+The optional macOS iTerm2 dynamic profile (`--iterm2`, `.iterm2/`, a `Taskfile.yaml`)
+is retired: the harnesses name the agent themselves. Onboard and `pool upgrade` remove
+those files where every one is a version meshctl shipped; a customised profile stays.
 
 ## Concurrency & claims
 

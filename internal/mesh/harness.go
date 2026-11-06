@@ -289,9 +289,14 @@ func (h opencodeHarness) WireAgent(dest string) ([]string, error) {
 	if h.Major() >= 2 {
 		want, wantRel, staleRel = opencodePluginV2JS, opencodePluginV2Rel, opencodePluginV1Rel
 	}
+	panel := func() ([]string, error) { return removeManagedPlugin(dest, opencodeTUIRel) } // V1: no TUI plugins
+	if h.Major() >= 2 {
+		panel = func() ([]string, error) { return writeManagedPlugin(dest, opencodeTUIRel, opencodeTUIPlugin) }
+	}
 	for _, step := range []func() ([]string, error){
 		func() ([]string, error) { return writeManagedPlugin(dest, wantRel, want) },
 		func() ([]string, error) { return removeManagedPlugin(dest, staleRel) },
+		panel,
 	} {
 		n, err := step()
 		if err != nil {

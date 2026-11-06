@@ -44,7 +44,7 @@ var HarnessParity = []ParityRow{
 		[]string{"agent brief"}},
 	{"Distillation at a boundary", "✅ distiller subagent", "✅ at session end", "✅ at session end",
 		nil},
-	{"Status line", "✅ every 10s", "✗ none", "✗ none",
+	{"Status line", "✅ every 10s", "✅ TUI panel (sidebar + prompt footer) every 10s; not in `opencode run`", "✗ none",
 		[]string{"hook status-line"}},
 	{"Rebuild a pool elsewhere: member list (`pool/members.yaml`), `pool clone`", "✅", "✅", "✅",
 		[]string{"pool clone"}},

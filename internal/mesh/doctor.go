@@ -3,6 +3,7 @@ package mesh
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -267,6 +268,12 @@ func reservedOwnerFindings(agentsDir string, validated map[string]bool) []Doctor
 
 // Doctor validates every manifest and reports drift. ok is false if any error
 // (not warning) was found — callers exit non-zero on !ok.
+// meshctlOnPath reports whether the harness hooks can find `meshctl`.
+var meshctlOnPath = func() bool {
+	_, err := exec.LookPath("meshctl")
+	return err == nil
+}
+
 func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 	agents, loadErrs, err := ScanAgents(agentsDir)
 	if err != nil {
@@ -285,6 +292,12 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 	findings = append(findings, outboundFindings(agentsDir, poolCfg, agents)...)
 	// Pool-level: grants.
 	findings = append(findings, grantFindings(agentsDir, poolCfg, agents)...)
+
+	// Machine-level: every hook runs the bare `meshctl`, so without it on
+	// PATH the harness's hooks fail and the mesh goes quiet.
+	if !meshctlOnPath() {
+		findings = append(findings, DoctorFinding{Agent: "-", Level: "warn", Message: "`meshctl` is not on PATH — every agent's hooks call it by name, so they fail; put the meshctl binary's folder on PATH"})
+	}
 
 	// Pool-level: doctrine that instructs agents to run invalid commands.
 	findings = append(findings, doctrineFlagFindings(agentsDir)...)

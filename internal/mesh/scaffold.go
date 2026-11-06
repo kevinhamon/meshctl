@@ -32,14 +32,6 @@ type AgentSpec struct {
 	Bare           bool // if false, New appends the "-agent" repo suffix
 }
 
-// ScaffoldOptions controls optional extras when creating/onboarding an agent.
-type ScaffoldOptions struct {
-	// ITerm writes a macOS iTerm2 dynamic profile (.iterm2/) for per-agent window
-	// identity. Off by default — portable identity comes from `meshctl agent identity`
-	// (see identity.go), which works in any terminal on any OS.
-	ITerm bool
-}
-
 // scaffoldKnowledgeAreas creates the KB areas. Add-only: it never
 // touches an area that already has a README, and a second run is a no-op.
 func scaffoldKnowledgeAreas(dest string) ([]string, error) {
@@ -181,11 +173,11 @@ func ensureMemoryIgnored(dest string) error {
 
 // New scaffolds a brand-new agent workspace as a sibling of the mesh, including
 // its agent.yaml manifest. dest must not exist.
-func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error) {
+func New(agentsDir string, spec AgentSpec) (string, error) {
 	// Poly-repo repo-naming: an agent repo is flagged `<name>-agent`
 	// unless --bare. dir == manifest name (discovery is unchanged).
-	if !spec.Bare && spec.Name != "" && !strings.HasSuffix(spec.Name, "-agent") {
-		spec.Name += "-agent"
+	if !spec.Bare && spec.Name != "" && !strings.HasSuffix(spec.Name, agentSuffix) {
+		spec.Name += agentSuffix
 	}
 	if err := ValidAgentName(spec.Name); err != nil {
 		return "", err
@@ -196,19 +188,6 @@ func New(agentsDir string, spec AgentSpec, opts ScaffoldOptions) (string, error)
 	}
 	if err := os.MkdirAll(filepath.Join(dest, IntakeDir), 0o755); err != nil {
 		return "", err
-	}
-
-	// Verbatim template files.
-	if err := copyTemplate("templates/Taskfile.yaml", filepath.Join(dest, "Taskfile.yaml")); err != nil {
-		return "", err
-	}
-
-	// Optional macOS iTerm2 profile for per-agent window identity. Portable identity
-	// (any terminal, any OS) comes from `meshctl agent identity` instead.
-	if opts.ITerm {
-		if err := writeITermProfile(dest, spec); err != nil {
-			return "", err
-		}
 	}
 
 	// Rendered template files. The standing orders have one source,
@@ -273,7 +252,7 @@ type OnboardResult struct {
 // Idempotent + non-destructive: only adds what is missing, never clobbers an
 // existing agent.yaml. spec supplies fields that cannot be inferred; inference
 // from CLAUDE.md fills title/role when spec leaves them blank.
-func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions) (*OnboardResult, error) {
+func Onboard(agentsDir, nameOrPath string, spec AgentSpec) (*OnboardResult, error) {
 	dir := nameOrPath
 	if !strings.ContainsRune(nameOrPath, os.PathSeparator) {
 		dir = AgentDir(agentsDir, nameOrPath)
@@ -414,17 +393,12 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec, opts ScaffoldOptions)
 		res.Notes = append(res.Notes, added...)
 	}
 
-	// Optional macOS iTerm2 profile (add-only; never clobber an existing one).
-	if opts.ITerm {
-		if _, err := os.Stat(filepath.Join(abs, ".iterm2")); os.IsNotExist(err) {
-			if a, _ := FindAgent(agentsDir, spec.Name); a != nil {
-				if err := writeITermProfile(abs, specFromAgent(a)); err != nil {
-					res.Notes = append(res.Notes, "iTerm2 profile not written: "+err.Error())
-				} else {
-					res.Notes = append(res.Notes, "wrote optional iTerm2 profile (.iterm2/)")
-				}
-			}
-		}
+	// 8. The retired iTerm2 profile files an earlier meshctl wrote
+	// (iterm_retire.go); a customised profile stays.
+	if notes, err := retireITerm(abs); err != nil {
+		return nil, err
+	} else {
+		res.Notes = append(res.Notes, notes...)
 	}
 	return res, nil
 }
@@ -482,7 +456,7 @@ func ScaffoldSteward(agentsDir, harness string, now time.Time) (string, []string
 		Harness:      harness,
 		Bare:         true, // StewardName already carries the -agent suffix
 	}
-	dir, err := New(agentsDir, spec, ScaffoldOptions{})
+	dir, err := New(agentsDir, spec)
 	if err != nil {
 		return dest, nil, err
 	}
@@ -504,6 +478,11 @@ func ScaffoldSteward(agentsDir, harness string, now time.Time) (string, []string
 		return dir, notes, err
 	}
 	notes = append(notes, "installed mesh-steward skill")
+	// New committed the generic scaffold; commit the role too, so a fresh
+	// pool starts clean.
+	if isGitRepo(dir) {
+		commitBestEffort(dir, "Set the steward role (meshctl)", "CLAUDE.md")
+	}
 	return dir, notes, nil
 }
 
@@ -525,36 +504,8 @@ func renderTemplate(embedded, dest string, repl *strings.Replacer) error {
 	return os.WriteFile(dest, []byte(repl.Replace(string(b))), 0o644)
 }
 
-var (
-	reRed   = regexp.MustCompile(`(?m)^  red: .*$`)
-	reGreen = regexp.MustCompile(`(?m)^  green: .*$`)
-	reBlue  = regexp.MustCompile(`(?m)^  blue: .*$`)
-)
-
-// writeITermProfile writes the optional macOS iTerm2 dynamic profile for an agent:
-// the .iterm2/ dir, the profile template, and the per-agent values (badge + color).
-func writeITermProfile(dest string, spec AgentSpec) error {
-	if err := os.MkdirAll(filepath.Join(dest, ".iterm2"), 0o755); err != nil {
-		return err
-	}
-	if err := copyTemplate("templates/.iterm2/profile.json.tmpl", filepath.Join(dest, ".iterm2", "profile.json.tmpl")); err != nil {
-		return err
-	}
-	return renderITermValues(dest, spec)
-}
-
-func renderITermValues(dest string, spec AgentSpec) error {
-	b, err := templatesFS.ReadFile("templates/.iterm2.values.yaml")
-	if err != nil {
-		return err
-	}
-	s := string(b)
-	s = strings.NewReplacer("__NAME__", spec.Name, "__BADGE__", spec.Badge.Label).Replace(s)
-	s = reRed.ReplaceAllString(s, fmt.Sprintf("  red: %g", spec.Badge.R))
-	s = reGreen.ReplaceAllString(s, fmt.Sprintf("  green: %g", spec.Badge.G))
-	s = reBlue.ReplaceAllString(s, fmt.Sprintf("  blue: %g", spec.Badge.B))
-	return os.WriteFile(filepath.Join(dest, ".iterm2.values.yaml"), []byte(s), 0o644)
-}
+// agentSuffix is appended to a new agent's name unless --bare.
+const agentSuffix = "-agent"
 
 // --- manifest writer ---
 

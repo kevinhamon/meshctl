@@ -313,7 +313,7 @@ func briefCmd() *cobra.Command {
 
 // identityCmd prints a portable per-agent terminal identity: an ANSI title-set plus a
 // colored badge banner from the manifest. Works in any terminal on any OS — the
-// cross-platform replacement for the optional macOS iTerm2 profile.
+// replacement for the retired macOS iTerm2 profile.
 func identityCmd() *cobra.Command {
 	var agent string
 	c := &cobra.Command{
@@ -419,6 +419,9 @@ func parseRGB(s string) (r, g, b float64, err error) {
 		vals[i], err = strconv.ParseFloat(strings.TrimSpace(p), 64)
 		if err != nil {
 			return 0, 0, 0, fmt.Errorf("--rgb component %q not a number", p)
+		}
+		if vals[i] < 0 || vals[i] > 1 {
+			return 0, 0, 0, fmt.Errorf("--rgb components are 0..1, got %q (for 0..255, divide by 255)", s)
 		}
 	}
 	return vals[0], vals[1], vals[2], nil
@@ -581,7 +584,7 @@ func poolUpgradeCmd() *cobra.Command {
 			return runPoolUpgrade(dir, force, doctrineOnly)
 		},
 	}
-	c.Flags().BoolVar(&headless, "headless", false, "no human at the prompt: apply only with the pool-wide `pool-upgrade` grant and a --check with no warnings")
+	c.Flags().BoolVar(&headless, "headless", false, "no human at the prompt: apply only with the pool-wide pool-upgrade grant and a --check with no warnings")
 	c.Flags().BoolVar(&force, "force", false, "overwrite locally-edited doctrine (each is backed up first)")
 	c.Flags().BoolVar(&check, "check", false, "preview the upgrade without writing anything (exit 1 if one is pending)")
 	c.Flags().BoolVar(&doctrineOnly, "doctrine-only", false, "upgrade the pool doctrine only; leave agent wiring alone")
@@ -761,6 +764,18 @@ func runPoolUpgrade(dir string, force, doctrineOnly bool) error {
 
 // refreshMembers brings the pool's member list up to date with the agents on
 // disk and commits it (pool-clone C1), saying so when it changed.
+// refreshPeerRoster re-renders the other agents' in-session peer subagents
+// after the roster changed; a failure is reported, not fatal.
+func refreshPeerRoster(poolRoot, except string) {
+	lines, err := mesh.RefreshPeerRoster(poolRoot, except)
+	for _, l := range lines {
+		fmt.Println("  refreshed peers in " + l)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "  peer refresh incomplete: "+err.Error()+" — run `meshctl pool upgrade`")
+	}
+}
+
 func refreshMembers(poolRoot string) error {
 	changed, err := mesh.RefreshMembers(poolRoot)
 	if changed {
@@ -922,7 +937,6 @@ func newCmd() *cobra.Command {
 		owns, domains, accepts            string
 		mutates                           string
 		dispatchable                      bool
-		iterm                             bool
 		harness                           string
 		ocVersion                         int
 		bare                              bool
@@ -954,7 +968,7 @@ func newCmd() *cobra.Command {
 				Mutates: splitCSV(mutates), Model: model, Repo: repo, Workdirs: splitCSV(workdirs), Harness: harness, HarnessVersion: ocVersion, Bare: bare,
 				Badge: mesh.Badge{Label: badge, R: r, G: g, B: b},
 			}
-			dest, err := mesh.New(dir, spec, mesh.ScaffoldOptions{ITerm: iterm})
+			dest, err := mesh.New(dir, spec)
 			if err != nil {
 				return err
 			}
@@ -962,9 +976,9 @@ func newCmd() *cobra.Command {
 			if err := refreshMembers(dir); err != nil {
 				return err
 			}
-			fmt.Println("next: (1) flesh out CLAUDE.md body  (2) cd " + dest +
-				" && task install  (3) create its git remote  (4) for a per-agent terminal badge, " +
-				"run `meshctl agent identity` on shell entry (portable — any terminal, any OS)")
+			refreshPeerRoster(dir, dest)
+			fmt.Println("next: (1) flesh out the CLAUDE.md body  (2) create its git remote  (3) optional: for a " +
+				"per-agent terminal title and badge, run `meshctl agent identity` on shell entry (any terminal, any OS)")
 			return nil
 		},
 	}
@@ -978,12 +992,11 @@ func newCmd() *cobra.Command {
 	f.StringVar(&domains, "domains", "", "comma-separated capability/domain tags")
 	f.StringVar(&accepts, "accepts", "", "accepted request types: type:desc,type:desc")
 	f.StringVar(&mutates, "mutates", "", "external systems written (tracker,code,prod); non-empty ⇒ not dispatchable")
-	f.BoolVar(&dispatchable, "dispatchable", false, "may `meshctl ask` run it headlessly (ignored if mutates set)")
+	f.BoolVar(&dispatchable, "dispatchable", false, "may meshctl ask run it headlessly (ignored if mutates set)")
 	f.StringVar(&repo, "repo", "", "git remote URL")
 	f.StringVar(&workdirs, "workdirs", "", "comma-separated local repo paths writable in delegated hub-session work (~ ok)")
 	f.StringVar(&harness, "harness", "", "coding-agent harness: claude|opencode (default: claude for new; autodetect for onboard)")
 	f.IntVar(&ocVersion, "opencode-version", 0, "opencode major to wire for: 1|2 (default: the installed opencode's; 2 if none)")
-	f.BoolVar(&iterm, "iterm2", false, "also write a macOS iTerm2 dynamic profile (.iterm2/) for window identity")
 	f.BoolVar(&bare, "bare", false, "do not append the '-agent' repo suffix to the name")
 	return cmd
 }
@@ -997,7 +1010,6 @@ func onboardCmd() *cobra.Command {
 		owns, domains, accepts            string
 		mutates                           string
 		dispatchable                      bool
-		iterm                             bool
 		harness                           string
 		ocVersion                         int
 	)
@@ -1027,7 +1039,7 @@ func onboardCmd() *cobra.Command {
 			if badge != "" || cmd.Flags().Changed("rgb") {
 				spec.Badge = mesh.Badge{Label: badge, R: r, G: g, B: b}
 			}
-			res, err := mesh.Onboard(dir, args[0], spec, mesh.ScaffoldOptions{ITerm: iterm})
+			res, err := mesh.Onboard(dir, args[0], spec)
 			if err != nil {
 				return err
 			}
@@ -1053,6 +1065,7 @@ func onboardCmd() *cobra.Command {
 			if err := refreshMembers(dir); err != nil {
 				return err
 			}
+			refreshPeerRoster(dir, res.Dir)
 			return nil
 		},
 	}
@@ -1071,7 +1084,6 @@ func onboardCmd() *cobra.Command {
 	f.StringVar(&workdirs, "workdirs", "", "comma-separated local repo paths writable in delegated hub-session work (~ ok)")
 	f.StringVar(&harness, "harness", "", "coding-agent harness: claude|opencode (default: claude for new; autodetect for onboard)")
 	f.IntVar(&ocVersion, "opencode-version", 0, "opencode major to wire for: 1|2 (default: the installed opencode's; 2 if none)")
-	f.BoolVar(&iterm, "iterm2", false, "also write a macOS iTerm2 dynamic profile (.iterm2/) if missing")
 	return cmd
 }
 
@@ -2137,16 +2149,22 @@ func hookCmd() *cobra.Command {
 
 	// The status line is not a hook event but rides the same wiring: Claude
 	// Code runs it with its own stdin JSON and shows stdout verbatim.
+	var statusJSON bool
 	statusLine := &cobra.Command{
 		Use:   "status-line",
-		Short: "Status line: the agent and the pending work waiting on you, one line",
+		Short: "Status line: the agent and the pending work waiting on you, one line (--json: as data)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			b, _ := io.ReadAll(os.Stdin)
+			p := mesh.ParseStatusLinePayload(b)
 			dir, _ := agentsDir()
-			fmt.Println(mesh.StatusLine(dir, mesh.ParseStatusLinePayload(b), time.Now()))
+			if statusJSON {
+				return json.NewEncoder(os.Stdout).Encode(mesh.StatusLineReport(dir, p, time.Now()))
+			}
+			fmt.Println(mesh.StatusLine(dir, p, time.Now()))
 			return nil
 		},
 	}
+	statusLine.Flags().BoolVar(&statusJSON, "json", false, "print the agent, pool and groups as JSON (the opencode panel reads this)")
 
 	cmd.AddCommand(sessionStart, userPrompt, sessionBeat, sessionEnd, preToolUse, postToolUse, statusLine)
 	return cmd

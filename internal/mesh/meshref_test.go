@@ -13,12 +13,12 @@ import (
 func TestReservedOwner_CreateRefusesPeerNamedPool(t *testing.T) {
 	dir := migratedRoot(t)
 	spec := AgentSpec{Name: "pool", Title: "Pool", Role: "r", Bare: true}
-	if _, err := New(dir, spec, ScaffoldOptions{}); err == nil || !strings.Contains(err.Error(), "reserved") {
+	if _, err := New(dir, spec); err == nil || !strings.Contains(err.Error(), "reserved") {
 		t.Fatalf("agent new must refuse the reserved name: err=%v", err)
 	}
 	// Case does not matter: a case-folding filesystem would collide with pool/.
 	spec.Name = "Pool"
-	if _, err := New(dir, spec, ScaffoldOptions{}); err == nil || !strings.Contains(err.Error(), "reserved") {
+	if _, err := New(dir, spec); err == nil || !strings.Contains(err.Error(), "reserved") {
 		t.Fatalf("agent new must refuse the reserved name regardless of case: err=%v", err)
 	}
 	if err := ValidAgentName("pool"); err == nil || !strings.Contains(err.Error(), "reserved") {
@@ -35,7 +35,7 @@ func TestReservedOwner_OnboardRefusesPeerNamedPool(t *testing.T) {
 	if err := os.MkdirAll(ws, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Onboard(dir, ws, AgentSpec{Title: "Pool", Role: "r"}, ScaffoldOptions{})
+	_, err := Onboard(dir, ws, AgentSpec{Title: "Pool", Role: "r"})
 	if err == nil || !strings.Contains(err.Error(), "reserved") {
 		t.Fatalf("onboard must refuse the reserved name: err=%v", err)
 	}

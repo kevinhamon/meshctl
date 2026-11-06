@@ -50,7 +50,7 @@ func TestOnboard_ReplacesRenderedSkillCopyWithLink(t *testing.T) {
 	if acts := actions(planAgent(a, finishNow)); !strings.Contains(acts, "link skill mesh-cognition") {
 		t.Fatalf("plan does not name the link: %s", acts)
 	}
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	if !skillLinked(dir, a.Dir(), "mesh-cognition", HarnessByName(HarnessClaude)) {
@@ -69,7 +69,7 @@ func TestOnboard_RefreshesStalePoolCopy(t *testing.T) {
 	if acts := actions(planAgent(a, finishNow)); !strings.Contains(acts, "refresh skill mesh-cognition") {
 		t.Fatalf("plan does not name the stale pool copy: %s", acts)
 	}
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	want, _ := renderedSkill(dir, "mesh-cognition")
@@ -85,7 +85,7 @@ func TestOnboard_StewardCloneGetsStewardSkill(t *testing.T) {
 	a := newTestAgent(t, dir, StewardName, false, nil)
 	steward := filepath.Join(a.Dir(), ".claude", "skills", "mesh-steward")
 	_ = os.RemoveAll(steward)
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	if !skillLinked(dir, a.Dir(), "mesh-steward", HarnessByName(HarnessClaude)) {

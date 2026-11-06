@@ -74,8 +74,21 @@ func initAgentRepo(dir string) {
 		}
 	}
 	_ = exec.Command("git", "-C", dir, "add", "-A").Run()
-	// Commit only if a git identity is configured; otherwise leave it staged.
-	cmd := exec.Command("git", "-C", dir, "commit", "-m", "Scaffold agent workspace (meshctl)")
+	commitBestEffort(dir, "Scaffold agent workspace (meshctl)")
+}
+
+// commitBestEffort commits what is staged (or the given paths) under the
+// person's git identity; with none configured it falls back to a meshctl
+// identity so a fresh workspace still starts clean. Errors are ignored.
+func commitBestEffort(dir, msg string, paths ...string) {
+	args := []string{"-C", dir, "commit", "-q", "-m", msg}
+	if len(paths) > 0 {
+		args = append(append(args, "--"), paths...)
+	}
+	if exec.Command("git", args...).Run() == nil {
+		return
+	}
+	cmd := exec.Command("git", args...)
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=meshctl", "GIT_AUTHOR_EMAIL=meshctl@localhost",
 		"GIT_COMMITTER_NAME=meshctl", "GIT_COMMITTER_EMAIL=meshctl@localhost")

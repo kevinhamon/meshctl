@@ -126,7 +126,7 @@ func TestOnboard_BringsAnOlderWorkspaceToTheDocsConvention(t *testing.T) {
 	b, _ := os.ReadFile(gi)
 	_ = os.WriteFile(gi, []byte(strings.Replace(string(b), DocsLocalDir+"/\n", "", 1)), 0o644)
 
-	res, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{})
+	res, err := Onboard(dir, a.Dir(), AgentSpec{})
 	if err != nil {
 		t.Fatal(err)
 	}

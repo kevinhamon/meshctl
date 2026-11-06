@@ -31,7 +31,7 @@ func testPool(t *testing.T) (dir string, a *mesh.Agent) {
 	}
 	spec := mesh.AgentSpec{Name: "architect", Title: "Architect", Role: "role", Dispatchable: true,
 		Accepts: []mesh.Accept{{Type: "guidance", Desc: "advice"}}, Badge: mesh.Badge{Label: "A"}, Bare: true}
-	if _, err := mesh.New(dir, spec, mesh.ScaffoldOptions{}); err != nil {
+	if _, err := mesh.New(dir, spec); err != nil {
 		t.Fatal(err)
 	}
 	a, err := mesh.FindAgent(dir, "architect")

@@ -203,6 +203,14 @@ func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
 		if managed(opencodePluginState(dir, staleRel, staleJS)) {
 			p.Actions = append(p.Actions, "remove "+staleRel+" (other opencode major)")
 		}
+		if major >= 2 {
+			switch opencodePluginState(dir, opencodeTUIRel, opencodeTUIPlugin) {
+			case pluginAbsent:
+				p.Actions = append(p.Actions, "add the mesh status panel "+opencodeTUIRel)
+			case pluginStale:
+				p.Actions = append(p.Actions, "update "+opencodeTUIRel)
+			}
+		}
 		if major < 2 {
 			p.Warnings = append(p.Warnings, "opencode V1: no pre-tool hook, so the mesh gate stays unavailable until opencode V2")
 		} else if !opencodeAskWired(dir, false) {
@@ -269,6 +277,10 @@ func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
 		}
 	}
 
+	if rm := planITermRetire(dir); len(rm) > 0 {
+		p.Actions = append(p.Actions, "remove the retired iTerm2 profile files: "+strings.Join(rm, ", "))
+	}
+
 	// Standing orders: moved out of CLAUDE.md, (re)written in CLAUDE.local.md.
 	so := planStandingOrders(dir, filepath.Dir(dir))
 	if so.movedOut {
@@ -318,7 +330,7 @@ func UpgradeAgents(poolRoot, version string) ([]AgentUpgradePlan, error) {
 	var out []AgentUpgradePlan
 	for _, a := range agents {
 		before := dirtySnapshot(a.Dir())
-		res, err := Onboard(poolRoot, a.Dir(), AgentSpec{}, ScaffoldOptions{})
+		res, err := Onboard(poolRoot, a.Dir(), AgentSpec{})
 		if err != nil {
 			return out, fmt.Errorf("%s: %w", a.Name, err)
 		}
@@ -331,7 +343,7 @@ func UpgradeAgents(poolRoot, version string) ([]AgentUpgradePlan, error) {
 		if res.AddedIntake {
 			did = append(did, "created intake/")
 		}
-		committed, warnings := commitUpgradeWiring(a.Dir(), before, version)
+		committed, warnings := commitChangedPaths(a.Dir(), before, UpgradeWiringSubject(version))
 		if committed != "" {
 			did = append(did, committed)
 		}
@@ -373,13 +385,13 @@ func dirtySnapshot(dir string) map[string]string {
 	return snap
 }
 
-// commitUpgradeWiring commits, in an agent repo, exactly the paths the upgrade
+// commitChangedPaths commits, in an agent repo, exactly the paths meshctl
 // changed (issue #10): those clean before it and dirty after. A path that was
 // already uncommitted and that the upgrade changed again mixes the person's
 // edit with meshctl's, so it is left uncommitted and named in a warning.
 // Nothing is pushed. Returns the action line ("" when nothing was committed)
 // and any warnings.
-func commitUpgradeWiring(dir string, before map[string]string, version string) (string, []string) {
+func commitChangedPaths(dir string, before map[string]string, subject string) (string, []string) {
 	if before == nil {
 		return "", nil // not a repo
 	}
@@ -406,10 +418,10 @@ func commitUpgradeWiring(dir string, before map[string]string, version string) (
 	if _, err := git(dir, append([]string{"add", "-A", "--"}, written...)...); err != nil {
 		return "", append(warnings, "could not stage the upgrade's files: "+err.Error())
 	}
-	if _, err := git(dir, append([]string{"commit", "-q", "-m", UpgradeWiringSubject(version), "--"}, written...)...); err != nil {
+	if _, err := git(dir, append([]string{"commit", "-q", "-m", subject, "--"}, written...)...); err != nil {
 		return "", append(warnings, "could not commit the upgrade's files (left staged): "+err.Error())
 	}
-	return fmt.Sprintf("committed %d path(s): %s", len(written), UpgradeWiringSubject(version)), warnings
+	return fmt.Sprintf("committed %d path(s): %s", len(written), subject), warnings
 }
 
 // opencodeV1ConfigKeys are V1 opencode.json keys that V2 renames or reshapes

@@ -92,7 +92,7 @@ func TestOnboard_MovesStandingOrdersOutOfClaudeMd(t *testing.T) {
 	if !strings.Contains(findingsText(doctorAgentFindings(a, PoolConfig{}, nil, false)), "CLAUDE.md still carries the mesh standing orders") {
 		t.Fatal("doctor does not flag standing orders left in CLAUDE.md")
 	}
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	got := readFile(t, claudePath)
@@ -104,7 +104,7 @@ func TestOnboard_MovesStandingOrdersOutOfClaudeMd(t *testing.T) {
 		t.Fatalf("%s is not the current block:\n%s", ClaudeLocalFile, local)
 	}
 	// Idempotent: nothing left to do, nothing rewritten.
-	res, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{})
+	res, err := Onboard(dir, a.Dir(), AgentSpec{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestOnboard_MovesLegacyCognitionStanza(t *testing.T) {
 	if err := os.WriteFile(claudePath, []byte("# Role\n\n"+legacyCognitionStanza+"\n## Human notes\n\nHUMAN-TRAILER keep me.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFile(t, claudePath); got != "# Role\n\n## Human notes\n\nHUMAN-TRAILER keep me.\n" {
@@ -146,7 +146,7 @@ func TestStandingOrders_UnrecognizedCognitionStanzaIsKeptAndReported(t *testing.
 	if !strings.Contains(findingsText(doctorAgentFindings(a, PoolConfig{}, nil, false)), "no ending meshctl recognises") {
 		t.Fatal("doctor does not warn")
 	}
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	if readFile(t, claudePath) != edited {
@@ -168,7 +168,7 @@ func TestOnboard_RefreshesBlockKeepsLocalHumanText(t *testing.T) {
 	if acts := actions(planAgent(a, finishNow)); !strings.Contains(acts, "refresh the mesh standing orders in "+ClaudeLocalFile) {
 		t.Fatalf("plan does not name the refresh: %s", acts)
 	}
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := readFile(t, localPath), "MY-LOCAL-NOTE keep me.\n\n"+block+"\nMY-TRAILER keep me.\n"; got != want {
@@ -191,7 +191,7 @@ func TestOnboard_HandMovedStandingOrdersBecomeTheBlock(t *testing.T) {
 	if err := os.WriteFile(localPath, []byte(hand), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	if readFile(t, claudePath) != neutral {
@@ -244,7 +244,7 @@ func TestOnboard_RecreatesMissingIntakeReadme(t *testing.T) {
 	if acts := actions(planAgent(a, finishNow)); !strings.Contains(acts, "recreate "+IntakeDir+"/README.md") {
 		t.Fatalf("plan does not name the missing README: %s", acts)
 	}
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	if !fileExists(readme) {
@@ -267,7 +267,7 @@ func TestOnboard_KeepsCustomisedCommsSection(t *testing.T) {
 	if w := strings.Join(p.Warnings, "\n"); !strings.Contains(w, "CLAUDE.md keeps a customised Agent Communication section") {
 		t.Fatalf("plan does not warn about the customised section: %s", w)
 	}
-	if _, err := Onboard(dir, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, a.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFile(t, claudePath); got != "# Role\n\n"+custom {

@@ -191,7 +191,7 @@ func TestOnboard_RefreshesRenderedPointersAfterMigration(t *testing.T) {
 	if _, err := UpgradePoolDir(root, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Onboard(root, a.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(root, a.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, f := range []string{

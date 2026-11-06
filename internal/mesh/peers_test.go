@@ -26,7 +26,7 @@ func TestPeers_RenderedForDispatchablePeersOnly(t *testing.T) {
 	dir, caller := peerPool(t)
 	// newTestAgent → New → WireAgent already rendered; the order of creation
 	// means the caller saw no peers yet. Onboard refreshes.
-	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range []string{"architect", "catalog-expert"} {
@@ -91,7 +91,7 @@ func TestPeers_FrontmatterContract(t *testing.T) {
 
 func TestPeers_RosterChangeRefreshesAndRemoves(t *testing.T) {
 	dir, caller := peerPool(t)
-	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	// catalog-expert stops being dispatchable → its definition is removed.
@@ -133,7 +133,7 @@ func TestPeers_HandAuthoredLeftAlone(t *testing.T) {
 	out := PeerAgentFile(caller.Dir(), "architect")
 	_ = os.MkdirAll(filepath.Dir(out), 0o755)
 	_ = os.WriteFile(out, []byte("---\nname: mesh-architect\n---\nmine\n"), 0o644)
-	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(out)
@@ -148,7 +148,7 @@ func TestPeers_HandAuthoredLeftAlone(t *testing.T) {
 
 func TestPeers_PoolAccessWiredInLocalSettings(t *testing.T) {
 	dir, caller := peerPool(t)
-	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	if !PoolAccessWired(dir, caller.Dir()) {
@@ -268,7 +268,7 @@ func TestPeers_WorkFrontmatterContract(t *testing.T) {
 
 func TestPeers_MutatingPeerGetsWorkDefinitionOnly(t *testing.T) {
 	dir, caller := peerPool(t)
-	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	if fileExists(PeerAgentFile(caller.Dir(), "pm")) || !fileExists(PeerWorkAgentFile(caller.Dir(), "pm")) {
@@ -317,7 +317,7 @@ func TestPeers_WorkdirsWiredIntoCallerAdditionalDirs(t *testing.T) {
 	if !strings.Contains(strings.Join(planAgent(caller, time.Now()).Actions, "\n"), repo) {
 		t.Fatal("upgrade plan must preview the workdir grant")
 	}
-	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	if miss := MissingAdditionalDirs(caller.Dir(), dir, repo); len(miss) != 0 {
@@ -374,7 +374,7 @@ func TestPeers_GateMatcherAndPostToolUse(t *testing.T) {
 // bare `mcp__` matcher is planned as a refresh and rewritten by pool upgrade.
 func TestPeers_StaleMatcherRefreshesOnUpgrade(t *testing.T) {
 	dir, caller := peerPool(t)
-	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	f := PeerAgentFile(caller.Dir(), "architect")

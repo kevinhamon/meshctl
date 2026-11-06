@@ -16,7 +16,7 @@ func inSessionPool(t *testing.T) (dir string, caller, arch *Agent) {
 	dir = meshRoot(t)
 	caller = newTestAgent(t, dir, "developer", false, []string{"code"})
 	arch = newTestAgent(t, dir, "architect", true, nil)
-	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENT_DISPATCH_HOURLY_MAX", "12")
@@ -102,7 +102,7 @@ func TestAskInSession_Guards(t *testing.T) {
 	if _, _, err := AskInSession(dir, arch, InSessionOptions{Type: "guidance", Prompt: "x", From: caller.Name, Stdout: discard{}}); err == nil || !strings.Contains(err.Error(), "meshctl agent onboard developer") {
 		t.Fatalf("missing definition must point at onboard: %v", err)
 	}
-	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	// Depth: a headless-dispatched peer may not go in-session either.

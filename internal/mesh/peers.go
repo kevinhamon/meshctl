@@ -668,3 +668,36 @@ func ensureGitignoreLine(dir, line string) error {
 	_, err = f.WriteString(prefix + line + "\n")
 	return err
 }
+
+// RefreshPeerRoster brings every other agent's in-session peer subagents in
+// line with the roster after an agent joins or changes (`agent new|onboard`),
+// so no workspace is left stale until the next `pool upgrade`. Each agent repo
+// gets one commit holding exactly the files written; nothing is pushed.
+// Returns one line per agent touched.
+func RefreshPeerRoster(poolRoot, except string) ([]string, error) {
+	agents, _, err := ScanAgents(poolRoot)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, a := range agents {
+		if a.Dir() == except || PlanPeerAgents(poolRoot, a.Dir()).Empty() {
+			continue
+		}
+		before := dirtySnapshot(a.Dir())
+		notes, err := ensurePeerAgents(poolRoot, a.Dir())
+		if err != nil {
+			return out, fmt.Errorf("%s: %w", a.Name, err)
+		}
+		line := a.Name + ": " + strings.Join(notes, "; ")
+		committed, warnings := commitChangedPaths(a.Dir(), before, "meshctl: refresh in-session peers")
+		if committed != "" {
+			line += " (" + committed + ")"
+		}
+		for _, w := range warnings {
+			line += " — " + w
+		}
+		out = append(out, line)
+	}
+	return out, nil
+}

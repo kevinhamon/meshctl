@@ -30,7 +30,7 @@ command you approve.
 | Term | What |
 |------|------|
 | **Pool** | An isolated mesh rooted at a directory, marked by `pool/pool.yaml`. `pool/` is a visible git repo holding the marker, doctrine and glossary (runtime state beside them, ignored); meshctl commits there, you push. A pool still on the hidden legacy directory keeps working until `meshctl pool upgrade` moves it. All comms/roster/KB scope to the pool — cross-pool contact is structurally impossible. Create with `meshctl pool init`. |
-| **Agent** | A sibling workspace in the pool: `agent.yaml` (identity/discovery), `intake/` (inbox), `knowledge/` (git-tracked KB), harness wiring, terminal identity. |
+| **Agent** | A sibling workspace in the pool: `agent.yaml` (identity/discovery), `intake/` (inbox), `knowledge/` (git-tracked KB), harness wiring, terminal identity. `meshctl agent new architect` creates `architect-agent/`, and the agent's name everywhere is `architect-agent` (`--bare` keeps the plain name). `meshctl agent list` shows the names. |
 | **Steward** | The onboarding-hub agent scaffolded into a fresh pool. It interviews you for the mesh's purpose and builds the agent roster. Your mesh's front door. |
 | **Harness** | The coding-agent runtime an agent runs under — `claude` (Claude Code) or `opencode`. `meshctl` renders hooks/skills into each harness's native form. |
 | **Comms** | File-based intake requests between agents. `meshctl msg send` (async handoff) / `meshctl msg ask` (sync headless dispatch). `meshctl agent list` is the live roster. |
@@ -44,37 +44,70 @@ Requires Go 1.26+ (to build) or a release binary. Any of:
 # 1. go install (module path is the repo — no manual download)
 go install github.com/kevinhamon/meshctl/cmd/meshctl@latest
 
-# 2. Download a prebuilt binary from a release (macOS/Linux/Windows)
-#    https://github.com/kevinhamon/meshctl/releases  → meshctl_<os>_<arch>
+# 2. Download a prebuilt binary (see below)
 
 # 3. Build from a clone
 git clone https://github.com/kevinhamon/meshctl.git agent-mesh
 cd agent-mesh && task install     # build → ~/.local/bin/meshctl
 ```
 
-Ensure the install dir (`$(go env GOPATH)/bin` or `~/.local/bin`) is on `$PATH`, then
-`meshctl --help`. Release binaries are cross-compiled (CGO-free) and attached by the
-release CI workflow on every `v*` tag.
+Prebuilt binary, macOS or Linux (pick `darwin` or `linux`, `arm64` or `amd64`):
 
-Doctrine is embedded source: edit `internal/mesh/templates/doctrine/agent-comms.md` /
-`distiller.md`, rebuild, and refresh a pool's emitted doctrine with
-`meshctl pool upgrade`. Upgrade only replaces files unchanged since meshctl wrote them; a
-pool whose doctrine was edited locally keeps its copy, gets the new version as
-`<file>.upstream` to merge by hand, and the command exits non-zero (`--force` overwrites,
-backing each edited file up to `<file>.bak-<timestamp>`). Pool-specific doctrine belongs
-in `pool/doctrine/local.md`, which upgrades never touch.
+```sh
+asset=meshctl_darwin_arm64
+base=https://github.com/kevinhamon/meshctl/releases/latest/download
+mkdir -p ~/.local/bin && cd ~/.local/bin
+curl -fsSLO "$base/$asset" && curl -fsSLO "$base/$asset.sha256"
+shasum -a 256 -c "$asset.sha256"          # Linux: sha256sum -c
+mv "$asset" meshctl && chmod +x meshctl && rm "$asset.sha256"
+```
+
+On macOS a binary fetched with `curl` runs as is. One downloaded in a browser is
+quarantined by Gatekeeper (the binaries are not Apple-notarized); clear that with
+`xattr -d com.apple.quarantine ~/.local/bin/meshctl`. On Windows, download
+`meshctl_windows_amd64.exe` from the [releases page](https://github.com/kevinhamon/meshctl/releases)
+and rename it `meshctl.exe`.
+
+**`meshctl` must be on `$PATH`.** Every agent's harness hooks call it by name, so check
+with `meshctl --version` in a new terminal; `meshctl doctor` warns when it isn't found.
+Once installed, `meshctl update` keeps it current.
 
 ## Quickstart — stand up a mesh
 
 ```sh
 meshctl pool init ~/myproject-mesh --name myproject      # emits doctrine + steward
-cd ~/myproject-mesh/steward
+cd ~/myproject-mesh/steward-agent
 # run your harness here (Claude Code or opencode). The steward interviews you and
 # scaffolds the agent roster with `meshctl agent new …`.
 ```
 
 Prefer to build the roster by hand? `meshctl pool init … --no-steward`, then
 `meshctl agent new <name> …` per agent.
+
+## A day with meshctl
+
+Each agent is a folder, and you work with one by opening a terminal there and starting
+your harness (`claude` or `opencode`). Two or three open at a time is typical; the rest
+sit idle until something arrives for them.
+
+- **Messages land as files.** When the architect sends the developer a request
+  (`meshctl send developer-agent …`), it becomes a file in `developer-agent/intake/`.
+  Nothing runs by itself: the developer sees it the next time a session starts there.
+- **You see what's waiting.** Every session starts with the agent's pending work, its
+  last handoff and its current-state digest. The Claude Code status line and the
+  opencode sidebar keep a running count; `meshctl console` shows every agent of every pool in a browser tab.
+- **You say "check intake".** The agent reads its queue to you, proposes an order and
+  waits; you pick, it claims and works the request, and answers. The sender reads the
+  answer back with `meshctl sent`.
+- **Advisory agents can answer on their own.** An agent marked `--dispatchable` can be
+  asked a question (`meshctl ask`) and answer it in a background run or inside the
+  asker's session, without you opening its terminal. Anything that writes code or a
+  tracker is never run that way.
+- **Agents remember.** Before a session ends, the agent writes a handoff and distills
+  what it learned into its `knowledge/` folder, which is plain markdown in git.
+- **Decisions come to you as numbered rounds.** The doctrine tells agents to bring
+  anything that changes shared state to you as numbered items; you answer `yes` or
+  `C2 no: …`.
 
 ## Move a pool to another machine
 
@@ -214,13 +247,14 @@ request needs the token kept in your user config (`meshctl/console.json`). `mesh
 
 Key flags: `agent new/onboard --harness claude|opencode`, `--dispatchable`,
 `--mutates code,tracker` (non-empty ⇒ not dispatchable), `--accepts type:desc,…`,
-`--owns`, `--domains`, `--rgb`, `--badge`, `--role`, `--title`, `--iterm2`.
+`--owns`, `--domains`, `--rgb r,g,b` (each 0..1), `--badge`, `--role`, `--title`, `--bare`.
 
 **Terminal identity (portable).** `meshctl agent identity` prints an ANSI title +
 colored badge (from the manifest's `--badge`/`--rgb`) so you can see which agent a
 terminal is driving — works in any terminal on any OS. Run it on shell entry in an
-agent workspace (shell rc or a direnv `.envrc`). `agent new --iterm2` additionally
-writes an optional macOS iTerm2 profile; it's off by default and never required.
+agent workspace (shell rc or a direnv `.envrc`). The optional macOS iTerm2 profile
+earlier versions wrote is retired: `pool upgrade` removes its files (`Taskfile.yaml`,
+`.iterm2/`) where they are unchanged, and leaves a customised profile alone.
 
 ## Harness integration
 
@@ -236,7 +270,7 @@ python, no loose scripts, no machine-absolute paths):
 | capture | SessionEnd | `session.idle` = heartbeat; session-end after an idle window | `session.execution.succeeded` = heartbeat; session-end after an idle window (`AGENT_MESH_OPENCODE_IDLE_SEC`, 600s) or `session.deleted` |
 | gate | PreToolUse deny envelope | — (advisory only) | `tool.hook("execute.before")` throws the reason |
 | ask | PreToolUse ask envelope | — | `opencode.json` `permissions` rules with effect `ask` for the promotion commands; the gate lets those calls through to opencode's prompt |
-| status line | settings.json `statusLine` → `meshctl hook status-line`, every 10s | — | — |
+| status line | settings.json `statusLine` → `meshctl hook status-line`, every 10s | — | `.opencode/plugins/meshctl-tui/tui.js`: TUI plugin → `meshctl hook status-line --json`, every 10s, in the session sidebar and prompt footer |
 | dispatch | `claude -p` | `opencode run --pure --auto` | `opencode run --standalone --auto` |
 
 ### Feature parity
@@ -260,7 +294,7 @@ release workflow runs it before building.
 | Headless dispatch | ✅ `claude -p` | ✅ `opencode run --standalone`, locked-down permissions | ✅ `opencode run --pure` |
 | In-session peers, consult and work (`ask --in-session [--work]`) | ✅ Agent tool | ✅ `subagent` tool; mutating peers asked by opencode | ✗ refused |
 | Distillation at a boundary | ✅ distiller subagent | ✅ at session end | ✅ at session end |
-| Status line | ✅ every 10s | ✗ none | ✗ none |
+| Status line | ✅ every 10s | ✅ TUI panel (sidebar + prompt footer) every 10s; not in `opencode run` | ✗ none |
 | Rebuild a pool elsewhere: member list (`pool/members.yaml`), `pool clone` | ✅ | ✅ | ✅ |
 | Console: live pool view, open sessions (`meshctl console`) | ✅ with scheduled jobs | ✅ no scheduled jobs | ✅ no scheduled jobs |
 <!-- parity:end -->
@@ -459,7 +493,7 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
    ```
    Rule: one agent per distinct responsibility with a real ownership boundary; advisory agents are `dispatchable`, anything that writes code/a tracker sets `--mutates` (⇒ not dispatchable, `send`-only, human-triggered).
 4. **Flesh each agent's `CLAUDE.md`** with its operating doctrine: the role-specific substance. The mesh standing orders (Agent Communication + Cognition) are not in it: they live in a block meshctl manages in the gitignored `CLAUDE.local.md`, rewritten on every onboard and `pool upgrade`, so a meshctl change never needs a commit in an agent repo and an agent repo is safe to share with people who don't run meshctl. The mesh skills are symlinks into `pool/skills/`, rendered once per pool.
-5. **Verify.** `meshctl doctor` (clean but for empty-KB warnings) and `meshctl agent list`.
+5. **Verify.** `meshctl doctor` and `meshctl agent list`. A new pool's doctor still warns that each KB is empty (`knowledge/<area>/ has no entries yet`) and that no repo has a git remote yet; both clear with use. An agent with `--mutates code` also asks for the code surface in `pool/config.yaml`; doctor's message names the key.
 6. **Onboard an existing directory** into the mesh instead of creating fresh: `meshctl agent onboard <path>` (add-only; infers title/role; autodetects harness; recreates a missing `intake/README.md`).
    An agent onboarded by an earlier meshctl gets its standing orders moved out of `CLAUDE.md` on the next onboard or upgrade (one commit in its repo). A customised Agent Communication section (one holding lines meshctl never wrote) stays where it is, and doctor flags it: move the role-specific lines under another heading and delete the section to get the current intake order.
 7. **Operate.** Reach a peer with `meshctl msg send|ask`; on "check intake" read `meshctl inbox list` to the human (pending + in-progress, priority then age, a one-line ask each), propose an order and wait, then `meshctl inbox claim <id>` in the order they give, answer with `meshctl inbox respond` (or `inbox decline --redirect` when it isn't yours), and read replies with `meshctl sent`; recall with `meshctl memory recall`; record decisions via `meshctl kb begin/finish`; leave a handoff with `meshctl handoff set`.
@@ -482,6 +516,13 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
   own repo in the pool, and `pool/` (doctrine, glossary, config) is its own git repo. Runtime artifacts (`pool/dispatch.*`, `pool/worktrees/`, `pool/sessions/`,
   `pool/skills/`, `.memory/`) are git-ignored.
 - Prefer SSH git remotes.
+- Doctrine is embedded source: edit `internal/mesh/templates/doctrine/agent-comms.md` /
+  `distiller.md`, rebuild, and refresh a pool's emitted doctrine with `meshctl pool upgrade`.
+  Upgrade only replaces files unchanged since meshctl wrote them; a pool whose doctrine was
+  edited locally keeps its copy, gets the new version as `<file>.upstream` to merge by hand,
+  and the command exits non-zero (`--force` overwrites, backing each edited file up to
+  `<file>.bak-<timestamp>`). Pool-specific doctrine belongs in `pool/doctrine/local.md`,
+  which upgrades never touch.
 - A change to what a harness can do updates `internal/mesh/parity.go` in the same commit:
   every command is classified there, and the README table above is generated from it.
 
@@ -490,8 +531,10 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
 Hit friction, a missing capability, a bug, or have an idea? Open an issue with the matching
 form at <https://github.com/kevinhamon/meshctl/issues/new/choose>: **Friction**, **Gap**,
 **Suggestion** or **Bug**. Describe meshctl's behaviour only, not your organization's work.
-`meshctl --help` ends with the same link. Inside a pool, agents send what they hit to the
-steward (`meshctl send steward fyi "meshctl …"`); when you ask, the steward merges the
+`meshctl --help` ends with the same link. Using meshctl in a way not described here, or
+not sure something is a bug? Say so in [Discussions](https://github.com/kevinhamon/meshctl/discussions):
+how other people use it is the feedback this project most needs. Inside a pool, agents send what they hit to the
+steward (`meshctl send steward-agent fyi "meshctl …"`); when you ask, the steward merges the
 reports, reads them to you as a decision round, and files the ones you confirm.
 
 ## Versioning

@@ -15,7 +15,7 @@ func v1Pool(t *testing.T) (pool string, a *Agent) {
 	pool = meshRoot(t)
 	spec := AgentSpec{Name: "oc", Title: "OC", Role: "r", Accepts: []Accept{{Type: "fyi", Desc: "x"}},
 		Badge: Badge{Label: "OC"}, Harness: HarnessOpencode, HarnessVersion: 1, Bare: true}
-	if _, err := New(pool, spec, ScaffoldOptions{}); err != nil {
+	if _, err := New(pool, spec); err != nil {
 		t.Fatal(err)
 	}
 	a, err := FindAgent(pool, "oc")
@@ -49,6 +49,9 @@ func TestPoolUpgrade_CheckPreviewsWithoutWriting(t *testing.T) {
 	if !strings.Contains(joined, "write opencode V2 plugin") || !strings.Contains(joined, "remove "+opencodePluginV1Rel) {
 		t.Fatalf("plan missing the plugin swap: %v", ap.Actions)
 	}
+	if !strings.Contains(joined, "add the mesh status panel "+opencodeTUIRel) {
+		t.Fatalf("plan missing the status panel: %v", ap.Actions)
+	}
 	if after, _ := os.ReadFile(v1); string(after) != string(before) {
 		t.Fatal("--check must not write")
 	}
@@ -77,6 +80,9 @@ func TestPoolUpgrade_ApplyRewiresThenConverges(t *testing.T) {
 	if !fileExists(filepath.Join(a.Dir(), filepath.FromSlash(opencodePluginV2Rel))) ||
 		fileExists(filepath.Join(a.Dir(), filepath.FromSlash(opencodePluginV1Rel))) {
 		t.Fatal("upgrade must swap the V1 plugin for the V2 one")
+	}
+	if opencodePluginState(a.Dir(), opencodeTUIRel, opencodeTUIPlugin) != pluginCurrent {
+		t.Fatal("upgrade must add the opencode status panel")
 	}
 	if fs := opencodeGateFindings(a); len(fs) != 0 {
 		t.Fatalf("doctor should be clean after upgrade: %+v", fs)

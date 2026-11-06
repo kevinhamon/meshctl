@@ -60,7 +60,7 @@ func TestAskInSessionWork_Eligibility(t *testing.T) {
 	_ = arch
 	ops := newTestAgent(t, dir, "ops", false, []string{"infra"})
 	scribe := newTestAgent(t, dir, "scribe", false, nil)
-	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, caller.Dir(), AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	// Neither dispatchable nor mutating: refused.

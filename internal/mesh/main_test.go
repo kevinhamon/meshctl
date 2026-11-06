@@ -13,5 +13,6 @@ func TestMain(m *testing.M) {
 	for _, k := range []string{"CLAUDECODE", "OPENCODE", "OPENCODE_SESSION_ID", "OPENCODE_CONFIG_CONTENT"} {
 		os.Unsetenv(k)
 	}
+	meshctlOnPath = func() bool { return true } // CI has no installed meshctl
 	os.Exit(m.Run())
 }

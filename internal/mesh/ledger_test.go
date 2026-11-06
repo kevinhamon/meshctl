@@ -181,7 +181,7 @@ func TestLedger_OnboardScaffoldsEmptyTrackedLedger(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(ws, KnowledgeDir), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	res, err := Onboard(dir, ws, AgentSpec{Title: "Legacy", Role: "r"}, ScaffoldOptions{})
+	res, err := Onboard(dir, ws, AgentSpec{Title: "Legacy", Role: "r"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestLedger_OnboardScaffoldsEmptyTrackedLedger(t *testing.T) {
 	if err := os.WriteFile(LedgerPath(ws), []byte(ledgerShape), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Onboard(dir, ws, AgentSpec{}, ScaffoldOptions{}); err != nil {
+	if _, err := Onboard(dir, ws, AgentSpec{}); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(LedgerPath(ws)); string(b) != ledgerShape {

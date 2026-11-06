@@ -264,7 +264,10 @@ func FindAgent(agentsDir, name string) (*Agent, error) {
 	}
 	mp := ManifestPath(agentsDir, name)
 	if !fileExists(mp) {
-		return nil, fmt.Errorf("agent %q has no manifest (%s not found)", name, mp)
+		if alt := name + agentSuffix; fileExists(ManifestPath(agentsDir, alt)) {
+			return nil, fmt.Errorf("agent %q has no manifest (%s not found) — did you mean %q? `meshctl agent list` shows the roster", name, mp, alt)
+		}
+		return nil, fmt.Errorf("agent %q has no manifest (%s not found) — `meshctl agent list` shows the roster", name, mp)
 	}
 	return LoadAgent(mp)
 }

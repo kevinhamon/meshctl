@@ -38,7 +38,7 @@ func owningAgent(t *testing.T, root, name string, owns ...string) *Agent {
 		Badge:   Badge{Label: name, R: 0.1, G: 0.2, B: 0.3},
 		Bare:    true,
 	}
-	if _, err := New(root, spec, ScaffoldOptions{}); err != nil {
+	if _, err := New(root, spec); err != nil {
 		t.Fatalf("scaffold %s: %v", name, err)
 	}
 	a, err := FindAgent(root, name)

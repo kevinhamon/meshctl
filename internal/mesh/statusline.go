@@ -190,3 +190,68 @@ func renderStatusLine(b PendingBlock) string {
 	}
 	return strings.Join(parts, " * ")
 }
+
+// StatusReport is the status line as data, for a harness that draws its own
+// view (the opencode TUI panel): the same agent and groups, no ANSI.
+type StatusReport struct {
+	Agent  string        `json:"agent,omitempty"` // "" when the directory is not an agent
+	Pool   string        `json:"pool,omitempty"`
+	Dir    string        `json:"dir"`
+	Groups []StatusEntry `json:"groups"`
+}
+
+// StatusEntry is one group: its label, the value text, the phrase that
+// starts its review, and whether it blocks (rendered red on the line).
+type StatusEntry struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+	Say   string `json:"say,omitempty"`
+	Alert bool   `json:"alert,omitempty"`
+}
+
+// StatusLineReport resolves the session the payload describes the way
+// StatusLine does and returns the groups as data.
+func StatusLineReport(agentsDir string, p StatusLinePayload, now time.Time) StatusReport {
+	dirs := []string{p.Workspace.ProjectDir, p.Workspace.CurrentDir, p.Cwd}
+	r := StatusReport{Groups: []StatusEntry{}}
+	for _, d := range dirs {
+		if d != "" {
+			r.Dir = d
+			break
+		}
+	}
+	if r.Dir == "" {
+		r.Dir, _ = os.Getwd()
+		dirs = append(dirs, r.Dir)
+	}
+	if agentsDir == "" {
+		return r
+	}
+	a := statusLineAgent(agentsDir, dirs)
+	if a == nil {
+		return r
+	}
+	cfg := LoadPoolConfig(agentsDir)
+	r.Agent, r.Pool = a.Name, cfg.Name
+	if r.Pool == "" {
+		r.Pool = filepath.Base(agentsDir)
+	}
+	for _, l := range pendingScoped(agentsDir, a, now, scopeOwn).Lines {
+		for _, g := range statusGroups(l) {
+			val := ""
+			for i := 0; i < len(g.kv); i++ {
+				if i%2 == 1 { // a sub-label ("oldest") joins its value
+					val += " " + g.kv[i] + " " + g.kv[i+1]
+					i++
+					continue
+				}
+				val += g.kv[i]
+			}
+			r.Groups = append(r.Groups, StatusEntry{Label: g.label, Value: val, Say: StatusLinePhrases[g.label], Alert: g.color == ansiRed})
+		}
+	}
+	if cfg.Settings.Grants.Paused {
+		r.Groups = append(r.Groups, StatusEntry{Label: "grants", Value: "paused", Alert: true})
+	}
+	return r
+}

@@ -280,6 +280,12 @@ func opencodeGateFindings(a *Agent) []DoctorFinding {
 		if managed(v1) {
 			out = append(out, f("warn", "leftover opencode V1 plugin ("+opencodePluginV1Rel+") — V2 warns on it every start; "+onboard))
 		}
+		switch opencodePluginState(a.Dir(), opencodeTUIRel, opencodeTUIPlugin) {
+		case pluginAbsent:
+			out = append(out, f("warn", "no mesh status panel ("+opencodeTUIRel+") — the opencode TUI shows no pending work; "+onboard))
+		case pluginStale:
+			out = append(out, f("warn", "mesh status panel stale ("+opencodeTUIRel+") — "+onboard))
+		}
 		if !opencodeAskWired(a.Dir(), false) {
 			out = append(out, f("error", "opencode.json lacks the ask rules for promotions, so `kb finish`, `kb confirm` "+
 				"and `state set` are refused; "+onboard))

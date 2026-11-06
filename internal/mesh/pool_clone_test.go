@@ -24,7 +24,7 @@ func clonablePool(t *testing.T) (root string, remotes map[string]string) {
 	for _, name := range []string{"alpha", "beta"} {
 		spec := AgentSpec{Name: name, Title: name, Role: "r", Accepts: []Accept{{Type: "fyi", Desc: "x"}},
 			Badge: Badge{Label: strings.ToUpper(name)}, Bare: true}
-		dir, err := New(root, spec, ScaffoldOptions{})
+		dir, err := New(root, spec)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -81,7 +81,7 @@ func TestDoctor_StaleMemberListIsFixableAndNoRemoteIsNotRestorable(t *testing.T)
 	}
 	// A third agent appears, with no remote.
 	spec := AgentSpec{Name: "gamma", Title: "g", Role: "r", Accepts: []Accept{{Type: "fyi", Desc: "x"}}, Badge: Badge{Label: "G"}, Bare: true}
-	if _, err := New(root, spec, ScaffoldOptions{}); err != nil {
+	if _, err := New(root, spec); err != nil {
 		t.Fatal(err)
 	}
 	findings, _, _, _ := DoctorWithHygiene(root, false, time.Now())
@@ -119,7 +119,7 @@ func TestPoolClone_RebuildsThePoolFromItsRepo(t *testing.T) {
 	root, remotes := clonablePool(t)
 	// A member with no remote, and an extra listed by hand.
 	spec := AgentSpec{Name: "gamma", Title: "g", Role: "r", Accepts: []Accept{{Type: "fyi", Desc: "x"}}, Badge: Badge{Label: "G"}, Bare: true}
-	if _, err := New(root, spec, ScaffoldOptions{}); err != nil {
+	if _, err := New(root, spec); err != nil {
 		t.Fatal(err)
 	}
 	extra := filepath.Join(t.TempDir(), "tools.git")

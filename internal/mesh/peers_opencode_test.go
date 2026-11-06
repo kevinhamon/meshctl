@@ -23,7 +23,7 @@ func ocPeerPool(t *testing.T) (dir string, hub, arch, pm *Agent) {
 	newTestAgent(t, dir, "scout", false, nil)
 	spec := AgentSpec{Name: "hub", Title: "hub title", Role: "role", Accepts: []Accept{{Type: "guidance"}},
 		Harness: HarnessOpencode, Badge: Badge{Label: "hub"}, Bare: true}
-	if _, err := New(dir, spec, ScaffoldOptions{}); err != nil {
+	if _, err := New(dir, spec); err != nil {
 		t.Fatal(err)
 	}
 	hub, err := FindAgent(dir, "hub")
