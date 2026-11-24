@@ -44,7 +44,7 @@ func TestOpencode_V2Wiring(t *testing.T) {
 		t.Fatal("V2 plugin not written to .opencode/plugins/")
 	}
 	for _, want := range []string{opencodePluginMarker, "export default", `id: "meshctl"`,
-		`hook("context"`, `hook("execute.before"`, "pre-tool-use", "CLAUDE.md", "session.execution.succeeded"} {
+		`hook("context"`, `hook("execute.before"`, `"tool.before"`, "doctrine: true", "session.execution.succeeded"} {
 		if !strings.Contains(string(pb), want) {
 			t.Fatalf("V2 plugin missing %q", want)
 		}

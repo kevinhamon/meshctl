@@ -532,7 +532,7 @@ func poolInitCmd() *cobra.Command {
 }
 
 func poolUpgradeCmd() *cobra.Command {
-	var force, check, doctrineOnly, asJSON, headless bool
+	var force, check, doctrineOnly, asJSON, headless, allPools bool
 	c := &cobra.Command{
 		Use:   "upgrade",
 		Short: "Upgrade the pool to this binary + the installed harnesses: pool directory, doctrine and every agent's wiring",
@@ -551,8 +551,14 @@ func poolUpgradeCmd() *cobra.Command {
 			"without writing anything; it exits 1 when an upgrade is pending.\n" +
 			"With no human at the prompt (--headless, dispatch depth or a distil run) it applies only when the pool config\n" +
 			"grants `grants.pool.pool-upgrade` (not paused, under its cap) and --check flags nothing; otherwise it refuses\n" +
-			"and changes nothing. Each such run is recorded in the policy log.",
+			"and changes nothing. Each such run is recorded in the policy log.\n" +
+			"--all-pools runs the same upgrade (or --check) in every pool registered on this machine, one after another:\n" +
+			"a pool that fails is reported and the walk goes on; pools whose path is gone or holds no pool are listed\n" +
+			"at the end, never forgotten. It needs a human at the prompt to apply, and refuses --force and --headless.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if allPools {
+				return runPoolUpgradeAllPools(check, doctrineOnly, asJSON, force, headless)
+			}
 			dir, err := agentsDir()
 			if err != nil {
 				return err
@@ -589,6 +595,7 @@ func poolUpgradeCmd() *cobra.Command {
 	c.Flags().BoolVar(&check, "check", false, "preview the upgrade without writing anything (exit 1 if one is pending)")
 	c.Flags().BoolVar(&doctrineOnly, "doctrine-only", false, "upgrade the pool doctrine only; leave agent wiring alone")
 	c.Flags().BoolVar(&asJSON, "json", false, "with --check: machine-readable preview (versioned schema); exit status as without it")
+	c.Flags().BoolVar(&allPools, "all-pools", false, "upgrade (or --check) every pool registered on this machine; one pool's failure does not stop the rest")
 	return c
 }
 
@@ -827,6 +834,9 @@ func printUpgradePlan(plan mesh.PoolUpgradePlan, doctrineOnly bool) {
 				fmt.Println("    ⚠ " + w)
 			}
 		}
+	}
+	for _, s := range plan.Skipped {
+		fmt.Println("· " + s)
 	}
 	for _, w := range plan.Warnings {
 		fmt.Println("⚠ " + w)
@@ -1245,7 +1255,7 @@ func sendCmd() *cobra.Command {
 // --- doctor ---
 
 func doctorCmd() *cobra.Command {
-	var fix, asJSON bool
+	var fix, asJSON, allPools bool
 	c := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check manifests, wiring, KB consistency and pool hygiene; non-zero exit on any error",
@@ -1253,69 +1263,40 @@ func doctorCmd() *cobra.Command {
 runtime state. Hygiene items (stale claims and sessions, orphan worktrees, retired
 files, legacy intake statuses, leftovers from earlier upgrades) are reported with
 "fixable" when meshctl can repair them; --fix applies those repairs. Items that
-need a human (text you wrote, doctrine you edited) are always reported, never changed.`,
+need a human (text you wrote, doctrine you edited) are always reported, never changed.
+--all-pools runs the same check in every pool registered on this machine, then
+lists the pools it skipped (path gone, or no pool there; never forgotten
+automatically) and a pool × agent × harness matrix: wired, missing (installed
+here but not wired) or n/a (not installed here). It exits non-zero when any
+pool's doctor finds errors.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			now := time.Now()
+			if allPools {
+				return runDoctorAllPools(fix, asJSON, now)
+			}
 			dir, err := agentsDir()
 			if err != nil {
 				return err
 			}
-			now := time.Now()
-			info := mesh.OutboundWiringLines(dir)
-			if n := mesh.UpgradeNotice(dir, resolveVersion()); n != "" {
-				info = append(info, n)
-			}
-			if n := selfupdate.Notice(resolveVersion(), now); n != "" {
-				info = append(info, n)
-			}
-			findings, ok, fixed, errs := mesh.DoctorWithHygiene(dir, fix, now)
-			for _, m := range console.LoginItemFindings(console.ReadSettings()) {
-				findings = append(findings, mesh.DoctorFinding{Agent: "console", Level: "warn", Message: m})
-			}
+			r := collectDoctor(dir, fix, now)
+			r.info = append(r.info, hostDoctorInfo(now)...)
+			r.findings = append(r.findings, hostDoctorFindings()...)
 			if asJSON {
-				if err := printJSON(mesh.NewDoctorReport(findings, ok, info, now)); err != nil {
+				if err := printJSON(mesh.NewDoctorReport(r.findings, r.ok, r.info, now)); err != nil {
 					return err
 				}
-				if !ok {
-					return &mesh.CodedError{Code: 1, Msg: "doctor found errors"}
-				}
-				return nil
+			} else {
+				printDoctorRun(r)
 			}
-			for _, l := range info {
-				fmt.Println("ℹ " + l)
-			}
-			for _, f := range fixed {
-				fmt.Println("✓ fixed " + f)
-			}
-			for _, e := range errs {
-				fmt.Println("✗ fix failed: " + e.Error())
-			}
-			for i, f := range findings {
-				if f.Fixable {
-					findings[i].Message += "  (fixable: meshctl doctor --fix)"
-				}
-			}
-			if len(findings) == 0 {
-				fmt.Println("doctor: clean ✓")
-				return nil
-			}
-			for _, f := range findings {
-				mark := "  "
-				if f.Level == "error" {
-					mark = "✗ "
-				} else if f.Level == "warn" {
-					mark = "⚠ "
-				}
-				fmt.Printf("%s[%s] %s\n", mark, f.Agent, f.Message)
-			}
-			if !ok {
+			if !r.ok {
 				return &mesh.CodedError{Code: 1, Msg: "doctor found errors"}
 			}
-			fmt.Println("doctor: no errors (warnings above)")
 			return nil
 		},
 	}
 	c.Flags().BoolVar(&fix, "fix", false, "apply the automatic hygiene repairs (stale state, retired files, legacy statuses)")
 	c.Flags().BoolVar(&asJSON, "json", false, "machine-readable report (versioned schema); exit status as without it")
+	c.Flags().BoolVar(&allPools, "all-pools", false, "check every pool registered on this machine; list skipped pools and the pool × agent × harness matrix")
 	return c
 }
 
@@ -2010,7 +1991,7 @@ func hookCmd() *cobra.Command {
 	var harness, peer string
 	var inSession, work bool
 	cmd := &cobra.Command{
-		Use:   "hook session-start|user-prompt|session-beat|session-end|pre-tool-use|post-tool-use|status-line",
+		Use:   "hook session-start|user-prompt|session-beat|session-end|pre-tool-use|post-tool-use|status-line|event",
 		Short: "Harness hook handlers (self-contained; wired per-agent by agent new/onboard)",
 	}
 	cmd.PersistentFlags().StringVar(&harness, "harness", "", "output envelope: claude|opencode (default: agent's harness)")
@@ -2166,7 +2147,23 @@ func hookCmd() *cobra.Command {
 	}
 	statusLine.Flags().BoolVar(&statusJSON, "json", false, "print the agent, pool and groups as JSON (the opencode panel reads this)")
 
-	cmd.AddCommand(sessionStart, userPrompt, sessionBeat, sessionEnd, preToolUse, postToolUse, statusLine)
+	// The neutral entry point for harness bridges: one normalized event on
+	// stdin (session.start, prompt, context, tool.before, tool.after,
+	// turn.end, heartbeat, tick, session.end, shutdown), the reply in the
+	// harness's form. Session bookkeeping and the idle window live here, not
+	// in the bridge. tool.before is fail-closed like pre-tool-use.
+	event := &cobra.Command{
+		Use:   "event",
+		Short: "Bridge event: one normalized harness event on stdin, the harness's reply on stdout",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, _ := agentsDir() // the gate must still fire outside a pool
+			b, _ := io.ReadAll(os.Stdin)
+			mesh.RunHookEvent(os.Stdout, dir, harness, b, time.Now())
+			return nil
+		},
+	}
+
+	cmd.AddCommand(sessionStart, userPrompt, sessionBeat, sessionEnd, preToolUse, postToolUse, statusLine, event)
 	return cmd
 }
 

@@ -340,6 +340,8 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 	// reads only its own peer's files and runs git in its own repo, and git
 	// process start-up is most of doctor's time.
 	perAgent := make([][]DoctorFinding, len(agents))
+	installed := installedHarnessesFn() // probed once, not per peer
+	findings = append(findings, noHarnessFinding(installed)...)
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, doctorParallel)
 	for i, a := range agents {
@@ -347,7 +349,7 @@ func Doctor(agentsDir string) (findings []DoctorFinding, ok bool) {
 		sem <- struct{}{}
 		go func(i int, a *Agent) {
 			defer func() { <-sem; wg.Done() }()
-			perAgent[i] = doctorAgentFindings(a, poolCfg, poolTerms, poolGlossary)
+			perAgent[i] = doctorAgentFindingsOn(a, poolCfg, poolTerms, poolGlossary, installed)
 		}(i, a)
 	}
 	wg.Wait()
@@ -413,7 +415,13 @@ const doctorParallel = 8
 // doctorAgentFindings runs every per-peer check for one agent. It must stay
 // safe to run for several peers at once: it reads only this peer's files and
 // shared read-only config.
-func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool, poolGlossary bool) (findings []DoctorFinding) {
+func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool, poolGlossary bool) []DoctorFinding {
+	return doctorAgentFindingsOn(a, poolCfg, poolTerms, poolGlossary, installedHarnessesFn())
+}
+
+// doctorAgentFindingsOn is doctorAgentFindings with the host's installed
+// harnesses supplied (Doctor probes them once for every peer).
+func doctorAgentFindingsOn(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool, poolGlossary bool, installed []InstalledHarness) (findings []DoctorFinding) {
 	for _, p := range a.Validate() {
 		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "error", Message: p})
 	}
@@ -462,13 +470,12 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 		findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: msg})
 	}
 
-	// Is the role file the harness will actually read? (Not gated on a
-	// knowledge/ tree: an agent with no KB still needs its doctrine loaded.)
-	findings = append(findings, opencodeInstructionsFindings(a)...)
-
-	// Fail-closed enforcement gate present + current? (Not gated on a
-	// knowledge/ tree: EVERY claude agent must enforce doctrine, KB or not.)
+	// Fail-closed enforcement gate present + current, and the role file
+	// loaded, for every harness the workspace is wired for? (Not gated on a
+	// knowledge/ tree: EVERY agent must enforce doctrine, KB or not.)
 	findings = append(findings, gateWiringFindings(a)...)
+	// Wired for every installed harness the pool allows, and no more?
+	findings = append(findings, harnessCoverageFindings(a, installed)...)
 
 	// Knowledge-base areas (tiered: warn on missing/empty, never error;
 	// a fresh agent legitimately has empty Experience). Only checked if the
@@ -540,17 +547,14 @@ func doctorAgentFindings(a *Agent, poolCfg PoolConfig, poolTerms map[string]bool
 		// Cognition wiring: the mesh-cognition skill (the Cognition stanza is
 		// checked with the standing orders above). An agent with a knowledge/
 		// tree needs it, else the learn loop has no trigger (warn only).
-		// Skill location is harness-specific: .claude/skills vs .opencode/skills.
-		skillDir := ".claude"
-		if a.HarnessName() == HarnessOpencode {
-			skillDir = ".opencode"
-		}
-		if !fileExists(filepath.Join(a.Dir(), skillDir, "skills", "mesh-cognition", "SKILL.md")) {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "mesh-cognition skill not installed (" + skillDir + "/skills/mesh-cognition/) — run `meshctl agent onboard " + a.Name + "`"})
-		}
-		// Harness wiring present?
-		if a.HarnessName() == HarnessOpencode && !fileExists(filepath.Join(a.Dir(), "opencode.json")) {
-			findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "harness=opencode but no opencode.json — run `meshctl agent onboard " + a.Name + "`"})
+		// Skill location is harness-specific (the adapter's SkillDir), so
+		// check it for every harness the workspace is wired for.
+		for _, id := range doctorHarnessIDs(a) {
+			dir := HarnessByName(id).SkillDir(a.Dir(), "mesh-cognition")
+			if !fileExists(filepath.Join(dir, "SKILL.md")) {
+				rel, _ := filepath.Rel(a.Dir(), dir)
+				findings = append(findings, DoctorFinding{Agent: a.Name, Level: "warn", Message: "mesh-cognition skill not installed (" + filepath.ToSlash(rel) + "/) — run `meshctl agent onboard " + a.Name + "`"})
+			}
 		}
 		// Will cognition actually fire, and will it have anything to mine?
 		// Both fail silently otherwise — see doctor_wiring.go.

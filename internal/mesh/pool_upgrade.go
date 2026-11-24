@@ -24,9 +24,14 @@ import (
 type AgentUpgradePlan struct {
 	Name     string
 	Dir      string
-	Harness  string
+	Harness  string   // the preferred harness (agent.yaml `harness:`)
 	Actions  []string // changes the upgrade will make
 	Warnings []string // things the user must handle (not changed by the upgrade)
+	// AddHarnesses are the harnesses the upgrade wires the workspace for
+	// that it is not wired for yet; RefreshHarnesses are already-wired ones
+	// whose wiring it changes. Both are in the wire set (wire_set.go).
+	AddHarnesses     []string
+	RefreshHarnesses []string
 }
 
 // PoolUpgradePlan is the read-only preview of a pool upgrade.
@@ -38,7 +43,11 @@ type PoolUpgradePlan struct {
 	Conflicts     []string // locally-edited doctrine: left alone, .upstream written for a merge
 	DoctrineDiff  string   // unified diff of the Doctrine updates, for review before applying
 	Warnings      []string // pool-wide issues outside the pool (e.g. global harness config)
-	Agents        []AgentUpgradePlan
+	// Skipped notes the harnesses the pool would wire that are not installed
+	// on this host. Informational: not a warning, so it never holds up a
+	// headless upgrade.
+	Skipped []string
+	Agents  []AgentUpgradePlan
 }
 
 // Pending reports whether the upgrade would change anything.
@@ -73,10 +82,33 @@ func PlanPoolUpgrade(poolRoot string, now time.Time) (PoolUpgradePlan, error) {
 	if err != nil {
 		return plan, err
 	}
+	installed := installedHarnessesFn()
 	usesOpencode := false
+	skipped := map[string]bool{}
 	for _, a := range agents {
-		usesOpencode = usesOpencode || a.HarnessName() == HarnessOpencode
-		plan.Agents = append(plan.Agents, planAgent(a, now))
+		ap := planAgentOn(a, now, installed)
+		for _, id := range append(WiredHarnesses(a.Dir()), a.HarnessName()) {
+			usesOpencode = usesOpencode || id == HarnessOpencode
+		}
+		for _, id := range ap.AddHarnesses {
+			usesOpencode = usesOpencode || id == HarnessOpencode
+		}
+		if !installedHas(installed, a.HarnessName()) {
+			skipped[a.HarnessName()] = true
+		}
+		plan.Agents = append(plan.Agents, ap)
+	}
+	// A harness the pool would wire but that is not installed is skipped;
+	// say so once. A pool that never wants it lists the others in
+	// `harnesses:` and the note goes away.
+	allowAll, allowed := poolAllowsAll(poolRoot), map[string]bool{}
+	for _, id := range PoolHarnessAllowlist(poolRoot) {
+		allowed[id] = true
+	}
+	for _, s := range RegisteredHarnesses() {
+		if !installedHas(installed, s.ID) && (allowAll || allowed[s.ID] || skipped[s.ID]) {
+			plan.Skipped = append(plan.Skipped, s.Label+" is not installed on this host — skipped: its wiring is neither added nor refreshed until it is installed")
+		}
 	}
 	if usesOpencode {
 		plan.OpencodeMajor = InstalledOpencodeMajor()
@@ -181,81 +213,132 @@ func doctrineDiff(poolRoot string) (string, error) {
 	return b.String(), nil
 }
 
-func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
-	p := AgentUpgradePlan{Name: a.Name, Dir: a.Dir(), Harness: a.HarnessName()}
-	dir := a.Dir()
+// harnessUpgradePlanners preview, read-only, what one harness's WireAgent
+// would change in a workspace, for the variant it would wire. A harness
+// without an entry is planned as a whole ("wire for X") when unwired.
+var harnessUpgradePlanners = map[string]func(dir string, variant int) (actions, warnings []string){
+	HarnessClaude:   planClaudeWiring,
+	HarnessOpencode: planOpencodeWiring,
+}
 
-	// Harness wiring.
-	if a.HarnessName() == HarnessOpencode {
-		major := opencodeExpectedMajor(dir)
-		want, wantRel, wantJS, staleRel, staleJS := 1, opencodePluginV1Rel, opencodePluginJS, opencodePluginV2Rel, opencodePluginV2JS
-		if major >= 2 {
-			want, wantRel, wantJS, staleRel, staleJS = 2, opencodePluginV2Rel, opencodePluginV2JS, opencodePluginV1Rel, opencodePluginJS
-		}
-		switch opencodePluginState(dir, wantRel, wantJS) {
-		case pluginAbsent:
-			p.Actions = append(p.Actions, fmt.Sprintf("write opencode V%d plugin %s", want, wantRel))
-		case pluginStale:
-			p.Actions = append(p.Actions, "update "+wantRel)
-		case pluginForeign:
-			p.Warnings = append(p.Warnings, wantRel+" is not meshctl's — left alone; mesh hooks/gate unverified")
-		}
-		if managed(opencodePluginState(dir, staleRel, staleJS)) {
-			p.Actions = append(p.Actions, "remove "+staleRel+" (other opencode major)")
-		}
-		if major >= 2 {
-			switch opencodePluginState(dir, opencodeTUIRel, opencodeTUIPlugin) {
-			case pluginAbsent:
-				p.Actions = append(p.Actions, "add the mesh status panel "+opencodeTUIRel)
-			case pluginStale:
-				p.Actions = append(p.Actions, "update "+opencodeTUIRel)
-			}
-		}
-		if major < 2 {
-			p.Warnings = append(p.Warnings, "opencode V1: no pre-tool hook, so the mesh gate stays unavailable until opencode V2")
-		} else if !opencodeAskWired(dir, false) {
-			p.Actions = append(p.Actions, "add opencode ask rules for promotions to opencode.json")
-		}
-		p.Actions = append(p.Actions, PlanPeerAgents(filepath.Dir(dir), dir).Actions()...)
-		if major >= 2 {
-			if miss := missingSubagentAsk(dir, false); len(miss) > 0 {
-				p.Actions = append(p.Actions, "add opencode subagent ask rules to opencode.json: "+strings.Join(miss, ", "))
-			}
-		}
-	} else {
-		if v := WiringVersion(dir); v < MeshWiringVersion {
-			p.Actions = append(p.Actions, fmt.Sprintf("refresh .claude/settings.json mesh hooks (v%d → v%d)", v, MeshWiringVersion))
-		}
-		if !hasStatusLine(dir) {
-			p.Actions = append(p.Actions, "add the mesh status line to .claude/settings.json")
-		}
-		// In-session peer subagents are derived from the roster; a roster
-		// change or a template change makes them stale.
-		poolRoot := filepath.Dir(dir)
-		p.Actions = append(p.Actions, PlanPeerAgents(poolRoot, dir).Actions()...)
-		if IsPool(poolRoot) {
-			if miss := MissingAdditionalDirs(dir, append([]string{poolRoot}, PeerWorkdirs(poolRoot, dir)...)...); len(miss) > 0 {
-				p.Actions = append(p.Actions, "add "+strings.Join(miss, ", ")+" to .claude/settings.local.json additionalDirectories (in-session peers)")
-			}
+func planClaudeWiring(dir string, _ int) (actions, warnings []string) {
+	if v := WiringVersion(dir); v < MeshWiringVersion {
+		actions = append(actions, fmt.Sprintf("refresh .claude/settings.json mesh hooks (v%d → v%d)", v, MeshWiringVersion))
+	}
+	if !hasStatusLine(dir) {
+		actions = append(actions, "add the mesh status line to .claude/settings.json")
+	}
+	if poolRoot := filepath.Dir(dir); IsPool(poolRoot) {
+		if miss := MissingAdditionalDirs(dir, append([]string{poolRoot}, PeerWorkdirs(poolRoot, dir)...)...); len(miss) > 0 {
+			actions = append(actions, "add "+strings.Join(miss, ", ")+" to .claude/settings.local.json additionalDirectories (in-session peers)")
 		}
 	}
+	return actions, warnings
+}
+
+func planOpencodeWiring(dir string, major int) (actions, warnings []string) {
+	if major <= 0 {
+		major = opencodeExpectedMajor(dir)
+	}
+	want, wantRel, wantJS, staleRel, staleJS := 1, opencodePluginV1Rel, opencodePluginJS, opencodePluginV2Rel, opencodePluginV2JS
+	if major >= 2 {
+		want, wantRel, wantJS, staleRel, staleJS = 2, opencodePluginV2Rel, opencodePluginV2JS, opencodePluginV1Rel, opencodePluginJS
+	}
+	switch opencodePluginState(dir, wantRel, wantJS) {
+	case pluginAbsent:
+		actions = append(actions, fmt.Sprintf("write opencode V%d plugin %s", want, wantRel))
+	case pluginStale:
+		actions = append(actions, "update "+wantRel)
+	case pluginForeign:
+		warnings = append(warnings, wantRel+" is not meshctl's — left alone; mesh hooks/gate unverified")
+	}
+	if managed(opencodePluginState(dir, staleRel, staleJS)) {
+		actions = append(actions, "remove "+staleRel+" (other opencode major)")
+	}
+	if major < 2 {
+		warnings = append(warnings, "opencode V1: no pre-tool hook, so the mesh gate stays unavailable until opencode V2")
+		return actions, warnings
+	}
+	switch opencodePluginState(dir, opencodeTUIRel, opencodeTUIPlugin) {
+	case pluginAbsent:
+		actions = append(actions, "add the mesh status panel "+opencodeTUIRel)
+	case pluginStale:
+		actions = append(actions, "update "+opencodeTUIRel)
+	}
+	if !opencodeAskWired(dir, false) {
+		actions = append(actions, "add opencode ask rules for promotions to opencode.json")
+	}
+	if miss := missingSubagentAsk(dir, false); len(miss) > 0 {
+		actions = append(actions, "add opencode subagent ask rules to opencode.json: "+strings.Join(miss, ", "))
+	}
+	return actions, warnings
+}
+
+func planAgent(a *Agent, now time.Time) AgentUpgradePlan {
+	return planAgentOn(a, now, installedHarnessesFn())
+}
+
+// planAgentOn plans one agent against the host's installed harnesses: the
+// wiring of every harness in its wire set (added when the workspace is not
+// wired for it yet, refreshed when it is), then the harness-neutral
+// scaffolding. Mirrors what Onboard applies.
+func planAgentOn(a *Agent, now time.Time, installed []InstalledHarness) AgentUpgradePlan {
+	p := AgentUpgradePlan{Name: a.Name, Dir: a.Dir(), Harness: a.HarnessName()}
+	dir := a.Dir()
+	poolRoot := filepath.Dir(dir)
 
 	// Mesh-owned skills (regenerated from the embedded templates).
-	h := HarnessByName(a.HarnessName())
 	skills := []string{"mesh-cognition"}
 	if isSteward(dir) {
 		skills = append(skills, "mesh-steward")
 	}
+
+	// Harness wiring, per harness in the wire set.
+	targets, _ := wireTargetsFrom(poolRoot, a.HarnessName(), 0, installed)
+	wired := map[string]bool{}
+	for _, id := range WiredHarnesses(dir) {
+		wired[id] = true
+	}
+	linking := map[string]bool{} // skills some harness links (which renders the pool copy)
+	for _, t := range targets {
+		var acts, warns []string
+		if plan := harnessUpgradePlanners[t.ID]; plan != nil {
+			acts, warns = plan(dir, t.Harness.Variant())
+		}
+		for _, s := range skills {
+			if !skillLinked(poolRoot, dir, s, t.Harness) {
+				linking[s] = true
+				acts = append(acts, "link skill "+s+" to the pool's copy ("+PoolDirName(poolRoot)+"/"+PoolSkillsDirName+"/"+s+")")
+			}
+		}
+		tag := ""
+		if len(targets) > 1 {
+			tag = "[" + harnessIDLabel(t.ID) + "] "
+		}
+		if !wired[t.ID] {
+			p.AddHarnesses = append(p.AddHarnesses, t.ID)
+			p.Actions = append(p.Actions, "wire for "+harnessIDLabel(t.ID)+" (installed on this host; not wired yet)")
+		} else if len(acts) > 0 {
+			p.RefreshHarnesses = append(p.RefreshHarnesses, t.ID)
+		}
+		for _, x := range acts {
+			p.Actions = append(p.Actions, tag+x)
+		}
+		for _, x := range warns {
+			p.Warnings = append(p.Warnings, tag+x)
+		}
+	}
+	// In-session peer subagents are derived from the roster; a roster
+	// change or a template change makes them stale.
+	p.Actions = append(p.Actions, PlanPeerAgents(poolRoot, dir).Actions()...)
+
+	// The pool's rendered copy of each mesh skill, shared by every harness.
 	for _, s := range skills {
-		if !skillLinked(filepath.Dir(dir), dir, s, h) {
-			p.Actions = append(p.Actions, "link skill "+s+" to the pool's copy ("+PoolDirName(filepath.Dir(dir))+"/"+PoolSkillsDirName+"/"+s+")")
+		want, err := renderedSkill(poolRoot, s)
+		if err != nil || linking[s] {
 			continue
 		}
-		want, err := renderedSkill(filepath.Dir(dir), s)
-		if err != nil {
-			continue
-		}
-		if have, err := os.ReadFile(filepath.Join(PoolSkillPath(filepath.Dir(dir), s), "SKILL.md")); err != nil || string(have) != want {
+		if have, err := os.ReadFile(filepath.Join(PoolSkillPath(poolRoot, s), "SKILL.md")); err != nil || string(have) != want {
 			p.Actions = append(p.Actions, "refresh skill "+s)
 		}
 	}
@@ -334,9 +417,13 @@ func UpgradeAgents(poolRoot, version string) ([]AgentUpgradePlan, error) {
 		if err != nil {
 			return out, fmt.Errorf("%s: %w", a.Name, err)
 		}
+		skipped := map[string]bool{}
+		for _, n := range res.Skipped {
+			skipped[n] = true // reported once for the pool by the plan
+		}
 		var did []string
 		for _, n := range res.Notes {
-			if n != "agent.yaml present — left unchanged" {
+			if n != "agent.yaml present — left unchanged" && !skipped[n] {
 				did = append(did, n)
 			}
 		}

@@ -69,6 +69,54 @@ func TestHarnessParity_EveryCommandClassified(t *testing.T) {
 	}
 }
 
+// TestHarnessParity_EveryCellFilled: registering a harness adds a column, so
+// it cannot ship without saying what works on it; a cell for a column that is
+// no longer registered is stale.
+func TestHarnessParity_EveryCellFilled(t *testing.T) {
+	cols := mesh.HarnessColumns()
+	known := map[string]bool{}
+	for _, c := range cols {
+		known[c.Key()] = true
+	}
+	for _, r := range mesh.HarnessParity {
+		for _, c := range cols {
+			if strings.TrimSpace(r.Cells[c.Key()]) == "" {
+				t.Errorf("parity row %q has no cell for %s (%q) in internal/mesh/parity.go", r.Feature, c.Label, c.Key())
+			}
+		}
+		for k := range r.Cells {
+			if !known[k] {
+				t.Errorf("parity row %q has a cell for %q, which is not a registered harness column", r.Feature, k)
+			}
+		}
+	}
+}
+
+// TestHarnessParity_CapsAgree: a row that reports a capability agrees with
+// each column's HarnessCaps — ✅ needs the cap, ✗ must lack it.
+func TestHarnessParity_CapsAgree(t *testing.T) {
+	for _, r := range mesh.HarnessParity {
+		if r.Cap == nil {
+			continue
+		}
+		for _, c := range mesh.HarnessColumns() {
+			h, err := mesh.ResolveHarness(c.ID, c.Variant)
+			if err != nil {
+				t.Fatal(err)
+			}
+			has, cell := r.Cap(h.Caps()), r.Cells[c.Key()]
+			switch {
+			case strings.HasPrefix(cell, "✅") && !has:
+				t.Errorf("parity row %q says ✅ for %s, but its caps lack the capability", r.Feature, c.Label)
+			case strings.HasPrefix(cell, "✗") && has:
+				t.Errorf("parity row %q says ✗ for %s, but its caps have the capability", r.Feature, c.Label)
+			case !strings.HasPrefix(cell, "✅") && !strings.HasPrefix(cell, "✗"):
+				t.Errorf("parity row %q reports a capability, so its %s cell must start with ✅ or ✗: %q", r.Feature, c.Label, cell)
+			}
+		}
+	}
+}
+
 func TestHarnessParity_READMEUpToDate(t *testing.T) {
 	b, err := os.ReadFile("../../README.md")
 	if err != nil {

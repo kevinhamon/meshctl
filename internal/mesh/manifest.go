@@ -42,12 +42,19 @@ type Agent struct {
 	Mutates      []string `yaml:"mutates"`
 	Badge        Badge    `yaml:"badge"`
 	Model        string   `yaml:"model,omitempty"`
-	Repo         string   `yaml:"repo,omitempty"`
+	// Models overrides Model per harness id (`models: { opencode: provider/x }`):
+	// a model name one harness resolves may mean nothing to another. Read the
+	// effective model through ModelFor.
+	Models map[string]string `yaml:"models,omitempty"`
+	Repo   string            `yaml:"repo,omitempty"`
 	// Workdirs are local repo paths (~ allowed) this agent may write when it
 	// does delegated work in a hub session, besides its workspace.
 	Workdirs []string `yaml:"workdirs,omitempty"`
-	// Harness is the coding-agent harness this workspace runs under (claude |
-	// opencode). Determines how hooks/skills are wired. Empty ⇒ claude.
+	// Harness is the agent's preferred harness (a registered harness id): the
+	// one a headless run uses when the caller's own harness is not wired here,
+	// and the fallback when nothing says which harness runs the session. Which
+	// harness runs a session is decided at runtime (RuntimeHarness).
+	// Empty ⇒ DefaultHarness.
 	Harness string `yaml:"harness,omitempty"`
 	// Tools are agent-specific tool references, merged over the pool's.
 	Tools []ToolRef `yaml:"tools,omitempty"`
@@ -63,12 +70,83 @@ type Agent struct {
 	dir string `yaml:"-"`
 }
 
-// HarnessName returns the agent's harness, defaulting to "claude".
+// HarnessName returns the agent's preferred harness, defaulting to
+// DefaultHarness. It is a preference, not what runs the session now: ask
+// RuntimeHarness for that.
 func (a *Agent) HarnessName() string {
 	if a.Harness == "" {
-		return HarnessClaude
+		return DefaultHarness
 	}
 	return a.Harness
+}
+
+// ModelFor is the model the agent runs under harness: its `models:` entry for
+// that harness, else `model:`. "" when neither is set.
+func (a *Agent) ModelFor(harness string) string {
+	if a == nil {
+		return ""
+	}
+	if m := strings.TrimSpace(a.Models[normHarnessID(harness)]); m != "" {
+		return m
+	}
+	return strings.TrimSpace(a.Model)
+}
+
+// RuntimeHarness is the harness running a's session now, in order: the
+// explicit flag (bridges always pass --harness), the running-harness env
+// marker, a's preferred harness, DefaultHarness. An id that is not registered
+// falls through to the next source. a may be nil (no agent resolved).
+func RuntimeHarness(a *Agent, flag string) Harness {
+	return HarnessByName(runtimeHarnessID(a, flag, RunningHarness()))
+}
+
+// runtimeHarnessID is RuntimeHarness's choice of id, with the env marker
+// passed in so the order is testable.
+func runtimeHarnessID(a *Agent, flag, running string) string {
+	cands := []string{flag, running}
+	if a != nil {
+		cands = append(cands, a.HarnessName())
+	}
+	for _, id := range cands {
+		if s, ok := LookupHarness(id); ok {
+			return s.ID
+		}
+	}
+	return DefaultHarness
+}
+
+// harnessLabel is h's display label: its variant's label when it has one.
+func harnessLabel(h Harness) string {
+	s, ok := LookupHarness(h.Name())
+	if !ok {
+		return h.Name()
+	}
+	for _, v := range s.Variants {
+		if v.Num == h.Variant() {
+			return v.Label
+		}
+	}
+	return s.Label
+}
+
+// harnessLabelsWith lists the registered harness variants whose caps satisfy
+// ok, by label ("Claude Code", "opencode V2 (2.x)"), for messages that tell
+// the human which harness can do what a refused call needed.
+func harnessLabelsWith(ok func(HarnessCaps) bool) string {
+	var out []string
+	for _, c := range HarnessColumns() {
+		s, found := LookupHarness(c.ID)
+		if !found {
+			continue
+		}
+		if ok(s.New(c.Variant).Caps()) {
+			out = append(out, c.Label)
+		}
+	}
+	if len(out) == 0 {
+		return "none registered"
+	}
+	return strings.Join(out, ", ")
 }
 
 // Dir returns the workspace directory the manifest was loaded from.

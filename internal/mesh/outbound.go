@@ -99,7 +99,7 @@ func (m OutboundMatchers) Empty() bool { return len(m.surfaces) == 0 }
 // surface at all: anything but a file-edit or patch tool. It is the set a
 // misconfigured gate denies.
 func OutboundCandidate(toolName string) bool {
-	return !fileEditTools[toolName] && !patchTools[toolName]
+	return !isFileEditTool(toolName) && !isPatchTool(toolName)
 }
 
 // Match returns every surface the call reaches, in surface-name order. err is
@@ -110,7 +110,7 @@ func (m OutboundMatchers) Match(p HookPayload) ([]OutboundMatch, error) {
 		return nil, nil
 	}
 	var cmds [][]string
-	if shellTools[p.ToolName] && m.hasCommands() {
+	if isShellTool(p.ToolName) && m.hasCommands() {
 		var in struct {
 			Command string `json:"command"`
 		}
@@ -173,13 +173,6 @@ func hasTag(tags []string, t string) bool {
 		}
 	}
 	return false
-}
-
-// harnessHasAskForm reports whether a harness can put an outbound gate ask to
-// the human. Only Claude Code's PreToolUse envelope can; opencode's own ask
-// covers only the promotion commands, so an outbound ask is a deny.
-func harnessHasAskForm(name string) bool {
-	return name == "" || name == HarnessClaude
 }
 
 // outboundAgent resolves the peer making the call: the --agent flag, else the
@@ -281,13 +274,12 @@ func resolveOutbound(agentsDir string, p HookPayload) (*Agent, OutboundMatch, Ga
 	if cause := noHumanCause(p); cause != "" {
 		return nil, OutboundMatch{}, outboundGrantDecision(agentsDir, a, p, *mt, cause)
 	}
-	harness := p.Harness
-	if harness == "" {
-		harness = a.HarnessName()
-	}
-	if !harnessHasAskForm(harness) {
+	// The ask is put by the harness running the call: without the GateAsk
+	// cap there is no confirmation path, so the ask is a deny.
+	if h := RuntimeHarness(a, p.Harness); !h.Caps().GateAsk {
 		return nil, OutboundMatch{}, outboundDeny("mesh: `" + p.ToolName + "` writes the outbound surface `" + mt.Surface + "`, which is gate-asked, " +
-			"and " + harness + " has no ask form — no confirmation path; run from a gated session (Claude Code in `" + a.Name + "`'s workspace).")
+			"and " + harnessLabel(h) + " has no ask form — no confirmation path; run from a gated session in `" + a.Name + "`'s workspace under a harness " +
+			"that can ask (" + harnessLabelsWith(func(c HarnessCaps) bool { return c.GateAsk }) + ").")
 	}
 	return a, *mt, GateDecision{}
 }

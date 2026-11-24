@@ -275,9 +275,10 @@ python, no loose scripts, no machine-absolute paths):
 
 ### Feature parity
 
-What works where. The table is generated from `internal/mesh/parity.go`; a test
-fails when a command is not classified there or when this block is out of date, and the
-release workflow runs it before building.
+What works where. The table is generated from `internal/mesh/parity.go`, one column per
+registered harness release line; a test fails when a command is not classified there, when
+a cell is empty, when a ✅ or ✗ contradicts the harness's declared capabilities, or when
+this block is out of date, and the release workflow runs it before building.
 
 <!-- parity:begin (generated from internal/mesh/parity.go; do not edit by hand) -->
 | Feature | Claude Code | opencode V2 (2.x) | opencode V1 (1.x) |
@@ -299,8 +300,12 @@ release workflow runs it before building.
 | Console: live pool view, open sessions (`meshctl console`) | ✅ with scheduled jobs | ✅ no scheduled jobs | ✅ no scheduled jobs |
 <!-- parity:end -->
 
-`meshctl agent new --harness …` picks it; `onboard` autodetects; it's recorded in
-`agent.yaml`. Adding a harness = one adapter (`internal/mesh/harness.go`).
+Every agent is wired for every supported harness installed on the machine (a pool can
+narrow that with `harnesses:` in its config), and the harness is chosen when the session
+starts. `harness:` in `agent.yaml` is the preferred one, used for headless runs;
+`meshctl agent new --harness …` sets it and `onboard` autodetects it. `meshctl doctor
+--all-pools` shows which harnesses each agent in each pool is wired for. Adding a harness:
+see [`docs/adding-a-harness.md`](docs/adding-a-harness.md).
 
 **Safety defaults.** The PreToolUse gate is fail-closed: a tool call it cannot read is
 denied, and shell commands that write a mesh-owned path (`> intake/x.md`, `sed -i`,
@@ -507,7 +512,7 @@ A from-zero procedure an agent (or human) can follow — no prior mesh required:
 | `internal/console/` | `meshctl console`: the localhost server and its single-page UI (`ui/index.html`, design notes in `ui/DESIGN.md`). |
 | `internal/selfupdate/` | `meshctl update` and the once-a-day release check. |
 | `internal/mesh/templates/` | Embedded (`go:embed`) source, edited in place: agent scaffold, skills (`mesh-cognition`, `mesh-steward`), steward CLAUDE.md, and the doctrine (`templates/doctrine/{agent-comms,distiller}.md`) the binary emits into each pool. |
-| `docs/` | Human docs: `DESIGN.md` (why it's built this way), `build-spec.md` (what to build), `knowledge-and-memory.md` (the cognition design brief), `grants.md` (letting headless runs act). |
+| `docs/` | Human docs: `DESIGN.md` (why it's built this way), `build-spec.md` (what to build), `knowledge-and-memory.md` (the cognition design brief), `grants.md` (letting headless runs act), `adding-a-harness.md` (supporting another coding-agent harness). |
 | `Taskfile.yaml` | `task install` / `build`. |
 
 ## Conventions

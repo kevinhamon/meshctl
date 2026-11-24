@@ -154,8 +154,10 @@ func grantFindings(poolRoot string, cfg PoolConfig, agents []*Agent) []DoctorFin
 				continue
 			}
 			allow := cfg.Settings.Outbound[m].Allow
-			if (a.HarnessName() == HarnessOpencode && len(allow.Opencode) == 0) || (a.HarnessName() != HarnessOpencode && len(allow.Claude) == 0) {
-				out = append(out, DoctorFinding{Agent: a.Name, Level: "warn", Message: fmt.Sprintf("holds `%s` but outbound surface %q has no `allow: { %s: … }` in %s — a peer dispatched by `ask` gets no tools for it", OutboundGrant(m), m, a.HarnessName(), poolRel(poolRoot, PoolConfigFile))})
+			for _, h := range headlessCandidates(a) {
+				if !outboundAllowHas(allow, h) {
+					out = append(out, DoctorFinding{Agent: a.Name, Level: "warn", Message: fmt.Sprintf("holds `%s` but outbound surface %q has no `allow: { %s: … }` in %s — a peer dispatched by `ask` under %s gets no tools for it", OutboundGrant(m), m, h, poolRel(poolRoot, PoolConfigFile), h)})
+				}
 			}
 		}
 		if a.Dispatchable == nil || !*a.Dispatchable || len(a.Mutates) == 0 {
@@ -166,6 +168,33 @@ func grantFindings(poolRoot string, cfg PoolConfig, agents []*Agent) []DoctorFin
 		}
 	}
 	return out
+}
+
+// headlessCandidates are the harnesses a headless `ask` of a may run under
+// (headlessHarness): its preferred harness and every harness its workspace
+// is wired for, in registration order with the preferred first.
+func headlessCandidates(a *Agent) []string {
+	out := []string{normHarnessID(a.HarnessName())}
+	for _, id := range WiredHarnesses(a.Dir()) {
+		if !hasString(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// outboundAllowFields reads, per harness id, whether a surface's `allow:`
+// carries entries for that harness's headless child.
+var outboundAllowFields = map[string]func(OutboundAllow) bool{
+	HarnessClaude:   func(a OutboundAllow) bool { return len(a.Claude) > 0 },
+	HarnessOpencode: func(a OutboundAllow) bool { return len(a.Opencode) > 0 },
+}
+
+// outboundAllowHas reports whether allow has entries for harness; a harness
+// with no `allow:` key has none.
+func outboundAllowHas(allow OutboundAllow, harness string) bool {
+	f, ok := outboundAllowFields[normHarnessID(harness)]
+	return ok && f(allow)
 }
 
 // GrantDecision is the answer to "may this action go through with no human?".

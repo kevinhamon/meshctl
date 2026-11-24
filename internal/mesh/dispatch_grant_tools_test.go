@@ -152,3 +152,33 @@ func TestGrantFindings_WarnsGrantedSurfaceWithoutAllow(t *testing.T) {
 		t.Fatalf("no allow warning:\n%s", all)
 	}
 }
+
+// A headless `ask` may run under any harness the peer is wired for, so the
+// allow check covers each of them, not only the preferred one.
+func TestGrantFindings_AllowCheckedPerWiredHarness(t *testing.T) {
+	t.Setenv(opencodeMajorEnv, "2")
+	root := migratedRoot(t)
+	pm := grantedPeer(t, root, "pm", "tracker")
+	claudeOnly := strings.Replace(grantsWithAllow, "      opencode: { bash: { \"trk create*\": \"allow\" } }\n", "", 1)
+	writeGrantsConfig(t, root, claudeOnly)
+	msgs := func() string {
+		var out []string
+		for _, f := range grantFindings(root, LoadPoolConfig(root), []*Agent{pm}) {
+			out = append(out, f.Message)
+		}
+		return strings.Join(out, "\n")
+	}
+	if all := msgs(); strings.Contains(all, "has no `allow:") {
+		t.Fatalf("Claude Code only, claude allow present: no warning, got\n%s", all)
+	}
+	if _, err := (opencodeHarness{major: 2}).WireAgent(pm.Dir()); err != nil {
+		t.Fatal(err)
+	}
+	if all := msgs(); !strings.Contains(all, "has no `allow: { opencode: … }`") || strings.Contains(all, "allow: { claude") {
+		t.Fatalf("wired for opencode too: warn for opencode only, got\n%s", all)
+	}
+	writeGrantsConfig(t, root, grantsWithAllow)
+	if all := msgs(); strings.Contains(all, "has no `allow:") {
+		t.Fatalf("both allows present: no warning, got\n%s", all)
+	}
+}

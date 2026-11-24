@@ -109,7 +109,7 @@ func deniedPeerWorkAction(agentsDir string, p HookPayload) string {
 		// Cannot establish the scope: hold the strict consult contract.
 		return deniedPeerAction(p)
 	}
-	if delegationTools[p.ToolName] {
+	if isDelegationTool(p.ToolName) {
 		return peerWorkDenyDispatch
 	}
 	roots := peerWorkRoots(agentsDir, peer)
@@ -118,7 +118,7 @@ func deniedPeerWorkAction(agentsDir string, p HookPayload) string {
 			return peerWorkWriteReason(peer, path)
 		}
 	}
-	if !shellTools[p.ToolName] || len(p.ToolInput) == 0 {
+	if !isShellTool(p.ToolName) || len(p.ToolInput) == 0 {
 		return ""
 	}
 	var in struct {

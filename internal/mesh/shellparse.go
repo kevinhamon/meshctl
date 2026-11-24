@@ -444,7 +444,7 @@ func shellWordsMatch(words, want []string) bool {
 // the only flag words that do not take the next word as their value. Kept in
 // step with cmd/meshctl by a test there (IsMeshctlBoolFlag).
 var meshctlBoolFlags = map[string]bool{
-	"abort": true, "all": true, "answered": true, "bare": true, "check": true,
+	"abort": true, "all": true, "all-pools": true, "answered": true, "bare": true, "check": true,
 	"claim": true, "closed": true, "current": true, "detach": true,
 	"dispatchable": true, "doctrine-only": true, "dry-run": true, "fix": true,
 	"force": true, "headless": true, "help": true, "h": true, "in-session": true,
@@ -530,7 +530,7 @@ func readMeshctlCall(words []string) meshctlCall {
 // shellCommandInput is the command of a Bash-like tool call ("" when the
 // payload is not one or carries none).
 func shellCommandInput(p HookPayload) string {
-	if !shellTools[p.ToolName] || len(p.ToolInput) == 0 {
+	if !isShellTool(p.ToolName) || len(p.ToolInput) == 0 {
 		return ""
 	}
 	var in struct {

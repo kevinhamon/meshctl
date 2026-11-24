@@ -206,13 +206,14 @@ func TestOnboard_HandMovedStandingOrdersBecomeTheBlock(t *testing.T) {
 	}
 }
 
-// opencode loads neither CLAUDE file natively: the V2 plugin injects
+// opencode loads neither CLAUDE file natively: the V2 plugin asks meshctl to inject
 // CLAUDE.local.md after CLAUDE.md, and V1 lists both under instructions.
 func TestOpencode_LoadsClaudeLocal(t *testing.T) {
-	if !strings.Contains(opencodePluginV2JS, "CLAUDE.local.md") {
+	dest := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dest, ClaudeLocalFile), []byte("ORDERS"), 0o644)
+	if !strings.Contains(opencodePluginV2JS, "doctrine: true") || !strings.Contains(workspaceDoctrine(dest), "ORDERS") {
 		t.Fatal("V2 plugin does not inject CLAUDE.local.md")
 	}
-	dest := t.TempDir()
 	if _, err := ensureOpencodeConfig(dest, 1); err != nil {
 		t.Fatal(err)
 	}

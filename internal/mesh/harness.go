@@ -20,7 +20,8 @@ type Harness interface {
 	// human-readable notes for what it added (empty ⇒ nothing).
 	WireAgent(dest string) ([]string, error)
 	// RenderSkill writes one shared skill into the harness's native location.
-	// Add-only: never clobbers an existing skill file.
+	// A same-content copy is a no-op; a differing mesh-owned copy is replaced;
+	// files beside the skill are never touched.
 	RenderSkill(name, body, dest string) (bool, error)
 	// SkillDir is where the harness discovers skill name in workspace dest.
 	SkillDir(dest, name string) string
@@ -35,6 +36,12 @@ type Harness interface {
 	// EmitGate writes a pre-tool-use gate decision in the form this harness's
 	// hook bridge consumes. Allow ⇒ nothing written.
 	EmitGate(w io.Writer, d GateDecision) error
+	// Variant is the release line this adapter renders for (0 ⇒ the harness
+	// has no variants).
+	Variant() int
+	// Caps is what this harness variant can do. Core code branches on caps,
+	// never on Name().
+	Caps() HarnessCaps
 }
 
 const (
@@ -42,39 +49,39 @@ const (
 	HarnessOpencode = "opencode"
 )
 
-// HarnessByName returns the adapter for a harness id (default: claude). An
-// opencode adapter resolves its major version lazily from the installed binary.
+// HarnessByName returns the adapter for a harness id. Empty or unknown ⇒
+// DefaultHarness; input boundaries validate with ResolveHarness first.
+// A variant harness resolves its variant lazily from the installed binary.
 func HarnessByName(name string) Harness { return HarnessByNameVersion(name, 0) }
 
-// HarnessByNameVersion is HarnessByName with the opencode major pinned (1 or 2);
-// 0 ⇒ detect from the installed binary. Ignored for claude.
-func HarnessByNameVersion(name string, major int) Harness {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case HarnessOpencode:
-		return opencodeHarness{major: major}
-	default:
-		return claudeHarness{}
+// HarnessByNameVersion is HarnessByName with the variant pinned (opencode: the
+// major, 1 or 2); 0 ⇒ detect from the installed binary.
+func HarnessByNameVersion(name string, variant int) Harness {
+	if h, err := ResolveHarness(name, variant); err == nil {
+		return h
 	}
+	h, _ := ResolveHarness(DefaultHarness, 0)
+	return h
 }
 
 // HarnessFor returns the adapter an agent runs under.
 func HarnessFor(a *Agent) Harness { return HarnessByName(a.HarnessName()) }
-
-// DetectHarness infers the harness from a pre-existing workspace: an opencode.json
-// or .opencode/ (V1 plugin/ or V2 plugins/ alike) ⇒ opencode; else claude (the
-// default). Used by onboard when no --harness is given.
-func DetectHarness(dest string) string {
-	if fileExists(filepath.Join(dest, "opencode.json")) || dirExists(filepath.Join(dest, ".opencode")) {
-		return HarnessOpencode
-	}
-	return HarnessClaude
-}
 
 // --- Claude Code ---
 
 type claudeHarness struct{}
 
 func (claudeHarness) Name() string { return HarnessClaude }
+
+func (claudeHarness) Variant() int { return 0 }
+
+// Caps: Claude Code has every surface the mesh uses.
+func (claudeHarness) Caps() HarnessCaps {
+	return HarnessCaps{
+		PreToolGate: true, GateAsk: true, PromotionAsk: true, PostToolHook: true,
+		SessionEndEvent: true, InSessionPeers: true, InSessionDistill: true, StatusLine: true,
+	}
+}
 
 // WireAgent = the per-agent settings.json wiring (hooks + preapproval).
 func (claudeHarness) WireAgent(dest string) ([]string, error) {
@@ -192,6 +199,19 @@ type opencodeHarness struct{ major int }
 
 func (opencodeHarness) Name() string { return HarnessOpencode }
 
+func (h opencodeHarness) Variant() int { return h.Major() }
+
+// Caps: V2 has the pre-tool gate (plugin tool.execute.before), opencode's own
+// permission ask for the promotion commands, subagents and a TUI status panel;
+// it has no arbitrary gate ask, no after-call hook and no session-end event
+// (an idle window closes sessions). V1 has none of the gate surfaces.
+func (h opencodeHarness) Caps() HarnessCaps {
+	if h.Major() >= 2 {
+		return HarnessCaps{PreToolGate: true, PromotionAsk: true, InSessionPeers: true, StatusLine: true}
+	}
+	return HarnessCaps{}
+}
+
 // Major is the opencode major this adapter renders for: the pinned value, else
 // the installed binary's, else 2 (the current line) when opencode is absent.
 func (h opencodeHarness) Major() int {
@@ -248,19 +268,6 @@ func (opencodeHarness) EmitGate(w io.Writer, d GateDecision) error {
 	}
 	_, err := io.WriteString(w, d.Reason+"\n")
 	return err
-}
-
-// RunningHarness names the harness whose tool call runs this process, from the
-// marker each exports to tool subprocesses: CLAUDECODE (Claude Code), OPENCODE
-// (opencode). "" for a human's own terminal.
-func RunningHarness() string {
-	switch {
-	case os.Getenv("CLAUDECODE") != "":
-		return HarnessClaude
-	case os.Getenv("OPENCODE") != "":
-		return HarnessOpencode
-	}
-	return ""
 }
 
 // WireAgent for opencode:
@@ -348,69 +355,58 @@ func ensureOpencodeConfig(dest string, major int) ([]string, error) {
 	return notes, nil
 }
 
-// opencodePluginJS is the V1 plugin. It bridges opencode's real plugin hooks (opencode ≥1.18) to the
-// harness-neutral `meshctl hook` subcommands (on $PATH), which emit raw text under
-// --harness opencode. The system transform injects the session-start block (run
-// once per session, pushed on every call) + intuition (each call); the session.idle event captures a
-// session-record (overwrite-by-id, so repeated idles converge on one record).
+// opencodePluginJS is the V1 plugin: a thin bridge from opencode's real plugin
+// hooks (opencode ≥1.18) to `meshctl --harness opencode hook event`
+// (hook_event.go). It translates each hook into a normalized event and applies
+// the reply; whether a session has started, its cached session-start block,
+// its latest prompt and the idle window are all kept by meshctl. The system
+// transform injects the context reply (the session-start block on every call,
+// then intuition); session.idle is a finished turn; a wake-up timer per session
+// sends a tick after the idle window so meshctl can close it.
 const opencodePluginMarker = "meshctl mesh integration for opencode"
 const opencodePluginJS = `// meshctl mesh integration for opencode (generated by ` + "`meshctl agent new/onboard`" + `).
-// Injection goes through experimental.chat.system.transform (output.system is a
-// string[]) — NOT chat.message output.parts, which require id/sessionID/messageID
-// and reject a synthetic text part ("invalid user part before save"). chat.message
-// is used read-only to capture the latest prompt for intuition.
+// A thin bridge: each hook becomes one event for ` + "`meshctl hook event`" + `, which keeps
+// the session state. Injection goes through experimental.chat.system.transform
+// (output.system is a string[]) — NOT chat.message output.parts, which require
+// id/sessionID/messageID and reject a synthetic text part ("invalid user part before
+// save"). chat.message is read-only: it forwards the prompt.
 export const MeshctlPlugin = async ({ $, directory }) => {
   const cwd = directory || process.cwd()
-  // Open sessions, each with its session-start block: the system prompt is
-  // rebuilt on every call, so the block is pushed every time, not only once.
-  const started = new Map()
-  const idle = new Map()
-  // Idle window after which a quiet session is closed out (session-end):
-  // AGENT_MESH_OPENCODE_IDLE_SEC, default 10 minutes. A finished turn is only
-  // a heartbeat — ending the session per turn produced one-turn records.
-  const idleMs = (Number(process.env.AGENT_MESH_OPENCODE_IDLE_SEC) || 600) * 1000
-  let lastPrompt = ""
-  let lastSession = ""
-  const run = async (sub, sessionID, promptText) => {
-    const payload = JSON.stringify({ cwd, session_id: sessionID || "", prompt: promptText || "" })
-    try { return (await $` + "`echo ${payload} | meshctl --harness opencode hook ${sub}`" + `.quiet()).stdout.toString().trim() }
+  const instance = "oc1-" + process.pid + "-" + Date.now().toString(36)
+  const send = async (ev) => {
+    const payload = JSON.stringify({ harness: "opencode", variant: 1, instance, cwd, ...ev })
+    try { return (await $` + "`echo ${payload} | meshctl --harness opencode hook event`" + `.quiet()).stdout.toString().trim() }
     catch { return "" }
   }
-  const endSession = async (sid) => {
-    if (!sid || !started.has(sid)) return
-    started.delete(sid)
-    const t = idle.get(sid); if (t) { clearTimeout(t); idle.delete(sid) }
-    await run("session-end", sid, "")
-  }
-  const armIdle = (sid) => {
-    if (!sid) return
-    const t = idle.get(sid); if (t) clearTimeout(t)
-    const h = setTimeout(() => { void endSession(sid) }, idleMs)
+  // Wake-up timers: after a finished turn, tell meshctl once the idle window
+  // (AGENT_MESH_OPENCODE_IDLE_SEC, default 600s) has passed; meshctl decides
+  // whether the session is still quiet and closes it.
+  const idleMs = (Number(process.env.AGENT_MESH_OPENCODE_IDLE_SEC) || 600) * 1000
+  const wake = new Map()
+  const armWake = (sid) => {
+    const t = wake.get(sid); if (t) clearTimeout(t)
+    const h = setTimeout(() => { wake.delete(sid); void send({ event: "tick", session_id: sid || "" }) }, idleMs + 2000)
     if (h && typeof h.unref === "function") h.unref()
-    idle.set(sid, h)
+    wake.set(sid, h)
   }
   return {
-    // Read-only: capture the latest user prompt + session (never mutate output).
+    // Read-only: forward the latest user prompt (never mutate output).
     "chat.message": async (input, output) => {
-      if (input && input.sessionID) { lastSession = input.sessionID; const t = idle.get(lastSession); if (t) { clearTimeout(t); idle.delete(lastSession) } }
-      try { lastPrompt = (output.parts || []).filter(p => p.type === "text").map(p => p.text).join("\n") } catch {}
+      let prompt = ""
+      try { prompt = (output.parts || []).filter(p => p.type === "text").map(p => p.text).join("\n") } catch {}
+      await send({ event: "prompt", session_id: (input && input.sessionID) || "", prompt })
     },
     // Inject mesh context into the system prompt (safe string push).
     "experimental.chat.system.transform": async (input, output) => {
-      const sid = (input && input.sessionID) || lastSession || ""
-      let ctx = ""
-      if (sid && !started.has(sid)) { started.set(sid, ""); const out = await run("session-start", sid, ""); if (started.has(sid)) started.set(sid, out) }
-      if (sid) ctx += started.get(sid) || ""
-      const intu = await run("user-prompt", sid, lastPrompt)
-      if (intu) ctx += (ctx ? "\n\n" : "") + intu
+      const ctx = await send({ event: "context", session_id: (input && input.sessionID) || "" })
       if (ctx && output && Array.isArray(output.system)) output.system.push(ctx)
     },
     event: async ({ event }) => {
-      const sid = event?.properties?.sessionID || event?.properties?.session?.id || lastSession
-      if (event.type === "session.deleted") { await endSession(sid); return }
+      const sid = event?.properties?.sessionID || event?.properties?.session?.id || ""
+      if (event.type === "session.deleted") { await send({ event: "session.end", session_id: sid }); return }
       if (event.type === "session.idle") {
-        await run("session-beat", sid, "")
-        armIdle(sid)
+        await send({ event: "turn.end", session_id: sid })
+        armWake(sid)
       }
     },
   }

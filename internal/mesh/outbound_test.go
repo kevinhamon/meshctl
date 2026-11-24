@@ -149,6 +149,28 @@ func TestGate_OutboundNoAskForm(t *testing.T) {
 	}
 }
 
+// The ask form is the RUNNING harness's (GateAsk), not the preferred one's.
+func TestGate_OutboundAskFormFollowsRunningHarness(t *testing.T) {
+	t.Setenv(opencodeMajorEnv, "2")
+	dir, pm, _ := outboundPool(t, outboundTestConfig)
+	pm = setHarness(t, dir, pm, HarnessOpencode)
+	writeSummary(t, pm, "sess-1", outboundSummary)
+	p := outboundCall(pm.Dir(), "tracker_createIssue", nil)
+
+	if d := GatePreToolUse(dir, p); !d.Deny || !strings.Contains(d.Reason, "opencode V2 (2.x) has no ask form") ||
+		!strings.Contains(d.Reason, "Claude Code") {
+		t.Fatalf("opencode preferred, nothing running: the preference has no ask form; got %+v", d)
+	}
+	t.Setenv("CLAUDECODE", "1")
+	if d := GatePreToolUse(dir, p); !d.Ask {
+		t.Fatalf("Claude Code running an opencode-preferred agent can ask: got %+v", d)
+	}
+	p.Harness = HarnessOpencode // a bridge's flag beats the env marker
+	if d := GatePreToolUse(dir, p); !d.Deny {
+		t.Fatalf("--harness opencode has no ask form: got %+v", d)
+	}
+}
+
 func TestGate_OutboundFailsClosed(t *testing.T) {
 	for name, config := range map[string]string{
 		"unparseable config": "outbound: [this is: not a map\n",

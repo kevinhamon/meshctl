@@ -47,15 +47,19 @@ type GateDecision struct {
 	Rules []string
 }
 
-// fileEditTools name the tools whose input carries a target path the gate reads:
-// Claude Code's, and opencode's (lowercase; V2 write/edit take a `path`).
-var fileEditTools = map[string]bool{
-	"Write": true, "Edit": true, "MultiEdit": true, "NotebookEdit": true,
-	"write": true, "edit": true, "multiedit": true,
+// The gate classifies a tool call by its neutral kind (harness_registry.go),
+// never by a harness's raw tool name, so a registered harness is gated
+// without an edit here.
+
+// isFileEditTool: the tool's input carries a target path the gate reads
+// (gateFilePath) — a write or an in-place edit.
+func isFileEditTool(name string) bool {
+	k := ToolKindOf(name)
+	return k == ToolWrite || k == ToolEdit
 }
 
-// patchTools carry their target paths inside patch text (opencode apply_patch).
-var patchTools = map[string]bool{"apply_patch": true, "patch": true}
+// isPatchTool: the tool carries its target paths inside patch text.
+func isPatchTool(name string) bool { return ToolKindOf(name) == ToolPatch }
 
 // GatePreToolUse evaluates a PreToolUse payload against mesh doctrine and
 // appends the attributed decision to the deciding agent's log (gate_log.go).
@@ -76,7 +80,7 @@ func gateEvaluate(agentsDir string, p HookPayload) GateDecision {
 	// 1. A delegation (Agent/Task call) from the caller's session. Delegating
 	//    work to a state-mutating peer is the human's call, every
 	//    time: ask. Nothing else about a delegation is the gate's business.
-	if delegationTools[p.ToolName] {
+	if isDelegationTool(p.ToolName) {
 		if p.InSession {
 			return GateDecision{Deny: true, Check: GateCheckDelegation, Reason: peerWorkDenyDispatch}
 		}
@@ -310,7 +314,7 @@ func poolPathTargets(agentsDir string, p HookPayload) poolTargets {
 			t.writes = append(t.writes, r)
 		}
 	}
-	if !shellTools[p.ToolName] || len(p.ToolInput) == 0 {
+	if !isShellTool(p.ToolName) || len(p.ToolInput) == 0 {
 		return t
 	}
 	var in struct {
@@ -490,9 +494,11 @@ func gatePoolPathAsk(agentsDir string, p HookPayload) GateDecision {
 // reTopLevelTools finds a top-level `tools:` key in YAML text.
 var reTopLevelTools = regexp.MustCompile(`(?m)^tools\s*:`)
 
-// delegationTools launch a subagent: Claude Code's Agent (formerly Task) and
-// opencode V2's subagent.
-var delegationTools = map[string]bool{"Agent": true, "Task": true, "subagent": true}
+// isDelegationTool: the tool launches a subagent (ToolSubagent in any
+// registered harness's tool map — Claude Code's Agent/Task, opencode's task
+// and subagent), so a new harness's subagent tool cannot skip the delegation
+// check under an unfamiliar name.
+func isDelegationTool(name string) bool { return ToolKindOf(name) == ToolSubagent }
 
 // gateDelegation asks the human before work is delegated in-session to a
 // state-mutating peer; any other delegation is allowed. On opencode V2 the
@@ -517,8 +523,8 @@ func gateDelegation(agentsDir string, p HookPayload) GateDecision {
 		strings.Join(peer.Mutates, ", ") + ") — approve this delegated work before it runs in this session."}, st)
 }
 
-// shellTools name the tools whose input is a shell command line.
-var shellTools = map[string]bool{"Bash": true, "bash": true, "shell": true}
+// isShellTool: the tool's input is a shell command line.
+func isShellTool(name string) bool { return ToolKindOf(name) == ToolShell }
 
 // peerDeniedMeshctl are the meshctl subcommands a consulted peer may never
 // run: dispatch (ask/send), its KB or handoff, pool state. Matched by
@@ -560,10 +566,10 @@ const peerDenyReason = "mesh: you are a peer consulted in-session — answer onl
 // outside its write-back contract: any file-edit or patch tool by name, and a
 // shell command that dispatches, mutates git, writes files or the KB.
 func deniedPeerAction(p HookPayload) string {
-	if fileEditTools[p.ToolName] || patchTools[p.ToolName] {
+	if isFileEditTool(p.ToolName) || isPatchTool(p.ToolName) {
 		return peerDenyReason
 	}
-	if !shellTools[p.ToolName] || len(p.ToolInput) == 0 {
+	if !isShellTool(p.ToolName) || len(p.ToolInput) == 0 {
 		return ""
 	}
 	var in struct {
@@ -594,7 +600,7 @@ var reShellIntakePath = regexp.MustCompile(`(?:^|[\s"'=])(?:[^\s"']*/)?` + Intak
 // The sanctioned meshctl verbs never trip this: they take no redirection and
 // the path they write is not on the command line.
 func deniedShellWrite(agentsDir string, p HookPayload) string {
-	if !shellTools[p.ToolName] || len(p.ToolInput) == 0 {
+	if !isShellTool(p.ToolName) || len(p.ToolInput) == 0 {
 		return ""
 	}
 	var in struct {
@@ -680,11 +686,11 @@ func underDir(path, dir string) bool {
 func gateEditPaths(p HookPayload) []string {
 	var paths []string
 	switch {
-	case fileEditTools[p.ToolName]:
+	case isFileEditTool(p.ToolName):
 		if path := gateFilePath(p.ToolInput); path != "" {
 			paths = []string{path}
 		}
-	case patchTools[p.ToolName]:
+	case isPatchTool(p.ToolName):
 		paths = patchFilePaths(p.ToolInput)
 	}
 	for i, path := range paths {
@@ -695,23 +701,36 @@ func gateEditPaths(p HookPayload) []string {
 	return paths
 }
 
-// gateFilePath pulls the target path out of a tool_input blob: file_path
-// (Claude Write/Edit/MultiEdit), notebook_path (NotebookEdit), filePath (opencode
-// V1) or path (opencode V2), tolerating any or none.
+// gateFilePath pulls the target path out of a tool_input blob: the first
+// non-empty string under a registered path key (ToolPathKeys, in registration
+// order), tolerating any or none. A key matches as encoding/json matches a
+// struct tag: exactly, else case-insensitively.
 func gateFilePath(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
-	var in struct {
-		FilePath     string `json:"file_path"`
-		NotebookPath string `json:"notebook_path"`
-		CamelPath    string `json:"filePath"`
-		Path         string `json:"path"`
+	var in map[string]json.RawMessage
+	if json.Unmarshal(raw, &in) != nil {
+		return ""
 	}
-	_ = json.Unmarshal(raw, &in)
-	for _, v := range []string{in.FilePath, in.NotebookPath, in.CamelPath, in.Path} {
-		if v != "" {
-			return v
+	str := func(v json.RawMessage) string {
+		var s string
+		_ = json.Unmarshal(v, &s)
+		return s
+	}
+	for _, key := range ToolPathKeys() {
+		if v, ok := in[key]; ok {
+			if s := str(v); s != "" {
+				return s
+			}
+			continue
+		}
+		for k, v := range in {
+			if strings.EqualFold(k, key) {
+				if s := str(v); s != "" {
+					return s
+				}
+			}
 		}
 	}
 	return ""

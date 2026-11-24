@@ -9,12 +9,17 @@ import (
 
 // AgentInfo is what a peer's card shows about the peer itself.
 type AgentInfo struct {
-	Name    string `json:"name"`
-	Title   string `json:"title,omitempty"`
-	Role    string `json:"role,omitempty"` // first sentence, trimmed
-	Harness string `json:"harness"`
-	Badge   string `json:"badge,omitempty"`
-	Color   string `json:"color,omitempty"` // CSS rgb() from the manifest badge
+	Name  string `json:"name"`
+	Title string `json:"title,omitempty"`
+	Role  string `json:"role,omitempty"` // first sentence, trimmed
+	// Harness is the peer's preferred harness id; HarnessLabel its display
+	// name; Harnesses every harness its workspace is wired for. Which one
+	// runs a session is decided when it starts.
+	Harness      string   `json:"harness"`
+	HarnessLabel string   `json:"harness_label"`
+	Harnesses    []string `json:"harnesses,omitempty"`
+	Badge        string   `json:"badge,omitempty"`
+	Color        string   `json:"color,omitempty"` // CSS rgb() from the manifest badge
 	// Docs and DocsNewest summarize the agent's documents, so a page knows
 	// when to refetch its list (GET /api/docs).
 	Docs       int    `json:"docs"`
@@ -29,7 +34,11 @@ func Roster(dir string) []AgentInfo {
 		return out
 	}
 	for _, a := range agents {
-		info := AgentInfo{Name: a.Name, Title: a.Title, Role: firstSentence(a.Role, 160), Harness: a.HarnessName(), Badge: a.Badge.Label}
+		info := AgentInfo{Name: a.Name, Title: a.Title, Role: firstSentence(a.Role, 160), Harness: a.HarnessName(),
+			HarnessLabel: a.HarnessName(), Harnesses: mesh.WiredHarnesses(a.Dir()), Badge: a.Badge.Label}
+		if s, ok := mesh.LookupHarness(a.HarnessName()); ok {
+			info.HarnessLabel = s.Label
+		}
 		docs := ListDocs(a)
 		info.Docs = len(docs.Docs) + docs.More
 		if len(docs.Docs) > 0 {

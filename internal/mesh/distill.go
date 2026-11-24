@@ -84,33 +84,61 @@ func DistillPrompt(poolRoot string, a *Agent, sessionID string) string {
 // immediately, reporting whether a run was started.
 //
 // Fail-open throughout: any error means no distillation, never a failed session.
+// The session ran under the harness RuntimeHarness reports with no flag;
+// SpawnDistillUnder takes it explicitly.
 func SpawnDistill(poolRoot string, a *Agent, sessionID string) bool {
-	if a == nil || DistillingNow() {
+	return SpawnDistillUnder(RuntimeHarness(a, ""), poolRoot, a, sessionID)
+}
+
+// SpawnDistillUnder distils a session that ran under h. Nothing to spawn when
+// h distils in-session (InSessionDistill: the boundary nudge runs its
+// distiller) or has no headless distill command.
+func SpawnDistillUnder(h Harness, poolRoot string, a *Agent, sessionID string) bool {
+	if a == nil || DistillingNow() || h.Caps().InSessionDistill {
 		return false
 	}
-	return spawnDistillArgv(a, sessionID, HarnessFor(a).DistillCmd(DistillPrompt(poolRoot, a, sessionID)))
+	return spawnDistillArgv(a, sessionID, h.DistillCmd(DistillPrompt(poolRoot, a, sessionID)))
 }
 
 // SpawnPeerDistill distils a peer's in-session window (a subagent that ran
-// under a caller's Claude Code session) into the PEER's own KB. The
-// in-session subagent has no session end of its own and the caller's session
-// end distils the caller, so without this a correction made to a consulted or
-// delegated peer is never learned by it.
+// under a caller's session) into the PEER's own KB. The in-session subagent
+// has no session end of its own and the caller's session end distils the
+// caller, so without this a correction made to a consulted or delegated peer
+// is never learned by it.
 //
-// The caller is Claude Code, so the run is `claude -p` whatever the peer's own
-// harness — and deliberately not claudeHarness.DistillCmd, which stays nil so
-// a normal Claude session keeps its in-session distiller. The allowlist covers
-// the distiller procedure and nothing more: reads, the recall/consolidate
-// verbs, and writes confined to the peer's candidates and pending decisions.
+// The run is headless in the peer's workspace, under the harness a headless
+// `ask` would use (headlessHarness: the caller's running harness when the
+// peer is wired for it, else the peer's preference). Its argv is
+// peerDistillArgvFor that harness.
 func SpawnPeerDistill(poolRoot string, a *Agent, sessionID string) bool {
 	if a == nil || DistillingNow() {
 		return false
 	}
-	return spawnDistillArgv(a, sessionID, peerDistillArgv(DistillPrompt(poolRoot, a, sessionID)))
+	h := HarnessByName(headlessHarness(a, RunningHarness()))
+	return spawnDistillArgv(a, sessionID, peerDistillArgvFor(h, DistillPrompt(poolRoot, a, sessionID)))
 }
 
-// peerDistillArgv is the headless Claude Code invocation for a peer distill.
-// Path rules are relative to the run's cwd, the peer's workspace.
+// peerDistillArgvs are the headless peer-distill invocations scoped tighter
+// than a harness's own DistillCmd, by harness id.
+var peerDistillArgvs = map[string]func(prompt string) []string{
+	HarnessClaude: peerDistillArgv,
+}
+
+// peerDistillArgvFor is the peer-distill argv under h: its scoped form when
+// one is registered above, else h's DistillCmd (nil ⇒ no run).
+func peerDistillArgvFor(h Harness, prompt string) []string {
+	if f, ok := peerDistillArgvs[h.Name()]; ok {
+		return f(prompt)
+	}
+	return h.DistillCmd(prompt)
+}
+
+// peerDistillArgv is the headless Claude Code invocation for a peer distill —
+// deliberately not claudeHarness.DistillCmd, which stays nil so a normal
+// Claude session keeps its in-session distiller. The allowlist covers the
+// distiller procedure and nothing more: reads, the recall/consolidate verbs,
+// and writes confined to the peer's candidates and pending decisions. Path
+// rules are relative to the run's cwd, the peer's workspace.
 func peerDistillArgv(prompt string) []string {
 	return []string{"claude", "-p", prompt,
 		"--permission-mode", "default",
@@ -147,7 +175,8 @@ func spawnDistillArgv(a *Agent, sessionID string, argv []string) bool {
 
 	cmd := exec.Command(bin, argv[1:]...)
 	cmd.Dir = a.Dir()
-	cmd.Env = append(os.Environ(), distillGuardEnv+"=1", "AGENT_NAME="+a.Name)
+	// The run's harness sets its own running-harness marker (withoutHarnessMarkers).
+	cmd.Env = append(withoutHarnessMarkers(os.Environ()), distillGuardEnv+"=1", "AGENT_NAME="+a.Name)
 	// Capture output to a log rather than discarding it. This runs unattended
 	// and nobody is watching it fail; a distiller that errors on startup and a
 	// distiller that correctly found nothing durable are indistinguishable
@@ -181,10 +210,16 @@ func DistillLogPath(agentDir, sessionID string) string {
 	return filepath.Join(agentDir, ".memory", "distill-"+sid+".log")
 }
 
-// harnessAutoDistills reports whether the harness runs distillation itself at
-// session end, in which case the in-session boundary nudge is redundant and
-// would only duplicate the run. Probed with an empty prompt: the argv shape
-// does not depend on the prompt's contents.
+// harnessAutoDistills reports whether the agent's preferred harness runs
+// distillation itself at session end (harnessAutoDistillsUnder).
 func harnessAutoDistills(a *Agent) bool {
-	return a != nil && len(HarnessFor(a).DistillCmd("")) > 0
+	return a != nil && harnessAutoDistillsUnder(HarnessFor(a))
+}
+
+// harnessAutoDistillsUnder reports whether h distils at session end with a
+// headless run of its own, in which case the in-session boundary nudge is
+// redundant and would only duplicate the run. Probed with an empty prompt:
+// the argv shape does not depend on the prompt's contents.
+func harnessAutoDistillsUnder(h Harness) bool {
+	return !h.Caps().InSessionDistill && len(h.DistillCmd("")) > 0
 }

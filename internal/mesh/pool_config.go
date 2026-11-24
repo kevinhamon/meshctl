@@ -53,6 +53,10 @@ type PoolSettings struct {
 	Tools     []ToolRef                  `yaml:"tools"`
 	Extras    []PoolExtra                `yaml:"extras"` // non-agent folders `pool clone` also clones (pool-clone C4)
 	Grants    GrantSettings              `yaml:"grants"` // per-action grants; empty ⇒ none
+	// Harnesses limits which installed harnesses agents are wired for
+	// (wire_set.go); empty ⇒ every registered harness. An agent's preferred
+	// harness is wired whenever it is installed, listed or not.
+	Harnesses []string `yaml:"harnesses"`
 }
 
 // poolIdentity is the parsed identity file (PoolMarkerPath). `tools` is read
@@ -121,8 +125,9 @@ func mergeToolRefs(lists ...[]ToolRef) []ToolRef {
 
 // poolConfigFindings are doctor's pool-level findings about the two config
 // files: a config file that cannot be parsed (error — the outbound gate fails
-// closed on it), an invalid `knowledge` value (error) and tool
-// references still in the identity file (warn — moved by `pool upgrade`).
+// closed on it), an invalid `knowledge` value (error), an unknown id in the
+// `harnesses` allowlist (error) and tool references still in the identity
+// file (warn — moved by `pool upgrade`).
 func poolConfigFindings(poolRoot string, cfg PoolConfig) []DoctorFinding {
 	if !IsPool(poolRoot) {
 		return nil
@@ -134,6 +139,7 @@ func poolConfigFindings(poolRoot string, cfg PoolConfig) []DoctorFinding {
 	if !ValidKnowledgeKind(cfg.Settings.Knowledge) {
 		out = append(out, DoctorFinding{Agent: "pool", Level: "error", Message: poolRel(poolRoot, PoolConfigFile) + ": " + knowledgeKindProblem(cfg.Settings.Knowledge)})
 	}
+	out = append(out, harnessAllowlistFindings(poolRoot, cfg)...)
 	if len(cfg.IdentityTools) > 0 {
 		cmds := make([]string, 0, len(cfg.IdentityTools))
 		for _, t := range cfg.IdentityTools {

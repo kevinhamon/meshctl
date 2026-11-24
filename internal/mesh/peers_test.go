@@ -76,7 +76,7 @@ func TestPeers_FrontmatterContract(t *testing.T) {
 		t.Fatalf("description must list accepted types and the precondition: %q", fm.Description)
 	}
 	h, _ := json.Marshal(fm.Hooks)
-	for _, want := range []string{"PreToolUse", "Stop", "meshctl hook pre-tool-use --agent architect --in-session", "meshctl hook session-end --agent architect --in-session"} {
+	for _, want := range []string{"PreToolUse", "Stop", "meshctl hook pre-tool-use --harness claude --agent architect --in-session", "meshctl hook session-end --harness claude --agent architect --in-session"} {
 		if !strings.Contains(string(h), want) {
 			t.Fatalf("hooks missing %q: %s", want, h)
 		}
@@ -254,7 +254,7 @@ func TestPeers_WorkFrontmatterContract(t *testing.T) {
 		t.Fatalf("description must name the work precondition: %q", fm.Description)
 	}
 	h, _ := json.Marshal(fm.Hooks)
-	for _, want := range []string{"meshctl hook pre-tool-use --agent architect --in-session --work", "meshctl hook session-end --agent architect --in-session --work"} {
+	for _, want := range []string{"meshctl hook pre-tool-use --harness claude --agent architect --in-session --work", "meshctl hook session-end --harness claude --agent architect --in-session --work"} {
 		if !strings.Contains(string(h), want) {
 			t.Fatalf("hooks missing %q: %s", want, h)
 		}
@@ -364,7 +364,7 @@ func TestPeers_GateMatcherAndPostToolUse(t *testing.T) {
 				t.Fatalf("%s: %s matcher = %+v, want %q", c.name, ev, es, GateHookMatcher)
 			}
 		}
-		if cmd, _ := fm.Hooks["PostToolUse"][0].Hooks[0]["command"].(string); cmd != "meshctl hook post-tool-use "+c.flags {
+		if cmd, _ := fm.Hooks["PostToolUse"][0].Hooks[0]["command"].(string); cmd != "meshctl hook post-tool-use --harness claude "+c.flags {
 			t.Fatalf("%s: PostToolUse command = %q", c.name, cmd)
 		}
 	}

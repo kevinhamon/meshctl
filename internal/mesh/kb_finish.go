@@ -89,22 +89,49 @@ func kbFinishStage(stage string) error {
 	return kbFinishFailpoint(stage)
 }
 
-// KBTrustGuard refuses a promotion when the peer's gate could not have put
-// the promotion ask to a human: the call runs under a different harness than
-// the one the workspace is wired for (that harness's gate never saw it); an
-// opencode peer without the V2 plugin or without opencode's ask rules
-// (V1 has no pre-tool hook at all); a Claude Code peer whose
-// PreToolUse gate is not wired or whose wiring is stamped below
-// PromotionAskWiringVersion. nil means the ledger may trust the gate.
-// `kb finish`, `kb confirm` and `state set` run it before touching main.
-func KBTrustGuard(a *Agent) error {
+// KBTrustGuard refuses a promotion when the gate of the harness running the
+// call (RuntimeHarness) could not have put the promotion ask to a human: that
+// harness has no PromotionAsk cap (opencode V1 has no pre-tool hook at all),
+// or its gate is not wired or not current in the agent's workspace
+// (promotionAskChecks). Which harness the agent prefers does not matter: a
+// workspace wired for several harnesses may promote from any of them whose
+// gate is wired. nil means the ledger may trust the gate. `kb finish`,
+// `kb confirm` and `state set` run it before touching main.
+func KBTrustGuard(a *Agent) error { return kbTrustGuardUnder(a, RuntimeHarness(a, "")) }
+
+// kbTrustGuardUnder is KBTrustGuard for a call running under h.
+func kbTrustGuardUnder(a *Agent, h Harness) error {
 	fix := "run `meshctl agent onboard " + a.Name + "`, then re-run from a gated session"
-	h := a.HarnessName()
-	if run := RunningHarness(); run != "" && run != h {
-		return fmt.Errorf("%w: this runs under %s, but %s is wired for %s, so %s's gate never saw the call — "+
-			"run it from a %s session of %s (the branch and worktree are left intact)", ErrKBTrustGuard, run, a.Name, h, h, h, a.Name)
+	label := harnessLabel(h)
+	if !h.Caps().PromotionAsk {
+		return fmt.Errorf("%w: this runs under %s, which cannot ask the human before a promotion — run it from a session of %s "+
+			"under a harness that can (%s); the branch and worktree are left intact", ErrKBTrustGuard, label, a.Name,
+			harnessLabelsWith(func(c HarnessCaps) bool { return c.PromotionAsk }))
 	}
-	if h == HarnessOpencode {
+	check, ok := promotionAskChecks[h.Name()]
+	if !ok {
+		return fmt.Errorf("%w: meshctl cannot verify that %s's gate would ask before %s's promotions — run it from a session "+
+			"under %s; the branch and worktree are left intact", ErrKBTrustGuard, label, a.Name, strings.Join(promotionAskVerifiable(), ", "))
+	}
+	return check(a, fix)
+}
+
+// promotionAskChecks verify, per harness id, that the harness's gate is wired
+// and current in a workspace, so a promotion it lets through was asked. The
+// wiring each harness needs differs; the guard picks the running harness's.
+var promotionAskChecks = map[string]func(a *Agent, fix string) error{
+	HarnessClaude: func(a *Agent, fix string) error {
+		if !gateHookWired(a.Dir()) {
+			return fmt.Errorf("%w: %s's Claude Code PreToolUse gate is not wired, so no promotion ask could have been shown — %s",
+				ErrKBTrustGuard, a.Name, fix)
+		}
+		if v := WiringVersion(a.Dir()); v < PromotionAskWiringVersion {
+			return fmt.Errorf("%w: %s's mesh wiring is stale (v%d < v%d, the version that carries the promotion ask) — %s",
+				ErrKBTrustGuard, a.Name, v, PromotionAskWiringVersion, fix)
+		}
+		return nil
+	},
+	HarnessOpencode: func(a *Agent, fix string) error {
 		if opencodePluginState(a.Dir(), opencodePluginV2Rel, opencodePluginV2JS) != pluginCurrent {
 			return fmt.Errorf("%w: %s has no current opencode V2 gate plugin (%s), so no promotion ask could have been shown "+
 				"(opencode V1 has no pre-tool hook and cannot promote) — %s", ErrKBTrustGuard, a.Name, opencodePluginV2Rel, fix)
@@ -114,16 +141,19 @@ func KBTrustGuard(a *Agent) error {
 				"opencode.json or overridden by OPENCODE_CONFIG_CONTENT — %s", ErrKBTrustGuard, a.Name, fix)
 		}
 		return nil
+	},
+}
+
+// promotionAskVerifiable lists, by label, the registered harnesses the guard
+// can verify.
+func promotionAskVerifiable() []string {
+	var out []string
+	for _, s := range RegisteredHarnesses() {
+		if _, ok := promotionAskChecks[s.ID]; ok {
+			out = append(out, s.Label)
+		}
 	}
-	if !gateHookWired(a.Dir()) {
-		return fmt.Errorf("%w: %s's PreToolUse gate is not wired, so no promotion ask could have been shown — %s",
-			ErrKBTrustGuard, a.Name, fix)
-	}
-	if v := WiringVersion(a.Dir()); v < PromotionAskWiringVersion {
-		return fmt.Errorf("%w: %s's mesh wiring is stale (v%d < v%d, the version that carries the promotion ask) — %s",
-			ErrKBTrustGuard, a.Name, v, PromotionAskWiringVersion, fix)
-	}
-	return nil
+	return out
 }
 
 // gateHookWired reports whether the agent's .claude/settings.json wires the

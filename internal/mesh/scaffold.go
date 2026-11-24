@@ -222,12 +222,10 @@ func New(agentsDir string, spec AgentSpec) (string, error) {
 	if err := ensureMemoryIgnored(dest); err != nil {
 		return "", err
 	}
-	// Shared mesh skills + harness integration, rendered per harness.
-	h := HarnessByNameVersion(spec.Harness, spec.HarnessVersion)
-	if _, err := scaffoldSkills(agentsDir, dest, h); err != nil {
-		return "", err
-	}
-	if _, err := h.WireAgent(dest); err != nil {
+	// Shared mesh skills + harness integration, for every harness in the
+	// wire set (wire_set.go); spec.Harness is only the recorded preference.
+	targets, _ := wireTargets(agentsDir, spec.Harness, spec.HarnessVersion)
+	if _, err := wireHarnesses(agentsDir, dest, targets); err != nil {
 		return "", err
 	}
 	// Repo hygiene: make the workspace a local git repo so knowledge/
@@ -246,6 +244,37 @@ type OnboardResult struct {
 	InferredTitle string
 	InferredRole  bool
 	Notes         []string
+	// Skipped names the harnesses left unwired because they are not
+	// installed on this host (also in Notes).
+	Skipped []string
+}
+
+// wireHarnesses links the shared mesh skills and installs the mesh
+// integration for each target harness, in order. Returns onboard-style
+// notes; with more than one target each note names its harness.
+func wireHarnesses(poolRoot, dest string, targets []wireTarget) ([]string, error) {
+	var notes []string
+	for _, t := range targets {
+		tag := ""
+		if len(targets) > 1 {
+			tag = "[" + harnessIDLabel(t.ID) + "] "
+		}
+		added, err := scaffoldSkills(poolRoot, dest, t.Harness)
+		if err != nil {
+			return notes, err
+		}
+		if len(added) > 0 {
+			notes = append(notes, tag+"installed skills: "+strings.Join(added, ", "))
+		}
+		wired, err := t.Harness.WireAgent(dest)
+		for _, n := range wired {
+			notes = append(notes, tag+n)
+		}
+		if err != nil {
+			return notes, err
+		}
+	}
+	return notes, nil
 }
 
 // Onboard upgrades a pre-existing agent directory into a full mesh member.
@@ -276,8 +305,10 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec) (*OnboardResult, erro
 	claudePath := filepath.Join(abs, "CLAUDE.md")
 	claudeBody, _ := os.ReadFile(claudePath)
 
-	// Resolve the harness: explicit flag, else an existing manifest's
-	// value, else detect from the workspace, else claude. Persisted on the manifest.
+	// Resolve the preferred harness: explicit flag, else an existing
+	// manifest's value, else detect from the workspace, else claude.
+	// Persisted on a new manifest. The workspace is wired for every harness
+	// in the wire set, the preferred one included when installed.
 	mp := filepath.Join(abs, ManifestName)
 	if spec.Harness == "" {
 		if a, err := LoadAgent(mp); err == nil && a.Harness != "" {
@@ -286,7 +317,8 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec) (*OnboardResult, erro
 			spec.Harness = DetectHarness(abs)
 		}
 	}
-	h := HarnessByNameVersion(spec.Harness, spec.HarnessVersion)
+	targets, skipped := wireTargets(agentsDir, spec.Harness, spec.HarnessVersion)
+	res.Skipped = skipped
 
 	// 1. Manifest — infer where possible, never overwrite.
 	if fileExists(mp) {
@@ -380,18 +412,14 @@ func Onboard(agentsDir, nameOrPath string, spec AgentSpec) (*OnboardResult, erro
 	if err := ensureMemoryIgnored(abs); err != nil {
 		return nil, err
 	}
-	// 6. Shared mesh skills — rendered per harness, add-only.
-	if added, err := scaffoldSkills(agentsDir, abs, h); err != nil {
-		return nil, err
-	} else if len(added) > 0 {
-		res.Notes = append(res.Notes, "installed skills: "+strings.Join(added, ", "))
-	}
-	// 7. Harness integration (hooks + preapproval, or opencode equivalent) — add-only.
-	if added, err := h.WireAgent(abs); err != nil {
+	// 6. Shared mesh skills and 7. harness integration (hooks + preapproval,
+	// or the harness's equivalent) — per harness in the wire set, add-only.
+	if notes, err := wireHarnesses(agentsDir, abs, targets); err != nil {
 		return nil, err
 	} else {
-		res.Notes = append(res.Notes, added...)
+		res.Notes = append(res.Notes, notes...)
 	}
+	res.Notes = append(res.Notes, skipped...)
 
 	// 8. The retired iTerm2 profile files an earlier meshctl wrote
 	// (iterm_retire.go); a customised profile stays.
@@ -473,11 +501,16 @@ func ScaffoldSteward(agentsDir, harness string, now time.Time) (string, []string
 		return dir, notes, err
 	}
 
-	// The mesh-steward skill (the interview/roster/scaffold playbook), per harness.
-	if _, err := linkSkill(agentsDir, dir, "mesh-steward", HarnessByName(harness)); err != nil {
-		return dir, notes, err
+	// The mesh-steward skill (the interview/roster/scaffold playbook), for
+	// every harness the steward is wired for.
+	targets, skipped := wireTargets(agentsDir, harness, 0)
+	for _, t := range targets {
+		if _, err := linkSkill(agentsDir, dir, "mesh-steward", t.Harness); err != nil {
+			return dir, notes, err
+		}
 	}
 	notes = append(notes, "installed mesh-steward skill")
+	notes = append(notes, skipped...)
 	// New committed the generic scaffold; commit the role too, so a fresh
 	// pool starts clean.
 	if isGitRepo(dir) {

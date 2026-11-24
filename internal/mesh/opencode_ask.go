@@ -167,7 +167,7 @@ func mutatingWorkPeers(callerDir string) []string {
 	if err != nil {
 		return nil
 	}
-	for stem, d := range wantedPeerDefs(agents, callerDir) {
+	for stem, d := range wantedPeerDefs(agents, HarnessByName(HarnessOpencode), callerDir) {
 		if d.work && len(d.peer.Mutates) > 0 {
 			out = append(out, PeerAgentPrefix+stem)
 		}
@@ -219,11 +219,19 @@ func ensureOpencodeSubagentAsk(callerDir string) ([]string, error) {
 	return []string{"opencode.json: subagent ask rules for " + strings.Join(missing, ", ")}, nil
 }
 
+// runsUnderOpencode reports whether opencode runs the call: the --harness
+// flag, else the running-harness env marker. The ask paths below read
+// opencode's own permission config, so they apply under opencode alone;
+// whether a harness can ask at all is its caps' business, elsewhere.
+func runsUnderOpencode(p HookPayload) bool {
+	return runtimeHarnessID(nil, p.Harness, RunningHarness()) == HarnessOpencode
+}
+
 // opencodeDelegationAsk hands the gate's ask on a delegation to a mutating
 // peer to opencode's own ask: through when opencode will ask on that
 // subagent, refused otherwise.
 func opencodeDelegationAsk(p HookPayload, d GateDecision, subagent string) GateDecision {
-	if !d.Ask || p.Harness != HarnessOpencode {
+	if !d.Ask || !runsUnderOpencode(p) {
 		return d
 	}
 	if readOcPerms(p.Cwd, true).effect("subagent", subagent) == "ask" {
@@ -288,7 +296,7 @@ func gatedRule(words []string) *opencodeAskRule {
 // wrapper, no `bash -c` string, `meshctl` by name); any other form is
 // refused, naming the plain form. Other decisions are returned unchanged.
 func opencodeAskPath(p HookPayload, d GateDecision) GateDecision {
-	if !d.Ask || p.Harness != HarnessOpencode {
+	if !d.Ask || !runsUnderOpencode(p) {
 		return d
 	}
 	command := shellCommandInput(p)

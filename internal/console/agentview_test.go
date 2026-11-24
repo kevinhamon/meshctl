@@ -97,6 +97,10 @@ func TestAgentView_ThroughTheServer(t *testing.T) {
 		if info.Name == "architect" && (info.Docs != 1 || info.DocsNewest == "") {
 			t.Errorf("roster docs: %+v", info)
 		}
+		// The preferred harness's label comes from the registry.
+		if info.Name == "architect" && (info.Harness != mesh.DefaultHarness || info.HarnessLabel != "Claude Code") {
+			t.Errorf("roster harness: %+v", info)
+		}
 	}
 }
 

@@ -94,7 +94,7 @@ func ResolvePeerSubagent(agentsDir string, p HookPayload) (HookPayload, error) {
 	if caller == nil {
 		return p, fmt.Errorf("subagent %q runs outside a mesh workspace, so its peer cannot be resolved", p.AgentType)
 	}
-	def := filepath.Join(peerDefsDir(caller.Dir()), p.AgentType+".md")
+	def := filepath.Join(peerDefsDirFor(p.Harness, caller.Dir()), p.AgentType+".md")
 	b, err := os.ReadFile(def)
 	if err != nil || !strings.Contains(string(b), distillerAgentMarker) {
 		return p, fmt.Errorf("subagent %q has no meshctl-rendered peer definition in %s — the mesh gate cannot tell which peer it is; run `meshctl pool upgrade`", p.AgentType, caller.Name)
@@ -224,7 +224,7 @@ func sessionStartContext(agentsDir string, a *Agent, p HookPayload, id, warn str
 		b.WriteString(ResumeSummaryLine(a, id))
 		b.WriteString("\n\n")
 	}
-	if line := PeerLine(a); line != "" && !resumed {
+	if line := PeerLineFor(a, RuntimeHarness(a, p.Harness)); line != "" && !resumed {
 		b.WriteString(line)
 		b.WriteString("\n\n")
 	}
@@ -377,7 +377,7 @@ func HookSessionEnd(agentsDir string, p HookPayload, pid int, now time.Time) {
 	// Cognition runs here, not on the model's initiative. No-ops for harnesses
 	// whose background primitive is in-session (Claude Code), and for the
 	// distillation run itself. See distill.go.
-	SpawnDistill(agentsDir, a, id)
+	SpawnDistillUnder(RuntimeHarness(a, p.Harness), agentsDir, a, id)
 }
 
 // HookSessionBeat refreshes presence for a session that is still open. The
@@ -487,9 +487,10 @@ func distillNudge(p HookPayload, agent string, a *Agent) string {
 	if !distillNudgeEnabled(agent) {
 		return ""
 	}
-	// Harnesses that distil themselves at session end are already covered;
-	// asking the model as well would just run the same window twice.
-	if harnessAutoDistills(a) {
+	// The nudge asks for an in-session distiller: only a harness with one is
+	// nudged. The others distil at session end (SpawnDistillUnder); asking
+	// the model as well would just run the same window twice.
+	if !RuntimeHarness(a, p.Harness).Caps().InSessionDistill {
 		return ""
 	}
 	cwd := p.Cwd
@@ -531,20 +532,20 @@ func distillNudge(p HookPayload, agent string, a *Agent) string {
 		"no-ops). Do this once — it will not be asked again this session.", why)
 }
 
-// EmitHookContext writes the injected context in Claude Code's envelope. Kept as
-// the default (claude) emitter; harness-aware callers use HarnessForPayload().
+// EmitHookContext writes the injected context in DefaultHarness's envelope.
+// Harness-aware callers use HarnessForPayload().
 func EmitHookContext(w io.Writer, event, ctx string) error {
-	return claudeHarness{}.EmitContext(w, event, ctx)
+	return HarnessByName(DefaultHarness).EmitContext(w, event, ctx)
 }
 
-// HarnessForPayload resolves the harness a hook should emit for: an explicit
-// flag wins, else the agent (resolved from the payload cwd), else claude.
+// HarnessForPayload resolves the harness a hook should emit for: the harness
+// running the call (RuntimeHarness: the flag, else the running-harness env
+// marker, else the preference of the agent the payload cwd names, else
+// DefaultHarness).
 func HarnessForPayload(agentsDir string, p HookPayload, flagHarness string) Harness {
-	if flagHarness != "" {
-		return HarnessByName(flagHarness)
+	var a *Agent
+	if flagHarness == "" && RunningHarness() == "" {
+		a = hookAgent(agentsDir, p.Cwd) // only the last resort needs the agent
 	}
-	if a := hookAgent(agentsDir, p.Cwd); a != nil {
-		return HarnessFor(a)
-	}
-	return claudeHarness{}
+	return RuntimeHarness(a, flagHarness)
 }

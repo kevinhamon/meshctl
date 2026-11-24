@@ -17,15 +17,103 @@ import (
 // never loads is indistinguishable from a model ignoring it. Those cost far
 // more to diagnose than to detect, so detect them.
 
-// gateWiringFindings verifies the fail-closed enforcement gate is installed and
-// current. Without it the mesh is advisory only — the exact defect that keeps
-// looking "fixed" (hooks wired, doctrine written) while the model routes around
-// it. An unwired gate is an error, not a warning: it means doctrine is optional.
-// opencode: see opencodeGateFindings.
-func gateWiringFindings(a *Agent) []DoctorFinding {
-	if a.HarnessName() == HarnessOpencode {
-		return opencodeGateFindings(a)
+// harnessDoctorCheck is what doctor knows about one harness's wiring in a
+// workspace: the adapter-specific half of the checks. Core doctor code
+// iterates the harnesses a workspace is wired for and looks each up here; a
+// harness with no entry gets only the generic checks.
+type harnessDoctorCheck struct {
+	// wiring checks the files the adapter writes: gate, plugin, config.
+	wiring func(a *Agent) []DoctorFinding
+	// distillerBinding is the workspace-relative subagent definition the
+	// boundary nudge asks the model to spawn ("" ⇒ none to check).
+	distillerBinding string
+	// transcript: the harness's bridge hands session capture a transcript
+	// path, so records have content without git.
+	transcript bool
+}
+
+var harnessDoctorChecks = map[string]harnessDoctorCheck{
+	HarnessClaude:   {wiring: claudeGateFindings, distillerBinding: ".claude/agents/distiller.md", transcript: true},
+	HarnessOpencode: {wiring: opencodeWiringFindings},
+}
+
+// doctorHarnessIDs is the harnesses doctor checks a workspace for: every
+// harness it is wired for, else (wired for none) the agent's preferred one,
+// so a bare workspace reports its missing gate.
+func doctorHarnessIDs(a *Agent) []string {
+	if ids := WiredHarnesses(a.Dir()); len(ids) > 0 {
+		return ids
 	}
+	return []string{a.HarnessName()}
+}
+
+// gateWiringFindings verifies the fail-closed enforcement gate is installed and
+// current for every harness the workspace is wired for. Without it the mesh is
+// advisory only — the exact defect that keeps looking "fixed" (hooks wired,
+// doctrine written) while the model routes around it. An unwired gate is an
+// error, not a warning: it means doctrine is optional.
+func gateWiringFindings(a *Agent) []DoctorFinding {
+	var out []DoctorFinding
+	for _, id := range doctorHarnessIDs(a) {
+		if c := harnessDoctorChecks[id]; c.wiring != nil {
+			out = append(out, c.wiring(a)...)
+		}
+	}
+	return append(out, peerPlanFindings(a)...)
+}
+
+// harnessCoverageFindings compares the harnesses a workspace is wired for
+// with the ones it should be (AgentWireSet against installed): an installed
+// harness it is not wired for (warn — `pool upgrade` wires it), a wired
+// harness not installed on this host (info), and a preferred harness that is
+// not installed (warn). With no harness installed at all there is nothing to
+// compare against; Doctor reports that once for the pool (noHarnessFinding).
+func harnessCoverageFindings(a *Agent, installed []InstalledHarness) []DoctorFinding {
+	if len(installed) == 0 {
+		return nil
+	}
+	var out []DoctorFinding
+	wired := map[string]bool{}
+	for _, id := range WiredHarnesses(a.Dir()) {
+		wired[id] = true
+	}
+	if pref := a.HarnessName(); !installedHas(installed, pref) {
+		out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
+			Message: "preferred harness " + harnessIDLabel(pref) + " (agent.yaml `harness:`) is not installed on this host — " +
+				"sessions here run under another wired harness; install it or change `harness:`"})
+	}
+	for _, h := range agentWireSetFrom(filepath.Dir(a.Dir()), a.HarnessName(), installed) {
+		if !wired[h.ID] {
+			out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
+				Message: harnessIDLabel(h.ID) + " is installed but this workspace is not wired for it — run `meshctl pool upgrade`"})
+		}
+	}
+	for _, id := range WiredHarnesses(a.Dir()) {
+		if !installedHas(installed, id) {
+			out = append(out, DoctorFinding{Agent: a.Name, Level: "info",
+				Message: "wired for " + harnessIDLabel(id) + ", which is not installed on this host — its wiring is left as is"})
+		}
+	}
+	return out
+}
+
+// noHarnessFinding is doctor's machine-level note when no registered harness
+// is installed on this host (or none is on doctor's PATH): wiring is still
+// checked, but not against the host, and scaffolds wire only each agent's
+// preferred harness.
+func noHarnessFinding(installed []InstalledHarness) []DoctorFinding {
+	if len(installed) > 0 {
+		return nil
+	}
+	return []DoctorFinding{{Agent: "-", Level: "info",
+		Message: "no registered harness (" + strings.Join(RegisteredHarnessIDs(), ", ") + ") is installed on this host's PATH — " +
+			"wiring is not checked against installed harnesses, and new agents are wired for their preferred harness only"}}
+}
+
+// claudeGateFindings checks the Claude Code wiring: the PreToolUse gate in
+// .claude/settings.json, its matchers and wiring version, and the session's
+// directory grants for in-session peers.
+func claudeGateFindings(a *Agent) []DoctorFinding {
 	path := filepath.Join(a.Dir(), ".claude", "settings.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -51,7 +139,7 @@ func gateWiringFindings(a *Agent) []DoctorFinding {
 			Message: fmt.Sprintf("mesh wiring stale (v%d < v%d) — run `meshctl agent onboard %s` to pick up gate/policy changes",
 				v, MeshWiringVersion, a.Name)})
 	}
-	out = append(out, peerWiringFindings(a)...)
+	out = append(out, claudeAccessFindings(a)...)
 	return out
 }
 
@@ -89,13 +177,25 @@ func staleMatcherFindings(a *Agent, entries []any) []DoctorFinding {
 // grant means the peer cannot read its own KB without a prompt, and a missing
 // workdir grant means delegated work cannot write the peer's repo.
 func peerWiringFindings(a *Agent) []DoctorFinding {
+	return append(peerPlanFindings(a), claudeAccessFindings(a)...)
+}
+
+// peerPlanFindings flags in-session peer definitions that no longer match the
+// roster. Checked once per workspace, whichever harnesses it is wired for.
+func peerPlanFindings(a *Agent) []DoctorFinding {
+	if plan := PlanPeerAgents(filepath.Dir(a.Dir()), a.Dir()); !plan.Empty() {
+		n := len(plan.Write) + len(plan.Update) + len(plan.Remove)
+		return []DoctorFinding{{Agent: a.Name, Level: "warn",
+			Message: fmt.Sprintf("in-session peer subagents out of date (%d to write/refresh/remove) — run `meshctl pool upgrade`", n)}}
+	}
+	return nil
+}
+
+// claudeAccessFindings checks the Claude Code session's directory grants:
+// the pool root and the peers' workdirs in .claude/settings.local.json.
+func claudeAccessFindings(a *Agent) []DoctorFinding {
 	poolRoot := filepath.Dir(a.Dir())
 	var out []DoctorFinding
-	if plan := PlanPeerAgents(poolRoot, a.Dir()); !plan.Empty() {
-		n := len(plan.Write) + len(plan.Update) + len(plan.Remove)
-		out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
-			Message: fmt.Sprintf("in-session peer subagents out of date (%d to write/refresh/remove) — run `meshctl pool upgrade`", n)})
-	}
 	if IsPool(poolRoot) && !PoolAccessWired(poolRoot, a.Dir()) {
 		out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
 			Message: "pool root not in .claude/settings.local.json additionalDirectories — in-session peers cannot read their own KB without prompts; run `meshctl agent onboard " + a.Name + "`"})
@@ -134,32 +234,47 @@ func cognitionTriggerFindings(a *Agent) []DoctorFinding {
 			Message: "distillation has no trigger: this harness has no background primitive and " +
 				distillNudgeAgentsEnv + " excludes this agent — the KB fills only if the model volunteers"})
 	}
-	// The nudge tells the model to spawn the `distiller` subagent; on Claude
-	// Code that is a definition file meshctl scaffolds. Without it the nudge
-	// asks for something that does not exist.
-	if !auto && distillNudgeEnabled(a.Name) && a.HarnessName() == HarnessClaude &&
-		!fileExists(filepath.Join(a.Dir(), ".claude", "agents", "distiller.md")) {
-		out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
-			Message: "distillation nudge is on but .claude/agents/distiller.md is missing — " +
-				"run `meshctl agent onboard " + a.Name + "` to scaffold the distiller subagent"})
+	// The nudge tells the model to spawn the `distiller` subagent; on a
+	// harness that distils in-session that is a definition file meshctl
+	// scaffolds. Without it the nudge asks for something that does not exist.
+	// Checked for every wired harness: a session may run under any of them.
+	if distillNudgeEnabled(a.Name) {
+		for _, id := range doctorHarnessIDs(a) {
+			rel := harnessDoctorChecks[id].distillerBinding
+			if rel == "" {
+				continue
+			}
+			if h := HarnessByName(id); !h.Caps().InSessionDistill || len(h.DistillCmd("")) > 0 {
+				continue
+			}
+			if !fileExists(filepath.Join(a.Dir(), filepath.FromSlash(rel))) {
+				out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
+					Message: "distillation nudge is on but " + rel + " is missing — " +
+						"run `meshctl agent onboard " + a.Name + "` to scaffold the distiller subagent"})
+			}
+		}
 	}
 	return out
 }
 
 // sessionSignalFindings checks that session records will contain something to
 // mine. CaptureSession has exactly two sources — the harness transcript and the
-// git spine. The opencode plugin sends no transcript path, so in a non-git
-// workspace every record is an empty shell and distillation can only ever
-// report "nothing to distil", however capable the model is.
+// git spine. A bridge that sends no transcript path (opencode's plugin) leaves
+// a non-git workspace's records empty, so distillation can only ever report
+// "nothing to distil", however capable the model is. Checked for every wired
+// harness: a session may run under any of them.
 func sessionSignalFindings(a *Agent) []DoctorFinding {
-	if a.HarnessName() != HarnessOpencode {
-		return nil // claude supplies a transcript path, so records have content
+	var without []string
+	for _, id := range doctorHarnessIDs(a) {
+		if !harnessDoctorChecks[id].transcript {
+			without = append(without, harnessIDLabel(id))
+		}
 	}
-	if AgentRepoHygiene(a.Dir()).IsRepo {
+	if len(without) == 0 || AgentRepoHygiene(a.Dir()).IsRepo {
 		return nil
 	}
 	return []DoctorFinding{{Agent: a.Name, Level: "warn",
-		Message: "session records will be empty: the opencode plugin supplies no transcript path and this " +
+		Message: "session records will be empty under " + strings.Join(without, ", ") + ": its bridge supplies no transcript path and this " +
 			"workspace is not a git repo, leaving distillation nothing to mine"}}
 }
 
@@ -174,14 +289,11 @@ func sessionSignalFindings(a *Agent) []DoctorFinding {
 // CLAUDE.md, and its presence is checked by opencodeGateFindings. Only the JSON
 // validity check applies.
 func opencodeInstructionsFindings(a *Agent) []DoctorFinding {
-	if a.HarnessName() != HarnessOpencode {
-		return nil
-	}
 	v2 := opencodeExpectedMajor(a.Dir()) >= 2
 	path := filepath.Join(a.Dir(), "opencode.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil // absence of opencode.json is already reported elsewhere
+		return nil // absence of opencode.json is reported by opencodeWiringFindings
 	}
 	var cfg struct {
 		Instructions []string `json:"instructions"`
@@ -249,6 +361,19 @@ func opencodeExpectedMajor(dir string) int {
 	return 2
 }
 
+// opencodeWiringFindings is doctor's opencode check: opencode.json present
+// and loaded (opencodeInstructionsFindings), and the plugin matching the
+// installed major (opencodeGateFindings).
+func opencodeWiringFindings(a *Agent) []DoctorFinding {
+	var out []DoctorFinding
+	if !fileExists(filepath.Join(a.Dir(), "opencode.json")) {
+		out = append(out, DoctorFinding{Agent: a.Name, Level: "warn",
+			Message: "opencode wiring incomplete: no opencode.json — run `meshctl agent onboard " + a.Name + "`"})
+	}
+	out = append(out, opencodeInstructionsFindings(a)...)
+	return append(out, opencodeGateFindings(a)...)
+}
+
 // opencodeGateFindings verifies an opencode agent's mesh plugin matches the
 // installed opencode major. A mismatch is silent at runtime — V2 skips a V1
 // plugin with a log warning, so doctrine, context and the gate all just stop —
@@ -289,10 +414,6 @@ func opencodeGateFindings(a *Agent) []DoctorFinding {
 		if !opencodeAskWired(a.Dir(), false) {
 			out = append(out, f("error", "opencode.json lacks the ask rules for promotions, so `kb finish`, `kb confirm` "+
 				"and `state set` are refused; "+onboard))
-		}
-		if plan := PlanPeerAgents(filepath.Dir(a.Dir()), a.Dir()); !plan.Empty() {
-			n := len(plan.Write) + len(plan.Update) + len(plan.Remove)
-			out = append(out, f("warn", fmt.Sprintf("in-session peer subagents out of date (%d to write/refresh/remove) — run `meshctl pool upgrade`", n)))
 		}
 		if miss := missingSubagentAsk(a.Dir(), false); len(miss) > 0 {
 			out = append(out, f("warn", "opencode.json lacks the subagent ask rules for state-mutating peers ("+strings.Join(miss, ", ")+

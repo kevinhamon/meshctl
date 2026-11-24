@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -35,7 +34,7 @@ type AskOptions struct {
 	Detach   bool
 
 	// now + runner are injected for tests. runner defaults to the real
-	// `claude -p` invocation.
+	// headless run of the harness Ask picks (headlessHarness).
 	Now    time.Time
 	Runner DispatchRunner
 	Stdout io.Writer
@@ -152,8 +151,11 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 	_, _ = ClaimRequest(req.path, dispatchSession, os.Getpid(), now)
 	defer func() { _ = ReleaseClaim(req.path, dispatchSession, time.Now()) }()
 
+	// The harness the child runs under: the caller's own when the target is
+	// wired for it, else the target's preference (headlessHarness).
+	harness := headlessHarness(target, RunningHarness())
 	ran = true
-	dispatchLog(agentsDir, caller, target.Name, depth, now, "DISPATCH id=%s", req.ID)
+	dispatchLog(agentsDir, caller, target.Name, depth, now, "DISPATCH id=%s harness=%s", req.ID, harness)
 
 	// Build the child invocation.
 	msg := fmt.Sprintf("process intake request %s", req.ID)
@@ -161,10 +163,13 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 	granted := dispatchGrants(agentsDir, target, dispatchSession, now)
 	sys := grantedSystemPrompt(fmt.Sprintf(headlessSystemPrompt, caller), granted)
 	model := dispatchModel()
-	if model == "" && target.Model != "" && target.Model != "default" {
-		model = target.Model
+	if m := target.ModelFor(harness); model == "" && m != "default" {
+		model = m
 	}
-	childEnv := append(os.Environ(),
+	// The child harness sets its own running-harness marker; the caller's
+	// must not leak into it, or the child's meshctl calls would think they
+	// run under the caller's harness.
+	childEnv := append(withoutHarnessMarkers(os.Environ()),
 		fmt.Sprintf("AGENT_DISPATCH_DEPTH=%d", depth+1),
 		"AGENT_NAME="+target.Name,
 		// The child's meshctl calls act as the dispatch session, so it can
@@ -184,7 +189,7 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 
 	runner := o.Runner
 	if runner == nil {
-		runner = realDispatch
+		runner = realDispatch(HarnessByName(harness))
 	}
 	ctx, cancel := context.WithTimeout(sigCtx, time.Duration(timeoutSec())*time.Second)
 	defer cancel()
@@ -216,7 +221,7 @@ func Ask(agentsDir string, target *Agent, o AskOptions) (*Request, int, error) {
 // shared background service) that inherits AGENT_DISPATCH_DEPTH, on which the V2
 // plugin drops to doctrine + gate only. Either way the system prompt is prepended
 // to the message (opencode run has no --append-system-prompt). ocMajor is the
-// installed opencode major (ignored for claude).
+// harness variant Ask chose (opencode: its major; ignored for claude).
 func dispatchArgv(harness string, ocMajor int, msg, sys, model string, extra ...string) (name string, args []string) {
 	switch harness {
 	case HarnessOpencode:
@@ -258,19 +263,77 @@ const opencodeDispatchConfig = `{"permission":{"edit":"deny","webfetch":"deny","
 	`"meshctl inbox respond*":"allow","meshctl inbox decline*":"allow","meshctl agent list*":"allow",` +
 	`"meshctl memory recall*":"allow","meshctl intuition recall*":"allow"}}}`
 
-// realDispatch runs the target's harness headlessly in its workspace to process
-// the intake request. The runtime is chosen by the TARGET agent's manifest harness
-// — claude → `claude -p`, opencode → `opencode run` — so dispatch works
-// in an opencode mesh, not just a Claude Code one.
-func realDispatch(ctx context.Context, targetDir, msg, sys, model string, env []string, stdout, stderr io.Writer) int {
-	harness, ocMajor := HarnessClaude, 0
-	if a, err := LoadAgent(filepath.Join(targetDir, ManifestName)); err == nil {
-		harness = a.HarnessName()
-		if oc, ok := HarnessFor(a).(opencodeHarness); ok {
-			ocMajor = oc.Major()
+// headlessHarness picks the harness a headless run in target's workspace
+// (`ask`, a peer distill) uses, given the caller's running harness:
+// chooseHeadlessHarness over the harnesses target is wired for and those
+// installed here.
+func headlessHarness(target *Agent, running string) string {
+	return chooseHeadlessHarness(target.HarnessName(), running, WiredHarnesses(target.Dir()), harnessInstalled)
+}
+
+// chooseHeadlessHarness is the selection order: the caller's running harness
+// when the target is wired for it and it is installed; else the target's
+// preferred harness when installed; else the first installed harness the
+// target is wired for; else the preferred one (its launch then fails and
+// says so).
+func chooseHeadlessHarness(preferred, running string, wired []string, installed func(id string) bool) string {
+	preferred = normHarnessID(preferred)
+	if preferred == "" {
+		preferred = DefaultHarness
+	}
+	running = normHarnessID(running)
+	if running != "" && hasString(wired, running) && installed(running) {
+		return running
+	}
+	if installed(preferred) {
+		return preferred
+	}
+	for _, id := range wired {
+		if installed(id) {
+			return id
 		}
 	}
-	name, args := dispatchArgv(harness, ocMajor, msg, sys, model, dispatchToolsFromEnv(env)...)
+	return preferred
+}
+
+// harnessInstalled reports whether a registered harness's binary is on PATH:
+// a PATH lookup, no version probe, so it is cheap enough for a hook.
+func harnessInstalled(id string) bool {
+	s, ok := LookupHarness(id)
+	return ok && s.Binary != "" && ToolOnPath(s.Binary)
+}
+
+// withoutHarnessMarkers drops every registered harness's running-harness env
+// marker from env, for a child that runs under a harness of its own.
+func withoutHarnessMarkers(env []string) []string {
+	drop := map[string]bool{}
+	for _, h := range RegisteredHarnesses() {
+		for _, k := range h.RunningEnv {
+			drop[k] = true
+		}
+	}
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		k, _, _ := strings.Cut(kv, "=")
+		if !drop[k] {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+// realDispatch returns the runner that runs harness h headlessly in the
+// target's workspace to process the intake request (dispatchArgv: `claude -p`,
+// `opencode run`, …). Ask picks h (headlessHarness).
+func realDispatch(h Harness) DispatchRunner {
+	return func(ctx context.Context, targetDir, msg, sys, model string, env []string, stdout, stderr io.Writer) int {
+		return runHeadlessUnder(ctx, h, targetDir, msg, sys, model, env, stdout, stderr)
+	}
+}
+
+func runHeadlessUnder(ctx context.Context, h Harness, targetDir, msg, sys, model string, env []string, stdout, stderr io.Writer) int {
+	harness := h.Name()
+	name, args := dispatchArgv(harness, h.Variant(), msg, sys, model, dispatchToolsFromEnv(env)...)
 
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = targetDir

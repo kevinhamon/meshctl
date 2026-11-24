@@ -164,8 +164,11 @@ func TestKBTrustGuard_OpencodeV2AndRunningHarness(t *testing.T) {
 	if err := KBTrustGuard(a); err != nil {
 		t.Fatalf("wired Claude Code agent from a terminal: %v", err)
 	}
+	// The guard checks the running harness's gate, not the preference:
+	// opencode running where only Claude Code is wired is refused for its
+	// own missing gate.
 	t.Setenv("OPENCODE", "1")
-	if err := KBTrustGuard(a); !errors.Is(err, ErrKBTrustGuard) || !strings.Contains(err.Error(), "runs under opencode") {
+	if err := KBTrustGuard(a); !errors.Is(err, ErrKBTrustGuard) || !strings.Contains(err.Error(), "no current opencode V2 gate plugin") {
 		t.Fatalf("opencode running in a Claude-wired workspace: %v", err)
 	}
 	t.Setenv("OPENCODE", "")
@@ -185,9 +188,30 @@ func TestKBTrustGuard_OpencodeV2AndRunningHarness(t *testing.T) {
 		t.Fatalf("ask rules overridden by the env: %v", err)
 	}
 	t.Setenv("OPENCODE_CONFIG_CONTENT", "")
+	// Claude Code running in this workspace: trusted only once its own
+	// gate is wired here too (newTestAgent wired it before the switch).
 	t.Setenv("CLAUDECODE", "1")
-	if err := KBTrustGuard(a); !errors.Is(err, ErrKBTrustGuard) || !strings.Contains(err.Error(), "runs under claude") {
-		t.Fatalf("Claude Code running in an opencode workspace: %v", err)
+	if err := KBTrustGuard(a); err != nil {
+		t.Fatalf("Claude Code running where its gate is wired, opencode preferred: %v", err)
+	}
+	if err := os.Remove(filepath.Join(a.Dir(), ".claude", "settings.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := KBTrustGuard(a); !errors.Is(err, ErrKBTrustGuard) || !strings.Contains(err.Error(), "PreToolUse gate is not wired") {
+		t.Fatalf("Claude Code running where its gate is not wired: %v", err)
+	}
+}
+
+func TestKBTrustGuard_RunningHarnessWithoutPromotionAskIsRefused(t *testing.T) {
+	dir := meshRoot(t)
+	a := newTestAgent(t, dir, "architect", true, nil)
+	err := kbTrustGuardUnder(a, opencodeHarness{major: 1})
+	if !errors.Is(err, ErrKBTrustGuard) || !strings.Contains(err.Error(), "cannot ask the human before a promotion") ||
+		!strings.Contains(err.Error(), "opencode V1 (1.x)") || !strings.Contains(err.Error(), "Claude Code") {
+		t.Fatalf("a running harness without PromotionAsk must be refused, naming the ones that can: %v", err)
+	}
+	if err := kbTrustGuardUnder(a, claudeHarness{}); err != nil {
+		t.Fatalf("Claude Code with its gate wired: %v", err)
 	}
 }
 

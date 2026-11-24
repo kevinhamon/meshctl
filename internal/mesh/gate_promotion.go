@@ -289,7 +289,7 @@ func deniedKBMainWrite(agentsDir string, p HookPayload) string {
 		return ""
 	}
 	targets := gateEditPaths(p)
-	if shellTools[p.ToolName] && len(p.ToolInput) > 0 {
+	if isShellTool(p.ToolName) && len(p.ToolInput) > 0 {
 		var in struct {
 			Command string `json:"command"`
 		}

@@ -142,9 +142,9 @@ func toolInputText(raw json.RawMessage) string {
 // (issue #2). Every other tool (MCP above all) contributes its flattened input.
 func kbRuleActionText(p HookPayload) string {
 	switch {
-	case shellTools[p.ToolName]:
+	case isShellTool(p.ToolName):
 		return p.ToolName + "\n" + ShellOwnArguments(shellCommandInput(p))
-	case fileEditTools[p.ToolName], patchTools[p.ToolName]:
+	case isFileEditTool(p.ToolName), isPatchTool(p.ToolName):
 		return p.ToolName + "\n" + strings.Join(gateEditPaths(p), "\n")
 	}
 	return p.ToolName + "\n" + toolInputText(p.ToolInput)

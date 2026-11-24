@@ -1055,7 +1055,7 @@ function renderDetail(m, name, section, root) {
   const txt = el("div", "txt");
   const line1 = el("div", "line1");
   line1.append(el("h2", null, displayName(a.info)), el("span", "status " + a.status.cls, a.status.word),
-    el("span", "meta", [a.info.title && a.info.title !== a.info.name ? a.info.name : "", a.info.harness === "opencode" ? "opencode" : "Claude Code"].filter(Boolean).join(" · ")));
+    el("span", "meta", [a.info.title && a.info.title !== a.info.name ? a.info.name : "", a.info.harness_label || (a.info.harness === "opencode" ? "opencode" : "Claude Code")].filter(Boolean).join(" · ")));
   txt.append(line1);
   if (a.info.role) {
     const role = el("div", "role" + (roleOpen ? " open" : ""), a.info.role);

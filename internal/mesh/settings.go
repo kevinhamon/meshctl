@@ -57,7 +57,12 @@ var meshctlAllowRules = []string{
 // shared-understanding spec ride the same bump — one re-onboard per peer.
 // v6: a Stop hook (session-beat) records the session's heartbeat and its
 // scheduled jobs at the end of every turn (mesh console).
-const MeshWiringVersion = 6
+// v7: every hook command names its harness (`--harness claude`): a workspace
+// can be wired for several harnesses, and the bridge — not the agent's
+// preferred harness or an inherited env marker — says which one is calling.
+// The same bump carries the gate change that every harness's subagent tool
+// (by tool kind, not three fixed names) reaches the delegation check.
+const MeshWiringVersion = 7
 
 const meshWiringStampFile = ".mesh-wiring.json"
 
@@ -277,8 +282,13 @@ func ensureHooks(root map[string]any) []string {
 	var added []string
 	for _, w := range hookWiring {
 		cmdStr := "meshctl hook " + w.sub
+		want := claudeHookCommand(w.sub)
 		entries, _ := hooks[w.event].([]any)
 		if hookCommandPresent(entries, cmdStr) {
+			// v7: the mesh's own bare command gains --harness claude in place.
+			if upgradeHookCommand(entries, cmdStr, want) {
+				added = append(added, w.event+" (--harness)")
+			}
 			// The mesh owns its own entry's matcher: upgrade it in place when
 			// hookWiring widens (v2: KB-rule gate needs Bash + all MCP tools;
 			// v5: `mcp__.*` so MCP tool names actually match).
@@ -289,7 +299,7 @@ func ensureHooks(root map[string]any) []string {
 		}
 		hookDef := map[string]any{
 			"hooks": []any{
-				map[string]any{"type": "command", "command": cmdStr, "timeout": 10},
+				map[string]any{"type": "command", "command": want, "timeout": 10},
 			},
 		}
 		if w.matcher != "" {
@@ -299,6 +309,37 @@ func ensureHooks(root map[string]any) []string {
 		added = append(added, w.event)
 	}
 	return added
+}
+
+// claudeHookCommand is the settings.json command for one hook subcommand. It
+// names its harness so the hook never has to guess (MeshWiringVersion v7).
+func claudeHookCommand(sub string) string {
+	return "meshctl hook " + sub + " --harness " + HarnessClaude
+}
+
+// upgradeHookCommand rewrites a hook command that is exactly the mesh's bare
+// form (cmdStr) to want. A command a human edited (anything else that merely
+// mentions cmdStr) is left alone. Returns true if it changed one.
+func upgradeHookCommand(entries []any, cmdStr, want string) bool {
+	changed := false
+	for _, e := range entries {
+		em, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		inner, _ := em["hooks"].([]any)
+		for _, h := range inner {
+			hm, ok := h.(map[string]any)
+			if !ok {
+				continue
+			}
+			if c, _ := hm["command"].(string); strings.TrimSpace(c) == cmdStr {
+				hm["command"] = want
+				changed = true
+			}
+		}
+	}
+	return changed
 }
 
 // hookCommandPresent reports whether cmdStr already appears in any hook command
