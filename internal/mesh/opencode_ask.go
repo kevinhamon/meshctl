@@ -299,6 +299,9 @@ func opencodeAskPath(p HookPayload, d GateDecision) GateDecision {
 	if !d.Ask || !runsUnderOpencode(p) {
 		return d
 	}
+	if d.Check == GateCheckPoolPath {
+		return opencodePoolEditAsk(p, d)
+	}
 	command := shellCommandInput(p)
 	ps := readOcPerms(p.Cwd, true)
 	asked := 0
@@ -322,8 +325,7 @@ func opencodeAskPath(p HookPayload, d GateDecision) GateDecision {
 		return GateDecision{Check: d.Check}
 	}
 	if first == nil {
-		return GateDecision{Deny: true, Check: d.Check, Reason: "mesh: this call needs your confirmation and opencode has no ask " +
-			"path for it; run it yourself, or from a Claude Code session."}
+		return opencodeCannotAsk(d.Check, "this call", "Tell the human what you would run and why, and let them run it.")
 	}
 	return GateDecision{Deny: true, Check: d.Check, Reason: "mesh: this `" + first.Sub + "` needs your confirmation, and opencode " +
 		"will not ask you before it runs: its ask rule (`" + first.Resource + "`) is missing from opencode.json, overridden, or " +

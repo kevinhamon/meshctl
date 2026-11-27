@@ -271,6 +271,13 @@ func planOpencodeWiring(dir string, major int) (actions, warnings []string) {
 	if miss := missingSubagentAsk(dir, false); len(miss) > 0 {
 		actions = append(actions, "add opencode subagent ask rules to opencode.json: "+strings.Join(miss, ", "))
 	}
+	if !opencodeGateAskWired(dir) {
+		actions = append(actions, "add opencode ask rules for pool edits and outbound surfaces to opencode.json")
+	}
+	if _, undeclared := opencodeGateAskRules(dir); len(undeclared) > 0 {
+		warnings = append(warnings, "opencode cannot ask on "+strings.Join(undeclared, "; ")+
+			" — declare the surface's `ask.opencode` patterns in the pool config, or those calls are refused under opencode")
+	}
 	return actions, warnings
 }
 

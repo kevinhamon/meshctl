@@ -30,6 +30,22 @@ type OutboundSurface struct {
 	// it holds the surface's outbound grant, in each harness's own permission
 	// format. The regexes above stay what the gate matches and logs.
 	Allow OutboundAllow `yaml:"allow"`
+	// Ask is how a harness that asks through its own permission rules is told
+	// which calls reach this surface, in that harness's pattern syntax. Needed
+	// only where the regexes above cannot be turned into patterns.
+	Ask OutboundAsk `yaml:"ask"`
+}
+
+// OutboundAsk is a surface's harness-native ask patterns.
+type OutboundAsk struct {
+	Opencode OutboundAskPatterns `yaml:"opencode"`
+}
+
+// OutboundAskPatterns are opencode globs: `shell` against each simple command
+// ("ssh *"), `tools` against the tool name ("tracker_create*").
+type OutboundAskPatterns struct {
+	Shell []string `yaml:"shell"`
+	Tools []string `yaml:"tools"`
 }
 
 // OutboundAllow is a surface's harness-native permissions for a granted

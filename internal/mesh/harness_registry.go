@@ -23,6 +23,10 @@ type HarnessCaps struct {
 	// GateAsk: the gate can put an arbitrary ask to the human (outbound writes,
 	// agent writes to pool/). Without it an ask-class decision is a deny.
 	GateAsk bool
+	// NativeAsk: the harness asks the human through its own permission rules,
+	// which meshctl wires for outbound writes and file edits under pool/; the
+	// gate lets a call through only where such a rule will ask.
+	NativeAsk bool
 	// PromotionAsk: the promotion commands (kb finish, kb confirm, state set,
 	// inbox triage apply) are asked by the harness before they run.
 	PromotionAsk bool

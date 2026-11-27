@@ -207,8 +207,8 @@ func TestKBTrustGuard_RunningHarnessWithoutPromotionAskIsRefused(t *testing.T) {
 	a := newTestAgent(t, dir, "architect", true, nil)
 	err := kbTrustGuardUnder(a, opencodeHarness{major: 1})
 	if !errors.Is(err, ErrKBTrustGuard) || !strings.Contains(err.Error(), "cannot ask the human before a promotion") ||
-		!strings.Contains(err.Error(), "opencode V1 (1.x)") || !strings.Contains(err.Error(), "Claude Code") {
-		t.Fatalf("a running harness without PromotionAsk must be refused, naming the ones that can: %v", err)
+		!strings.Contains(err.Error(), "opencode V1 (1.x)") || strings.Contains(err.Error(), "Claude Code") {
+		t.Fatalf("a running harness without PromotionAsk must be refused, and never by naming another harness: %v", err)
 	}
 	if err := kbTrustGuardUnder(a, claudeHarness{}); err != nil {
 		t.Fatalf("Claude Code with its gate wired: %v", err)

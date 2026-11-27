@@ -140,16 +140,24 @@ func TestGate_OutboundNoHumanAtThePrompt(t *testing.T) {
 	}
 }
 
+// A harness with neither the gate's ask nor its own cannot confirm: the deny
+// tells the agent to hand the call to the human and names no other harness.
 func TestGate_OutboundNoAskForm(t *testing.T) {
+	t.Setenv(opencodeMajorEnv, "1")
 	dir, pm, _ := outboundPool(t, outboundTestConfig)
+	pm = setHarness(t, dir, pm, HarnessOpencode)
+	writeSummary(t, pm, "sess-1", outboundSummary)
 	p := outboundCall(pm.Dir(), "tracker_createIssue", nil)
-	p.Harness = HarnessOpencode
-	if d := GatePreToolUse(dir, p); !d.Deny || !strings.Contains(d.Reason, "run from a gated session") {
-		t.Fatalf("opencode has no ask form: want deny, got %+v", d)
+	d := GatePreToolUse(dir, p)
+	if !d.Deny || !strings.Contains(d.Reason, "has no way to put it to you") {
+		t.Fatalf("no ask form: want deny, got %+v", d)
+	}
+	if strings.Contains(d.Reason, "Claude") {
+		t.Fatalf("a refusal never sends the agent to another harness: %s", d.Reason)
 	}
 }
 
-// The ask form is the RUNNING harness's (GateAsk), not the preferred one's.
+// The ask form is the RUNNING harness's, not the preferred one's.
 func TestGate_OutboundAskFormFollowsRunningHarness(t *testing.T) {
 	t.Setenv(opencodeMajorEnv, "2")
 	dir, pm, _ := outboundPool(t, outboundTestConfig)
@@ -157,17 +165,13 @@ func TestGate_OutboundAskFormFollowsRunningHarness(t *testing.T) {
 	writeSummary(t, pm, "sess-1", outboundSummary)
 	p := outboundCall(pm.Dir(), "tracker_createIssue", nil)
 
-	if d := GatePreToolUse(dir, p); !d.Deny || !strings.Contains(d.Reason, "opencode V2 (2.x) has no ask form") ||
-		!strings.Contains(d.Reason, "Claude Code") {
-		t.Fatalf("opencode preferred, nothing running: the preference has no ask form; got %+v", d)
-	}
 	t.Setenv("CLAUDECODE", "1")
 	if d := GatePreToolUse(dir, p); !d.Ask {
 		t.Fatalf("Claude Code running an opencode-preferred agent can ask: got %+v", d)
 	}
 	p.Harness = HarnessOpencode // a bridge's flag beats the env marker
-	if d := GatePreToolUse(dir, p); !d.Deny {
-		t.Fatalf("--harness opencode has no ask form: got %+v", d)
+	if d := GatePreToolUse(dir, p); !d.Deny || !strings.Contains(d.Reason, "opencode will not ask") {
+		t.Fatalf("--harness opencode with no ask rule wired: want the opencode refusal, got %+v", d)
 	}
 }
 

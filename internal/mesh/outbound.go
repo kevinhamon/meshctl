@@ -219,7 +219,7 @@ func gateOutbound(agentsDir string, p HookPayload) GateDecision {
 	if a == nil {
 		return d
 	}
-	return gateOutboundAsk(agentsDir, a, p, mt)
+	return opencodeOutboundAsk(agentsDir, a, p, mt, gateOutboundAsk(agentsDir, a, p, mt))
 }
 
 // resolveOutbound runs the deny side of the outbound gate. It returns the
@@ -274,12 +274,12 @@ func resolveOutbound(agentsDir string, p HookPayload) (*Agent, OutboundMatch, Ga
 	if cause := noHumanCause(p); cause != "" {
 		return nil, OutboundMatch{}, outboundGrantDecision(agentsDir, a, p, *mt, cause)
 	}
-	// The ask is put by the harness running the call: without the GateAsk
-	// cap there is no confirmation path, so the ask is a deny.
-	if h := RuntimeHarness(a, p.Harness); !h.Caps().GateAsk {
-		return nil, OutboundMatch{}, outboundDeny("mesh: `" + p.ToolName + "` writes the outbound surface `" + mt.Surface + "`, which is gate-asked, " +
-			"and " + harnessLabel(h) + " has no ask form — no confirmation path; run from a gated session in `" + a.Name + "`'s workspace under a harness " +
-			"that can ask (" + harnessLabelsWith(func(c HarnessCaps) bool { return c.GateAsk }) + ").")
+	// The ask is put by the harness running the call: the gate's own ask
+	// (GateAsk), or the harness's permission rules (opencodeOutboundAsk).
+	// With neither there is no confirmation path, so the ask is a deny.
+	if h := RuntimeHarness(a, p.Harness); !h.Caps().GateAsk && !(h.Caps().NativeAsk && runsUnderOpencode(p)) {
+		return nil, OutboundMatch{}, outboundDeny("mesh: `" + p.ToolName + "` writes the outbound surface `" + mt.Surface + "`, which needs your " +
+			"confirmation, and " + harnessLabel(h) + " has no way to put it to you. Tell the human what you would run and why, and let them run it.")
 	}
 	return a, *mt, GateDecision{}
 }

@@ -76,8 +76,8 @@ func AskInSession(agentsDir string, target *Agent, o InSessionOptions) (*Request
 	}
 	run := RuntimeHarness(callerAgent, "")
 	if !peersSupportedBy(run) {
-		return nil, 1, fmt.Errorf("in-session dispatch runs the peer as a subagent, which needs a harness that can (%s); %q runs under %s — use `meshctl ask %s %s \"…\"` (headless) instead",
-			harnessLabelsWith(func(c HarnessCaps) bool { return c.InSessionPeers }), caller, harnessLabel(run), target.Name, o.Type)
+		return nil, 1, fmt.Errorf("in-session dispatch runs the peer as a subagent, which %s cannot do for %q — use `meshctl ask %s %s \"…\"` (headless) instead",
+			harnessLabel(run), caller, target.Name, o.Type)
 	}
 	format := peerFormatFor(run.Name())
 	defFile, subagent, mode := PeerAgentFileFor(run.Name(), callerAgent.Dir(), target.Name), PeerAgentName(target.Name), "in-session"

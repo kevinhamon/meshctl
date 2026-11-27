@@ -415,6 +415,13 @@ func opencodeGateFindings(a *Agent) []DoctorFinding {
 			out = append(out, f("error", "opencode.json lacks the ask rules for promotions, so `kb finish`, `kb confirm` "+
 				"and `state set` are refused; "+onboard))
 		}
+		if !opencodeGateAskWired(a.Dir()) {
+			out = append(out, f("error", "opencode.json lacks the ask rules for pool edits or outbound surfaces, so those calls are refused; "+onboard))
+		}
+		if _, undeclared := opencodeGateAskRules(a.Dir()); len(undeclared) > 0 {
+			out = append(out, f("warn", "opencode cannot ask on "+strings.Join(undeclared, "; ")+
+				" — declare the surface's `ask.opencode` patterns in the pool config, or those calls are refused under opencode"))
+		}
 		if miss := missingSubagentAsk(a.Dir(), false); len(miss) > 0 {
 			out = append(out, f("warn", "opencode.json lacks the subagent ask rules for state-mutating peers ("+strings.Join(miss, ", ")+
 				"), so delegating work to them is refused; "+onboard))

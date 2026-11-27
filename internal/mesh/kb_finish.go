@@ -104,9 +104,8 @@ func kbTrustGuardUnder(a *Agent, h Harness) error {
 	fix := "run `meshctl agent onboard " + a.Name + "`, then re-run from a gated session"
 	label := harnessLabel(h)
 	if !h.Caps().PromotionAsk {
-		return fmt.Errorf("%w: this runs under %s, which cannot ask the human before a promotion — run it from a session of %s "+
-			"under a harness that can (%s); the branch and worktree are left intact", ErrKBTrustGuard, label, a.Name,
-			harnessLabelsWith(func(c HarnessCaps) bool { return c.PromotionAsk }))
+		return fmt.Errorf("%w: this runs under %s, which cannot ask the human before a promotion — tell the human, who can run "+
+			"`meshctl kb finish` for %s from a terminal; the branch and worktree are left intact", ErrKBTrustGuard, label, a.Name)
 	}
 	check, ok := promotionAskChecks[h.Name()]
 	if !ok {

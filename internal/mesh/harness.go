@@ -207,7 +207,7 @@ func (h opencodeHarness) Variant() int { return h.Major() }
 // (an idle window closes sessions). V1 has none of the gate surfaces.
 func (h opencodeHarness) Caps() HarnessCaps {
 	if h.Major() >= 2 {
-		return HarnessCaps{PreToolGate: true, PromotionAsk: true, InSessionPeers: true, StatusLine: true}
+		return HarnessCaps{PreToolGate: true, NativeAsk: true, PromotionAsk: true, InSessionPeers: true, StatusLine: true}
 	}
 	return HarnessCaps{}
 }
@@ -261,7 +261,9 @@ func (h opencodeHarness) DistillCmd(prompt string) []string {
 }
 
 // EmitGate = the raw deny reason; the plugin throws it to block the call.
-// opencode has no ask form, so an ask is a deny (the human runs it by hand).
+// The plugin can only throw, so an ask that reaches here is a deny; the asks
+// opencode can put itself were already let through (opencode_ask.go,
+// opencode_outbound_ask.go).
 func (opencodeHarness) EmitGate(w io.Writer, d GateDecision) error {
 	if !d.Deny && !d.Ask {
 		return nil
@@ -340,6 +342,9 @@ func ensureOpencodeConfig(dest string, major int) ([]string, error) {
 	if major >= 2 {
 		if added := ensureOpencodeAskRules(root); len(added) > 0 {
 			notes = append(notes, "opencode.json: ask rules for "+strings.Join(added, ", "))
+		}
+		if added := ensureOpencodeGateAskRules(root, dest); len(added) > 0 {
+			notes = append(notes, "opencode.json: pool and outbound rules: "+strings.Join(added, ", "))
 		}
 	}
 	if len(notes) == 0 {

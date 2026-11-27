@@ -289,8 +289,8 @@ this block is out of date, and the release workflow runs it before building.
 | Console "Bring to front" (iTerm2 on macOS) | ✅ | ✅ with `--standalone`; ✗ in the background-service mode (no terminal) | untested |
 | Pre-tool gate: memory stores, intake, KB rules, peer contracts | ✅ | ✅ | ✗ no pre-tool hook |
 | Promotion asks: `kb finish`, `kb confirm`, `state set`, `inbox triage apply` | ✅ gate ask | ✅ opencode's permission ask | ✗ refused |
-| Agent writes to `pool/` | ✅ asked, committed after | ✗ refused; edit by hand | ✗ |
-| Outbound-write gate | ✅ asked once per summary | ✗ refused, no ask path | ✗ |
+| Agent writes to `pool/` | ✅ asked, committed after | ✅ opencode's permission ask, on file edits; not committed after | ✗ |
+| Outbound-write gate | ✅ asked once per summary | ✅ opencode's permission ask, every call | ✗ |
 | After-call record: pool commits, outbound acks | ✅ PostToolUse | ✗ not called | ✗ |
 | Headless dispatch | ✅ `claude -p` | ✅ `opencode run --standalone`, locked-down permissions | ✅ `opencode run --pure` |
 | In-session peers, consult and work (`ask --in-session [--work]`) | ✅ Agent tool | ✅ `subagent` tool; mutating peers asked by opencode | ✗ refused |
