@@ -200,9 +200,9 @@ func opencodePoolEditAsk(p HookPayload, d GateDecision) GateDecision {
 
 // opencodeOutboundAsk hands the gate's ask on an outbound write to opencode's
 // own ask. A tool call passes when opencode asks on that tool. A shell call
-// passes when every simple command that reaches the surface appears verbatim
-// as a top-level command and opencode asks on it (opencode matches its rules
-// against the raw text of each simple command). A call let through is written
+// passes when every simple command that reaches the surface is a top-level
+// command opencode asks on (opencode matches its rules against the raw text
+// of each simple command, quotes included: shellRawCommands). A call let through is written
 // to the outbound audit log: opencode has no after-call hook, so the gate
 // cannot record whether the human approved it.
 func opencodeOutboundAsk(agentsDir string, a *Agent, p HookPayload, mt OutboundMatch, d GateDecision) GateDecision {
@@ -235,9 +235,8 @@ func opencodeOutboundAsk(agentsDir string, a *Agent, p HookPayload, mt OutboundM
 		return ok
 	}
 	asked := 0
-	for _, words := range shellSplit(ShellOwnArguments(command)) {
-		text := strings.Join(words, " ")
-		if reaches(words) && strings.Contains(command, text) && ps.shellEffect(text) == "ask" {
+	for _, raw := range shellRawCommands(command) {
+		if words := rawCommandWords(raw); len(words) > 0 && reaches(words) && ps.shellEffect(raw) == "ask" {
 			asked++
 		}
 	}

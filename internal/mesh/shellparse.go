@@ -713,3 +713,69 @@ func sedInPlace(words []string) bool {
 	}
 	return false
 }
+
+// shellRawCommands returns each top-level simple command of a command line as
+// its raw text, quotes and all, trimmed. opencode matches its permission rules
+// against that text, so a gate that hands an ask to opencode must judge the
+// same string. It works on ShellOwnArguments and splits on `;`, `&`, `|` and
+// newlines outside quotes; a `$(…)`, `(…)` or backtick span is not entered, so
+// a command inside one is never reported here.
+func shellRawCommands(command string) []string {
+	s := ShellOwnArguments(command)
+	var out []string
+	start, depth := 0, 0
+	inSingle, inDouble, inTick := false, false, false
+	flush := func(end int) {
+		if t := strings.TrimSpace(s[start:end]); t != "" {
+			out = append(out, t)
+		}
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inSingle:
+			inSingle = c != '\''
+		case c == '\\' && i+1 < len(s):
+			i++
+		case inDouble:
+			inDouble = c != '"'
+		case inTick:
+			inTick = c != '`'
+		case c == '\'':
+			inSingle = true
+		case c == '"':
+			inDouble = true
+		case c == '`':
+			inTick = true
+		case c == '(':
+			depth++
+		case c == ')' && depth > 0:
+			depth--
+		case depth == 0 && (c == ';' || c == '&' || c == '|' || c == '\n'):
+			flush(i)
+			start = i + 1
+		}
+	}
+	flush(len(s))
+	return out
+}
+
+// rawCommandWords is a raw simple command's words as the gate's matchers see
+// them: quotes removed, leading assignments and wrappers dropped.
+func rawCommandWords(raw string) []string {
+	cmds := shellSplit(raw)
+	if len(cmds) != 1 {
+		return nil
+	}
+	return stripShellPrefix(cmds[0])
+}
+
+// cmdWordsNoPrefixStrip is a raw simple command's words with quotes removed
+// and nothing dropped.
+func cmdWordsNoPrefixStrip(raw string) []string {
+	cmds := shellSplit(raw)
+	if len(cmds) != 1 {
+		return nil
+	}
+	return cmds[0]
+}

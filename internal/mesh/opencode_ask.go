@@ -305,9 +305,8 @@ func opencodeAskPath(p HookPayload, d GateDecision) GateDecision {
 	command := shellCommandInput(p)
 	ps := readOcPerms(p.Cwd, true)
 	asked := 0
-	for _, words := range shellSplit(ShellOwnArguments(command)) {
-		text := strings.Join(words, " ")
-		if gatedRule(words) != nil && strings.Contains(command, text) && ps.shellEffect(text) == "ask" {
+	for _, raw := range shellRawCommands(command) {
+		if words := cmdWordsNoPrefixStrip(raw); len(words) > 0 && gatedRule(words) != nil && ps.shellEffect(raw) == "ask" {
 			asked++
 		}
 	}

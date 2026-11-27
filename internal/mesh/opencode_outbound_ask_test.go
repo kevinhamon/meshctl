@@ -83,7 +83,8 @@ func TestOpencodeOutbound_WiredAndAsked(t *testing.T) {
 	}
 	writeSummary(t, pm, "sess-1", outboundSummary)
 
-	for _, c := range []string{"ssh host uptime", "cd /tmp && ssh host uptime", "git push origin main"} {
+	for _, c := range []string{"ssh host uptime", "cd /tmp && ssh host uptime", "git push origin main",
+		`ssh host 'ls -l "a b"; date'`, `ssh -q host "ls | wc -l" 2>&1`} {
 		if d := GatePreToolUse(dir, ocShell(pm.Dir(), c)); d.Deny || d.Ask {
 			t.Errorf("%q: opencode asks on it, so the gate lets it through; got %+v", c, d)
 		}
@@ -139,5 +140,35 @@ func TestOpencodePoolEdit_AskedOnFileEdits(t *testing.T) {
 	d = GatePreToolUse(dir, ocShell(pm.Dir(), "echo x > ../"+PoolDirName(dir)+"/glossary.md"))
 	if !d.Deny || !strings.Contains(d.Reason, "file-edit tool") || strings.Contains(d.Reason, "Claude") {
 		t.Errorf("a shell write to the pool cannot be asked: got %+v", d)
+	}
+}
+
+// Quoted arguments are the normal case for an outbound command: opencode
+// matches the raw text, so the gate must too.
+func TestOpencodeOutbound_QuotedArguments(t *testing.T) {
+	t.Setenv(opencodeMajorEnv, "2")
+	dir, pm, _ := outboundPool(t, `outbound:
+  tracker:
+    commands: ['^ssh ', 'curl .*(-X ?(POST|PUT|PATCH|DELETE)|-d |--data)']
+    ask:
+      opencode:
+        shell: ['ssh *', 'curl *-X POST*', 'curl *-d *', 'curl *--data*']
+`)
+	pm = setHarness(t, dir, pm, HarnessOpencode)
+	wireOpencode(t, pm)
+	writeSummary(t, pm, "sess-1", outboundSummary)
+	for _, c := range []string{
+		`curl -s https://h.test/graphql -H 'Content-Type: application/json' -d '{"query":"{status{state uptime}}"}'`,
+		`curl -s https://h.test/graphql -H "Content-Type: application/json" -d "{\"query\":\"{a}\"}" | jq .`,
+		`curl -sk -X POST https://h.test/api --data-binary @body.json`,
+		`ssh host 'cd /x && ls; echo "a|b"'`,
+	} {
+		if d := GatePreToolUse(dir, ocShell(pm.Dir(), c)); d.Deny || d.Ask {
+			t.Errorf("%s\n  opencode asks on it, so the gate lets it through; got %s", c, d.Reason)
+		}
+	}
+	// A read is not outbound and passes without any ask.
+	if d := GatePreToolUse(dir, ocShell(pm.Dir(), `curl -s https://h.test/status`)); d.Deny || d.Ask {
+		t.Errorf("a GET is not outbound: %+v", d)
 	}
 }
